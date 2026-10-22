@@ -25,6 +25,9 @@ Identifica con IA (Claude visión) las características básicas y las guarda en
 - **Exportar** CSV (Excel), **GeoJSON** (QGIS/ArcGIS) y **KML** (Google Earth).
 - **Offline-first** (SQLite local), tema claro/oscuro/automático, accesibilidad (etiquetas, roles), háptica.
 
+## Empezar
+**Guía paso a paso (servidor, compilación, teléfonos y lista de verificación del piloto): `docs/puesta-en-marcha.md`.**
+
 ## Ejecutar
 ```bash
 npm install
