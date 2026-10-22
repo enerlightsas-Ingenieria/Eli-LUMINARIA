@@ -7,7 +7,7 @@ let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 const CAR_COLS = Object.keys(caracteristicasVacias()) as (keyof Caracteristicas)[];
 const COLS = [
   'uuid', 'proyectoId', 'creadoEn', 'actualizadoEn', 'fotos', 'latitud', 'longitud', 'precisionM', 'direccion',
-  'codigo', 'confianza', ...CAR_COLS,
+  'codigo', 'tecnico', 'confianza', ...CAR_COLS,
 ] as const;
 
 export const nuevoUuid = () => Crypto.randomUUID();
@@ -22,7 +22,7 @@ const SCHEMA = `
     id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
     proyectoId INTEGER NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
     creadoEn TEXT NOT NULL, actualizadoEn TEXT NOT NULL, fotos TEXT NOT NULL DEFAULT '[]',
-    latitud REAL, longitud REAL, precisionM REAL, direccion TEXT DEFAULT '', codigo TEXT DEFAULT '',
+    latitud REAL, longitud REAL, precisionM REAL, direccion TEXT DEFAULT '', codigo TEXT DEFAULT '', tecnico TEXT DEFAULT '',
     confianza TEXT DEFAULT '', sincronizado INTEGER NOT NULL DEFAULT 0,
     ${CAR_COLS.map((c) => `${c} TEXT DEFAULT ''`).join(', ')}
   );
@@ -35,6 +35,7 @@ function abrir() {
     await db.execAsync('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     const { user_version } = (await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version'))!;
     if (user_version < 1) await migrarAV1(db);
+    if (user_version < 2) await migrarAV2(db);
     return db;
   })();
   return dbPromise;
@@ -52,12 +53,19 @@ async function migrarAV1(db: SQLite.SQLiteDatabase) {
   if (esV0) {
     const filas = await db.getAllAsync<any>('SELECT * FROM luminarias_v0');
     for (const r of filas) {
-      const l: any = { ...r, uuid: nuevoUuid(), proyectoId, actualizadoEn: r.creadoEn, fotos: JSON.stringify([r.fotoUri]), codigo: '', alturaM: '' };
+      const l: any = { ...r, uuid: nuevoUuid(), proyectoId, actualizadoEn: r.creadoEn, fotos: JSON.stringify([r.fotoUri]), codigo: '', tecnico: '', alturaM: '' };
       await db.runAsync(`INSERT INTO luminarias (${COLS.join(',')}) VALUES (${COLS.map(() => '?').join(',')})`, COLS.map((c) => l[c] ?? null));
     }
     await db.execAsync('DROP TABLE luminarias_v0');
   }
   await db.execAsync('PRAGMA user_version = 1');
+}
+
+/** v1 → v2: añade el técnico que realizó el registro. */
+async function migrarAV2(db: SQLite.SQLiteDatabase) {
+  const cols = await db.getAllAsync<{ name: string }>('PRAGMA table_info(luminarias)');
+  if (!cols.some((c) => c.name === 'tecnico')) await db.execAsync("ALTER TABLE luminarias ADD COLUMN tecnico TEXT DEFAULT ''");
+  await db.execAsync('PRAGMA user_version = 2');
 }
 
 const aLuminaria = (r: any): Luminaria => ({ ...r, fotos: JSON.parse(r.fotos || '[]'), sincronizado: !!r.sincronizado });

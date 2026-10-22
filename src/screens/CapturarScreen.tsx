@@ -8,6 +8,7 @@ import { useApp } from '../context/AppContext';
 import { analizarFotos } from '../services/analyzer';
 import { direccionDe, Foto, obtenerPosicion, Posicion, tomarFoto } from '../services/captura';
 import { nuevoUuid } from '../services/db';
+import { cargarAjustes } from '../services/settings';
 import { persistirFoto } from '../services/fotos';
 import { radius, useTema } from '../theme';
 import { caracteristicasVacias, LuminariaBorrador } from '../types';
@@ -74,10 +75,11 @@ export function CapturarScreen() {
       const p = pos;
       if (!p) aviso += 'No se obtuvo la coordenada: ingrésala manualmente. ';
       const ahora = new Date().toISOString();
+      const tecnico = (await cargarAjustes()).tecnico;
       const borrador: LuminariaBorrador = {
         ...car, uuid: nuevoUuid(), proyectoId: proyecto.id, creadoEn: ahora, actualizadoEn: ahora, fotos: uris, confianza,
         latitud: p?.latitud ?? null, longitud: p?.longitud ?? null, precisionM: p?.precisionM ?? null,
-        direccion: p ? await direccionDe(p.latitud, p.longitud) : '', codigo: '',
+        direccion: p ? await direccionDe(p.latitud, p.longitud) : '', codigo: '', tecnico,
       };
       exito();
       nav.replace('Editar', { borrador, aviso: aviso.trim() || undefined });

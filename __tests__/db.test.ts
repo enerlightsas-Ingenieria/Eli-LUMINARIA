@@ -22,7 +22,7 @@ const cargarDb = () => { let m: typeof import('../src/services/db'); jest.isolat
 const borrador = (proyectoId: number, o: any = {}) => ({
   ...require('../src/types').caracteristicasVacias(), uuid: require('crypto').randomUUID(), proyectoId,
   creadoEn: '2026-01-01T00:00:00Z', actualizadoEn: '', fotos: ['file:///a.jpg'], latitud: 4.7, longitud: -74.07,
-  precisionM: 6, direccion: 'Cra 7', codigo: 'P-1', confianza: 'alta', marca: 'Philips', tecnologia: 'LED', ...o,
+  precisionM: 6, direccion: 'Cra 7', codigo: 'P-1', tecnico: 'Ana', confianza: 'alta', marca: 'Philips', tecnologia: 'LED', ...o,
 });
 
 describe('db', () => {
@@ -83,5 +83,28 @@ describe('db', () => {
     expect(ls[0]).toMatchObject({ marca: 'Lumenpulse', potenciaW: '150', pinesFotocelda: '7', fotos: ['file:///v0.jpg'], latitud: 4.5, longitud: -74.1 });
     expect(ls[0].uuid).toHaveLength(36);
     expect(mockMotor.prepare("SELECT name FROM sqlite_master WHERE name='luminarias_v0'").get()).toBeUndefined();
+  });
+});
+
+describe('migración v1 → v2', () => {
+  it('añade la columna tecnico a una base v1 existente sin perder filas', async () => {
+    mockMotor = new DatabaseSync(':memory:');
+    mockMotor.exec(`
+      CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT);
+      CREATE TABLE proyectos (id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE, nombre TEXT NOT NULL, cliente TEXT DEFAULT '', notas TEXT DEFAULT '', creadoEn TEXT NOT NULL);
+      INSERT INTO proyectos (uuid,nombre,creadoEn) VALUES ('p','General','2026-01-01');
+      CREATE TABLE luminarias (id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE, proyectoId INTEGER NOT NULL, creadoEn TEXT NOT NULL, actualizadoEn TEXT NOT NULL,
+        fotos TEXT NOT NULL DEFAULT '[]', latitud REAL, longitud REAL, precisionM REAL, direccion TEXT DEFAULT '', codigo TEXT DEFAULT '', confianza TEXT DEFAULT '', sincronizado INTEGER NOT NULL DEFAULT 0,
+        marca TEXT DEFAULT '', fabricante TEXT DEFAULT '', modelo TEXT DEFAULT '', tipoLuminaria TEXT DEFAULT '', tecnologia TEXT DEFAULT '', potenciaW TEXT DEFAULT '', tensionV TEXT DEFAULT '',
+        fotocelda TEXT DEFAULT '', pinesFotocelda TEXT DEFAULT '', temperaturaColorK TEXT DEFAULT '', flujoLuminosoLm TEXT DEFAULT '', ip TEXT DEFAULT '', montaje TEXT DEFAULT '', alturaM TEXT DEFAULT '', estado TEXT DEFAULT '', observaciones TEXT DEFAULT '');
+      INSERT INTO luminarias (uuid,proyectoId,creadoEn,actualizadoEn,marca) VALUES ('u1',1,'2026-01-01','2026-01-01','Schréder');
+      PRAGMA user_version = 1;`);
+    const db = cargarDb();
+    const ls = await db.listarLuminarias(1);
+    expect(ls).toHaveLength(1);
+    expect(ls[0]).toMatchObject({ marca: 'Schréder', tecnico: '' });
+    await db.guardarLuminaria({ ...ls[0], tecnico: 'Ana' });
+    expect((await db.listarLuminarias(1))[0].tecnico).toBe('Ana');
+    expect((mockMotor.prepare('PRAGMA user_version').get() as any).user_version).toBe(2);
   });
 });

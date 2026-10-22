@@ -12,6 +12,7 @@ Identifica con IA (Claude visión) las características básicas y las guarda en
 - **Proyectos**: agrupa levantamientos por zona/cliente, con resumen (kW instalados, por tecnología, por pines de fotocelda).
 - **Mapa** (OpenStreetMap + satélite, sin claves de API) con marcadores por tecnología y botón “centrar en mí”.
 - **Alerta de duplicados** (otra luminaria a < 8 m) y “Guardar y capturar otra” para trabajo en campo.
+- **Flotas:** técnico registrado en cada luminaria, configuración de teléfonos por enlace/QR, sincronización automática y proxy de IA con token por técnico (ver `docs/flota.md`).
 - **Sincronización** a **Google Sheets** (+ fotos en Drive) o a tu servidor, por lotes e idempotente (upsert por UUID).
 - **Exportar** CSV (Excel), **GeoJSON** (QGIS/ArcGIS) y **KML** (Google Earth).
 - **Offline-first** (SQLite local), tema claro/oscuro/automático, accesibilidad (etiquetas, roles), háptica.
@@ -34,7 +35,7 @@ eas build -p ios --profile production       # IPA para TestFlight / App Store (r
 Bundle ID / package: `co.enerlight.eliluminaria` (cámbialo en `app.json` si usas otro).
 
 ## Seguridad y producción
-- No repartas la API key en los teléfonos de una flota: despliega `server/worker.js` (proxy Cloudflare) y apunta
+- No repartas la API key en los teléfonos de una flota: despliega `server/worker.ts` (proxy Cloudflare) y apunta
   *Endpoint* a él; el “API key” de la app pasa a ser un token del equipo.
 - La URL de Apps Script queda protegida por un token secreto (ver `docs/google-sheets.md`).
 - Los CSV neutralizan inyección de fórmulas (`=`, `+`, `@`).

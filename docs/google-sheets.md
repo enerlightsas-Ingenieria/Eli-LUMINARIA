@@ -20,6 +20,6 @@ La app hace un `POST` (JSON) a la URL con `{ token, proyecto:{uuid,nombre,client
 espera `{ "ok": true }`. Cualquier backend que cumpla eso sirve (upsert por `uuid`).
 
 ## Proxy de IA (recomendado para flotas)
-`server/worker.js` es un Cloudflare Worker que guarda la API key de Anthropic en el servidor.
+`server/worker.ts` es un Cloudflare Worker que guarda la API key de Anthropic en el servidor.
 Despliégalo, define `ANTHROPIC_API_KEY` y `APP_TOKENS`, y en la app pon su URL en *Endpoint* y el token del equipo
 en *API key*.

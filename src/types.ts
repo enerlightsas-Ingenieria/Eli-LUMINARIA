@@ -42,6 +42,8 @@ export interface Luminaria extends Caracteristicas {
   direccion: string;
   /** Identificador propio del activo (n.º de poste, código de la empresa). */
   codigo: string;
+  /** Técnico que hizo el registro (para flotas). */
+  tecnico: string;
   confianza: Confianza | '';
   sincronizado: boolean;
 }

@@ -1,5 +1,5 @@
 import { Luminaria, Proyecto } from '../types';
-import { marcarSincronizadas, pendientesDeSync } from './db';
+import { listarProyectos, marcarSincronizadas, pendientesDeSync } from './db';
 import { leerBase64 } from './fotos';
 import { cargarAjustes } from './settings';
 
@@ -41,4 +41,20 @@ export async function sincronizar(proyecto: Proyecto, alProgreso?: (hechas: numb
     alProgreso?.(enviadas, pendientes.length);
   }
   return { enviadas, pendientes: 0 };
+}
+
+let corriendo = false;
+
+/** Sincronización silenciosa de todos los proyectos con pendientes. Devuelve cuántas luminarias envió. */
+export async function sincronizarTodo(): Promise<number> {
+  const a = await cargarAjustes();
+  if (!a.autoSync || !a.syncUrl || corriendo) return 0;
+  corriendo = true;
+  try {
+    let total = 0;
+    for (const p of await listarProyectos()) {
+      if ((await pendientesDeSync(p.id)).length) total += (await sincronizar(p)).enviadas;
+    }
+    return total;
+  } finally { corriendo = false; }
 }

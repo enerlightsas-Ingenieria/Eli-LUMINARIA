@@ -6,7 +6,7 @@ var TOKEN = 'CAMBIA-ESTE-TOKEN';           // el mismo que pondrás en la app (A
 var CARPETA_FOTOS = 'ELI-LUMINARIA Fotos';  // carpeta de Drive para las fotos (se crea sola)
 
 var COLUMNAS = [
-  ['uuid', 'UUID'], ['id', 'ID'], ['codigo', 'Código activo'], ['creadoEn', 'Fecha'], ['latitud', 'Latitud'],
+  ['uuid', 'UUID'], ['id', 'ID'], ['codigo', 'Código activo'], ['creadoEn', 'Fecha'], ['tecnico', 'Técnico'], ['latitud', 'Latitud'],
   ['longitud', 'Longitud'], ['precisionM', 'Precisión (m)'], ['direccion', 'Dirección'], ['marca', 'Marca'],
   ['fabricante', 'Fabricante'], ['modelo', 'Modelo'], ['tipoLuminaria', 'Tipo de luminaria'],
   ['tecnologia', 'Tecnología'], ['potenciaW', 'Potencia (W)'], ['tensionV', 'Tensión (V)'],

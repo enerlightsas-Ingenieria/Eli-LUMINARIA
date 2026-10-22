@@ -6,6 +6,7 @@ const COLUMNAS: [string, (l: Luminaria, p?: Proyecto) => string | number | null]
   ['Proyecto', (_l, p) => p?.nombre ?? ''],
   ['Código activo', (l) => l.codigo],
   ['Fecha', (l) => l.creadoEn],
+  ['Técnico', (l) => l.tecnico],
   ['Latitud', (l) => l.latitud],
   ['Longitud', (l) => l.longitud],
   ['Precisión (m)', (l) => (l.precisionM != null ? Math.round(l.precisionM) : null)],
@@ -51,7 +52,7 @@ export function aGeoJson(items: Luminaria[], proyecto?: Proyecto): string {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [l.longitud, l.latitud] },
       properties: {
-        id: l.id, proyecto: proyecto?.nombre ?? '', codigo: l.codigo, marca: l.marca, fabricante: l.fabricante,
+        id: l.id, proyecto: proyecto?.nombre ?? '', codigo: l.codigo, tecnico: l.tecnico, marca: l.marca, fabricante: l.fabricante,
         modelo: l.modelo, tipo: l.tipoLuminaria, tecnologia: l.tecnologia, potencia_w: l.potenciaW,
         tension_v: l.tensionV, fotocelda: l.fotocelda, pines_fotocelda: l.pinesFotocelda,
         temperatura_color_k: l.temperaturaColorK, flujo_lm: l.flujoLuminosoLm, ip: l.ip, montaje: l.montaje,
@@ -64,12 +65,14 @@ export function aGeoJson(items: Luminaria[], proyecto?: Proyecto): string {
 
 const xml = (t: string) => t.replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]!));
 
+const EXCLUIDAS_KML = ['ID', 'Proyecto', 'Fecha', 'Latitud', 'Longitud', 'Precisión (m)', 'Enlace mapa'];
+
 export function aKml(items: Luminaria[], proyecto?: Proyecto): string {
   const marcas = items
     .filter((l) => coordenadaValida(l.latitud, l.longitud))
     .map((l) => {
       const nombre = l.codigo || [l.marca, l.modelo].filter(Boolean).join(' ') || `Luminaria ${l.id}`;
-      const desc = COLUMNAS.slice(8, 24)
+      const desc = COLUMNAS.filter(([h]) => !EXCLUIDAS_KML.includes(h))
         .map(([h, f]) => ({ h, v: f(l, proyecto) }))
         .filter((x) => x.v !== '' && x.v != null)
         .map((x) => `${x.h}: ${x.v}`)

@@ -1,5 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, Text, View, useColorScheme } from 'react-native';
+import { ActivityIndicator, AppState, Linking, Pressable, Text, View, useColorScheme } from 'react-native';
 import { NavigationContainer, DarkTheme, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -13,7 +13,10 @@ import { EditarScreen } from './src/screens/EditarScreen';
 import { MapaScreen } from './src/screens/MapaScreen';
 import { ProyectosScreen } from './src/screens/ProyectosScreen';
 import { RegistrosScreen } from './src/screens/RegistrosScreen';
+import { ESQUEMA } from './src/lib/config';
+import { pedirYAplicar } from './src/services/configuracion';
 import { cargarAjustes, guardarAjustes, PreferenciaTema } from './src/services/settings';
+import { sincronizarTodo } from './src/services/sync';
 import { paletas, TemaContext, useTema } from './src/theme';
 import type { RootStackParams } from './src/navigation';
 
@@ -64,6 +67,41 @@ function Tabs() {
   );
 }
 
+/** Abre enlaces eliluminaria://config?c=… (flotas) y pide confirmación antes de aplicarlos. */
+function EnlacesDeConfiguracion() {
+  const { activar, proyecto, refrescar } = useApp();
+  useEffect(() => {
+    const manejar = (url?: string | null) => {
+      if (url?.startsWith(ESQUEMA)) pedirYAplicar(url, async () => { if (proyecto) await activar(proyecto.id); else await refrescar(); });
+    };
+    Linking.getInitialURL().then(manejar).catch(() => {});
+    const sub = Linking.addEventListener('url', (e) => manejar(e.url));
+    return () => sub.remove();
+  }, [activar, proyecto, refrescar]);
+  return null;
+}
+
+/** Envía en segundo plano lo pendiente: al guardar, al volver a la app y cuando cambia el número de pendientes. */
+function AutoSync() {
+  const { items, listo, refrescar } = useApp();
+  const pendientes = items.filter((l) => !l.sincronizado).length;
+  const correr = useCallback(async () => {
+    try { if ((await sincronizarTodo()) > 0) await refrescar(); } catch { /* sin conexión: se reintenta luego */ }
+  }, [refrescar]);
+
+  useEffect(() => {
+    if (!listo || !pendientes) return;
+    const t = setTimeout(correr, 3000);
+    return () => clearTimeout(t);
+  }, [listo, pendientes, correr]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (e) => { if (e === 'active') correr(); });
+    return () => sub.remove();
+  }, [correr]);
+  return null;
+}
+
 function Raiz() {
   const { c, oscuro } = useTema();
   const { listo } = useApp();
@@ -78,6 +116,8 @@ function Raiz() {
   return (
     <NavigationContainer theme={tema}>
       <StatusBar style={oscuro ? 'light' : 'dark'} />
+      <EnlacesDeConfiguracion />
+      <AutoSync />
       <Stack.Navigator screenOptions={{ headerStyle: { backgroundColor: c.surface }, headerTintColor: c.text, headerBackTitle: 'Atrás', contentStyle: { backgroundColor: c.bg } }}>
         <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
         <Stack.Screen name="Capturar" component={CapturarScreen} options={{ title: 'Nueva luminaria' }} />

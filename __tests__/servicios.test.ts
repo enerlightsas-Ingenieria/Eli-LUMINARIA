@@ -87,3 +87,32 @@ describe('sincronizar', () => {
     expect(mockMarcadas).toHaveLength(15);
   });
 });
+
+describe('sincronizarTodo (automática)', () => {
+  it('respeta autoSync=false y no toca la red', async () => {
+    jest.resetModules();
+    jest.doMock('../src/services/settings', () => ({ cargarAjustes: async () => ({ syncUrl: 'https://x.example', autoSync: false, syncToken: '', syncFotos: false }) }));
+    jest.doMock('../src/services/db', () => ({ listarProyectos: async () => [], pendientesDeSync: async () => [], marcarSincronizadas: async () => {} }));
+    const { sincronizarTodo } = require('../src/services/sync');
+    const f = jest.fn(); (global as any).fetch = f;
+    expect(await sincronizarTodo()).toBe(0);
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it('envía los pendientes de cada proyecto y evita ejecuciones simultáneas', async () => {
+    jest.resetModules();
+    jest.doMock('../src/services/settings', () => ({ cargarAjustes: async () => ({ syncUrl: 'https://x.example', autoSync: true, syncToken: 't', syncFotos: false }) }));
+    const marcadas: string[] = [];
+    jest.doMock('../src/services/db', () => ({
+      listarProyectos: async () => [{ id: 1, uuid: 'p1', nombre: 'A' }, { id: 2, uuid: 'p2', nombre: 'B' }],
+      pendientesDeSync: async (id: number) => (id === 1 ? [{ uuid: 'a1', fotos: [] }, { uuid: 'a2', fotos: [] }] : []),
+      marcarSincronizadas: async (u: string[]) => { marcadas.push(...u); },
+    }));
+    jest.doMock('../src/services/fotos', () => ({ leerBase64: async () => '' }));
+    const { sincronizarTodo } = require('../src/services/sync');
+    (global as any).fetch = jest.fn(async () => { await new Promise((r) => setTimeout(r, 20)); return resp(200, { ok: true }); });
+    const [x, y] = await Promise.all([sincronizarTodo(), sincronizarTodo()]);
+    expect([x, y].sort()).toEqual([0, 2]); // la segunda llamada simultánea se ignora
+    expect(marcadas).toEqual(['a1', 'a2']);
+  });
+});

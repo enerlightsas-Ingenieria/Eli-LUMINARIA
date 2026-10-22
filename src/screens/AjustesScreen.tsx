@@ -5,6 +5,7 @@ import { Cabecera } from '../components/Cabecera';
 import { Button, Field, Segmented, Seccion } from '../components/ui';
 import { useApp } from '../context/AppContext';
 import { Ajustes, cargarAjustes, ENDPOINT_POR_DEFECTO, guardarAjustes, MODELO_POR_DEFECTO } from '../services/settings';
+import { pedirYAplicar } from '../services/configuracion';
 import { sincronizar } from '../services/sync';
 import { useTema } from '../theme';
 
@@ -13,6 +14,7 @@ export function AjustesScreen() {
   const { proyecto, refrescar } = useApp();
   const [a, setA] = useState<Ajustes | null>(null);
   const [sync, setSync] = useState(false);
+  const [codigo, setCodigo] = useState('');
   useEffect(() => { cargarAjustes().then(setA); }, []);
   if (!a) return null;
 
@@ -36,6 +38,13 @@ export function AjustesScreen() {
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <Cabecera titulo="Ajustes" />
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
+        <Seccion>Técnico y configuración de flota</Seccion>
+        <Text style={p}>Tu nombre se registra en cada luminaria. Si tu empresa te dio un enlace o código de configuración, ábrelo o pégalo aquí: deja la app lista sin escribir claves.</Text>
+        <Field label="Nombre del técnico" value={a.tecnico} hint="Ej. Juan Pérez" onChangeText={(t) => cambiar({ tecnico: t })} />
+        <Field label="Código de configuración" url value={codigo} hint="ELI1.…  o  eliluminaria://config?c=…" onChangeText={setCodigo} />
+        <Button title="Importar configuración" variant="secondary" disabled={!codigo.trim()}
+          onPress={() => pedirYAplicar(codigo, async () => { setCodigo(''); setA(await cargarAjustes()); await refrescar(); })} />
+
         <Seccion>Apariencia</Seccion>
         <Segmented value={a.tema} onChange={(tema) => { cambiar({ tema }); setPref(tema); }}
           options={[{ value: 'auto', label: 'Automático' }, { value: 'claro', label: 'Claro' }, { value: 'oscuro', label: 'Oscuro' }]} />
@@ -54,6 +63,10 @@ export function AjustesScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <Text style={{ color: c.text, flex: 1, paddingRight: 12 }}>Incluir la primera foto (guarda en Drive)</Text>
           <Switch value={a.syncFotos} onValueChange={(syncFotos) => cambiar({ syncFotos })} trackColor={{ true: c.primary }} />
+        </View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <Text style={{ color: c.text, flex: 1, paddingRight: 12 }}>Sincronizar automáticamente cuando haya conexión</Text>
+          <Switch value={a.autoSync} onValueChange={(autoSync) => cambiar({ autoSync })} trackColor={{ true: c.primary }} />
         </View>
         <Button title={`Sincronizar "${proyecto?.nombre ?? ''}" ahora`} variant="secondary" loading={sync} disabled={!a.syncUrl} onPress={sincronizarYa} />
 

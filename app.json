@@ -4,6 +4,7 @@
     "slug": "eli-luminaria",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "eliluminaria",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "splash": { "image": "./assets/splash-icon.png", "resizeMode": "contain", "backgroundColor": "#0F1B2D" },

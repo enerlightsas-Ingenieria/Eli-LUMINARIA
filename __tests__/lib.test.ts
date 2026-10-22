@@ -6,7 +6,7 @@ import { caracteristicasVacias, Luminaria } from '../src/types';
 const base = (o: Partial<Luminaria> = {}): Luminaria => ({
   ...caracteristicasVacias(), id: 1, uuid: 'u1', proyectoId: 1, creadoEn: '2026-01-01T00:00:00Z',
   actualizadoEn: '2026-01-01T00:00:00Z', fotos: [], latitud: 4.711, longitud: -74.0721, precisionM: 5.4,
-  direccion: '', codigo: 'P-001', confianza: 'alta', sincronizado: false, ...o,
+  direccion: '', codigo: 'P-001', tecnico: 'Ana', confianza: 'alta', sincronizado: false, ...o,
 });
 
 describe('geo', () => {

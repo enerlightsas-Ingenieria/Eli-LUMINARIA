@@ -128,6 +128,7 @@ export function EditarScreen() {
           )}
         </ScrollView>
 
+        {!!l.tecnico && <Text style={{ color: c.muted, marginBottom: 6 }}>Registrada por {l.tecnico}</Text>}
         {!!aviso && <Text style={{ color: c.warn, marginBottom: 10, lineHeight: 19 }}>{aviso}</Text>}
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
           {!!l.confianza && <Chip text={`Confianza IA: ${l.confianza} — verifica los datos`} color={confianzaColor(c, l.confianza)} />}
