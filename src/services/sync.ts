@@ -4,27 +4,12 @@ import {
   borradasPendientes, fusionarRemotas, guardarKv, leerKv, limpiarBorradas, listarProyectos, marcarSincronizadas, pendientesDeSync,
 } from './db';
 import { leerBase64 } from './fotos';
+import { postServidor as post, SinConexion } from './servidor';
 import { Ajustes, cargarAjustes } from './settings';
 
 const LOTE = 15;
 
 export interface ResultadoSync { enviadas: number; borradasEnviadas: number; recibidas: number; borradasRemotas: number }
-
-class SinConexion extends Error {}
-
-async function post(a: Ajustes, cuerpo: object): Promise<any> {
-  let res: Response;
-  try {
-    res = await fetch(a.syncUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'text/plain;charset=utf-8' }, // evita preflight en Apps Script
-      body: JSON.stringify({ token: a.syncToken, ...cuerpo }),
-    });
-  } catch { throw new SinConexion(); }
-  const j = await res.json().catch(() => null);
-  if (!res.ok || !j?.ok) throw new Error(j?.error ?? `El servidor respondió ${res.status}. Revisa la URL y el token.`);
-  return j;
-}
 
 const infoProyecto = (p: Proyecto) => ({ uuid: p.uuid, nombre: p.nombre, cliente: p.cliente });
 

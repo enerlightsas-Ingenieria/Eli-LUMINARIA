@@ -2,7 +2,8 @@
 
 1. Crea una hoja de cálculo nueva en Google Sheets (será tu "base de datos" compartida).
 2. Menú **Extensiones → Apps Script**. Borra el contenido y pega `server/google-apps-script.gs`.
-3. Cambia `TOKEN` por una clave larga y aleatoria (la misma que pondrás en la app).
+3. Cambia `TOKEN` por una clave larga y aleatoria (la misma que pondrás en la app) y `TOKEN_ADMIN` por **otra distinta**,
+   solo para ti: es la que abre el mapa en vivo del equipo. El script necesita el runtime **V8** (viene por defecto).
 4. **Implementar → Nueva implementación → Aplicación web**
    - Ejecutar como: **Yo**
    - Quién tiene acceso: **Cualquier persona** (el token protege el acceso)
@@ -33,3 +34,19 @@ La app hace `POST` (JSON) a la URL con:
 `server/worker.ts` es un Cloudflare Worker que guarda la API key de Anthropic en el servidor.
 Despliégalo, define `ANTHROPIC_API_KEY` y `APP_TOKENS`, y en la app pon su URL en *Endpoint* y el token del equipo
 en *API key*.
+
+## Monitoreo del equipo (jornadas)
+Cuando un técnico inicia su jornada, la app envía un "latido" cada 5 minutos (solo con la app abierta y la jornada
+activa) y el script mantiene dos pestañas del sistema, que empiezan por `_` (ningún proyecto puede llamarse así):
+
+- **`_Equipo`**: una fila por teléfono con técnico, estado, última señal, **última posición**, proyecto, luminarias hechas
+  en la jornada, plataforma y versión. La columna **Estado actual** pasa a *Sin señal* si el último latido tiene más de
+  15 minutos (cambia `MINUTOS_SIN_SENAL` en el script).
+- **`_Jornadas`**: una fila por jornada con inicio, fin, horas y luminarias. Sirve para control de tiempos.
+
+**Mapa en vivo:** abre `<URL de tu Web App>?vista=equipo&token=<TOKEN_ADMIN>` en el navegador (guárdala como favorito).
+Muestra quién está en jornada, quién está sin señal, quién está en pausa y dónde, y se actualiza solo cada minuto.
+Casilla "ver luminarias" para superponer lo capturado por el equipo. Trata ese enlace como una contraseña
+(quien lo tenga ve al equipo); para cambiarlo, cambia `TOKEN_ADMIN` y vuelve a implementar.
+
+Privacidad por diseño: solo se guarda la **última** posición (sin historial de rutas) y se **borra** al pausar o terminar.

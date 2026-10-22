@@ -7,6 +7,7 @@ import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-cont
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { AppProvider, useApp } from './src/context/AppContext';
+import { JornadaProvider } from './src/context/JornadaContext';
 import { AjustesScreen } from './src/screens/AjustesScreen';
 import { CapturarScreen } from './src/screens/CapturarScreen';
 import { EditarScreen } from './src/screens/EditarScreen';
@@ -145,7 +146,9 @@ export default function App() {
       <SafeAreaProvider>
         <TemaContext.Provider value={valor}>
           <AppProvider>
-            <Raiz />
+            <JornadaProvider>
+              <Raiz />
+            </JornadaProvider>
           </AppProvider>
         </TemaContext.Provider>
       </SafeAreaProvider>

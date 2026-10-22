@@ -2,13 +2,20 @@
  * Receptor de ELI-LUMINARIA para Google Sheets (+ fotos en Google Drive).
  * Varios técnicos (Android e iOS) pueden usar la misma hoja a la vez. Instrucciones: docs/google-sheets.md
  *
+ * Requiere el runtime V8 (por defecto en proyectos nuevos).
+ *
  * Contrato (POST JSON, texto plano):
  *   { token, proyecto:{uuid,nombre}, luminarias:[...], borradas:[uuid] }   → guarda/actualiza/marca borradas
  *   { token, proyecto:{...}, accion:'listar', desde:'ISO' }                → devuelve lo recibido desde esa marca
+ *   { token, accion:'latido', dispositivo, tecnico, estado, ... }           → monitoreo de jornada (pestañas _Equipo y _Jornadas)
+ * Mapa en vivo para el administrador: <URL de la Web App>?vista=equipo&token=<TOKEN_ADMIN>
  * El orden lo pone EL SERVIDOR (columna "Recibido"), no los relojes de los teléfonos.
  */
 var TOKEN = 'CAMBIA-ESTE-TOKEN';           // el mismo que pondrás en la app (Ajustes → Token secreto)
 var CARPETA_FOTOS = 'ELI-LUMINARIA Fotos';  // carpeta de Drive para las fotos (se crea sola)
+var TOKEN_ADMIN = 'CAMBIA-ESTE-TOKEN-ADMIN'; // SOLO para ti: abre el mapa en vivo del equipo (distinto del token del equipo)
+var MINUTOS_SIN_SENAL = 15;                  // una jornada activa sin latidos por más de esto se muestra "Sin señal"
+var HOJA_EQUIPO = '_Equipo', HOJA_JORNADAS = '_Jornadas'; // pestañas del sistema (los proyectos no pueden empezar por "_")
 
 var COLUMNAS = [
   ['uuid', 'UUID'], ['id', 'ID (local del teléfono)'], ['codigo', 'Código activo'], ['creadoEn', 'Fecha'],
@@ -33,6 +40,7 @@ function doPost(e) {
     var d = JSON.parse(e.postData.contents);
     if (d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' });
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
+    if (d.accion === 'latido') return salida(registrarLatido(d, ahora));
     var hoja = obtenerHoja(d.proyecto && d.proyecto.nombre);
 
     if (d.accion === 'listar') return salida({ ok: true, ahora: ahora, luminarias: listar(hoja, d.desde || '') });
@@ -76,16 +84,22 @@ function doPost(e) {
   }
 }
 
-function doGet() { return salida({ ok: true, servicio: 'ELI-LUMINARIA' }); }
+function doGet(e) {
+  var p = (e && e.parameter) || {};
+  if (p.vista === 'equipo') {
+    if (p.token !== TOKEN_ADMIN) return HtmlService.createHtmlOutput('Acceso denegado').setTitle('ELI-LUMINARIA');
+    return HtmlService.createHtmlOutput(PAGINA_EQUIPO.replace('__TOKEN__', function () { return JSON.stringify(p.token).replace(/</g, '\\u003c'); }))
+      .setTitle('ELI-LUMINARIA · Equipo').addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  }
+  return salida({ ok: true, servicio: 'ELI-LUMINARIA' });
+}
 
 function obtenerHoja(nombreProyecto) {
   var libro = SpreadsheetApp.getActiveSpreadsheet();
   // Se normaliza el nombre (espacios y mayúsculas) para que "Barrio A" y "barrio  a" sean la misma pestaña.
   var limpio = String(nombreProyecto || 'General').replace(/[\\\/\?\*\[\]:]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 90) || 'General';
-  var hojas = libro.getSheets();
-  var hoja = null;
-  for (var i = 0; i < hojas.length; i++) if (hojas[i].getName().toLowerCase() === limpio.toLowerCase()) { hoja = hojas[i]; break; }
-  if (!hoja) hoja = libro.insertSheet(limpio);
+  limpio = limpio.replace(/^_+/, '').trim() || 'General'; // "_" está reservado para las pestañas del sistema
+  var hoja = buscarHoja(libro, limpio) || libro.insertSheet(limpio);
   if (hoja.getLastRow() === 0) {
     hoja.appendRow(COLUMNAS.map(function (c) { return c[1]; }));
     hoja.setFrozenRows(1);
@@ -134,3 +148,197 @@ function guardarFoto(l) {
 function salida(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
+
+function buscarHoja(libro, nombre) {
+  var hojas = libro.getSheets();
+  for (var i = 0; i < hojas.length; i++) if (hojas[i].getName().toLowerCase() === nombre.toLowerCase()) return hojas[i];
+  return null;
+}
+
+/* ---------------- Monitoreo del equipo (jornadas) ---------------- */
+
+var COL_EQUIPO = [
+  ['dispositivo', 'Dispositivo'], ['tecnico', 'Técnico'], ['estado', 'Estado'], ['senal', 'Última señal'],
+  ['latitud', 'Latitud'], ['longitud', 'Longitud'], ['precisionM', 'Precisión (m)'], ['proyecto', 'Proyecto'],
+  ['luminarias', 'Luminarias en la jornada'], ['inicio', 'Jornada desde'], ['plataforma', 'Plataforma'], ['version', 'App'],
+  ['visible', 'Estado actual']
+];
+var COL_JORNADAS = [
+  ['jornadaId', 'ID jornada'], ['dispositivo', 'Dispositivo'], ['tecnico', 'Técnico'], ['inicio', 'Inicio'],
+  ['fin', 'Fin'], ['horas', 'Horas'], ['luminarias', 'Luminarias'], ['proyecto', 'Proyecto']
+];
+var TEXTO_EQUIPO = ['dispositivo', 'tecnico', 'estado', 'proyecto', 'plataforma', 'version'];
+var TEXTO_JORNADAS = ['jornadaId', 'dispositivo', 'tecnico', 'proyecto'];
+
+function hojaSistema(nombre, columnas, textoClaves) {
+  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  var hoja = buscarHoja(libro, nombre);
+  if (hoja) return hoja;
+  hoja = libro.insertSheet(nombre);
+  hoja.appendRow(columnas.map(function (c) { return c[1]; }));
+  hoja.setFrozenRows(1);
+  hoja.getRange(1, 1, 1, columnas.length).setFontWeight('bold').setBackground('#FFC53D');
+  columnas.forEach(function (c, i) {
+    if (textoClaves.indexOf(c[0]) >= 0) hoja.getRange(2, i + 1, hoja.getMaxRows() - 1, 1).setNumberFormat('@');
+  });
+  return hoja;
+}
+
+/** Inserta o actualiza la fila cuya columna iClave vale "clave". 'conservar' = campos que no se pisan una vez escritos. */
+function upsert(hoja, columnas, iClave, clave, obj, conservar) {
+  var n = hoja.getLastRow();
+  var datos = n > 1 ? hoja.getRange(2, 1, n - 1, columnas.length).getValues() : [];
+  var fila = 0;
+  for (var i = 0; i < datos.length; i++) if (String(datos[i][iClave]) === String(clave)) { fila = i + 2; break; }
+  var valores = columnas.map(function (c, j) {
+    var v = obj[c[0]] === undefined ? '' : obj[c[0]];
+    if (fila && conservar && conservar.indexOf(c[0]) >= 0 && datos[fila - 2][j] !== '') v = datos[fila - 2][j];
+    return typeof v === 'string' ? textoSeguro(v) : v;
+  });
+  if (fila) hoja.getRange(fila, 1, 1, columnas.length).setValues([valores]);
+  else { hoja.appendRow(valores); fila = hoja.getLastRow(); }
+  return fila;
+}
+
+function texto(v, max) { return String(v === undefined || v === null ? '' : v).substring(0, max); }
+
+/** Un latido por teléfono con jornada: sobrescribe SU fila (solo se guarda la última posición, sin historial de rutas). */
+function registrarLatido(d, ahora) {
+  var estados = { activa: 'En jornada', pausada: 'Pausada', terminada: 'Terminada' };
+  var estado = estados[d.estado];
+  var dispositivo = texto(d.dispositivo, 64);
+  if (!estado) return { ok: false, error: 'Estado de jornada inválido' };
+  if (!dispositivo) return { ok: false, error: 'Falta el identificador del dispositivo' };
+
+  // La ubicación solo cuenta con la jornada ACTIVA; en pausa o al terminar se borra la última posición.
+  var conPos = d.estado === 'activa' && typeof d.latitud === 'number' && typeof d.longitud === 'number' &&
+    Math.abs(d.latitud) <= 90 && Math.abs(d.longitud) <= 180;
+  var inicio = d.inicio ? new Date(d.inicio) : new Date(ahora);
+  if (isNaN(inicio.getTime())) inicio = new Date(ahora);
+  var senal = new Date(ahora);
+  var luminarias = Number(d.luminarias) || 0;
+
+  var hE = hojaSistema(HOJA_EQUIPO, COL_EQUIPO, TEXTO_EQUIPO);
+  var fe = upsert(hE, COL_EQUIPO, 0, dispositivo, {
+    dispositivo: dispositivo, tecnico: texto(d.tecnico, 80), estado: estado, senal: senal,
+    latitud: conPos ? d.latitud : '', longitud: conPos ? d.longitud : '',
+    precisionM: conPos && typeof d.precisionM === 'number' ? Math.round(d.precisionM) : '',
+    proyecto: texto(d.proyecto, 90), luminarias: luminarias, inicio: inicio,
+    plataforma: texto(d.plataforma, 20), version: texto(d.version, 20), visible: ''
+  });
+  // Estado actual: se recalcula solo al abrir la hoja (Sin señal si el último latido es viejo)
+  hE.getRange(fe, COL_EQUIPO.length).setFormulaR1C1(
+    '=IF(RC3="Terminada","Terminada",IF(RC3="Pausada","Pausada",IF(NOW()-RC4>TIME(0,' + MINUTOS_SIN_SENAL + ',0),"Sin señal","En jornada")))');
+
+  var fin = d.estado === 'terminada' ? senal : '';
+  upsert(hojaSistema(HOJA_JORNADAS, COL_JORNADAS, TEXTO_JORNADAS), COL_JORNADAS, 0, texto(d.jornadaId, 64) || dispositivo + '-' + inicio.getTime(), {
+    jornadaId: texto(d.jornadaId, 64) || dispositivo + '-' + inicio.getTime(), dispositivo: dispositivo, tecnico: texto(d.tecnico, 80),
+    inicio: inicio, fin: fin, horas: fin ? Math.round((fin - inicio) / 36000) / 100 : '', luminarias: luminarias, proyecto: texto(d.proyecto, 90)
+  }, ['fin', 'horas']); // reintentos de "terminar" no mueven la hora de fin
+  return { ok: true };
+}
+
+/** Datos para el mapa en vivo (los consume la página con google.script.run). Exige TOKEN_ADMIN. */
+function datosEquipo(token) {
+  if (token !== TOKEN_ADMIN) throw new Error('Acceso denegado');
+  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  var ahora = new Date();
+  var iso = function (v) { return v instanceof Date ? v.toISOString() : v; };
+
+  var tecnicos = [];
+  var hE = buscarHoja(libro, HOJA_EQUIPO);
+  if (hE && hE.getLastRow() > 1) {
+    hE.getRange(2, 1, hE.getLastRow() - 1, COL_EQUIPO.length).getValues().forEach(function (r) {
+      if (!r[0]) return;
+      var senal = r[3] instanceof Date ? r[3] : new Date(r[3]);
+      var estado = String(r[2]);
+      var efectivo = estado === 'En jornada' && (ahora - senal) / 60000 > MINUTOS_SIN_SENAL ? 'Sin señal' : estado;
+      tecnicos.push({ dispositivo: r[0], tecnico: r[1], estado: efectivo, estadoReportado: estado, senal: iso(senal),
+        latitud: r[4], longitud: r[5], precisionM: r[6], proyecto: r[7], luminarias: r[8], inicio: iso(r[9]), plataforma: r[10] });
+    });
+  }
+
+  var luminarias = [];
+  var iLat = col('latitud'), iLng = col('longitud'), iTec = col('tecnico'), iMarca = col('marca'), iTecn = col('tecnologia'), iEli = col('eliminada');
+  libro.getSheets().forEach(function (h) {
+    if (h.getName().charAt(0) === '_' || h.getLastRow() < 2 || luminarias.length >= 5000) return;
+    h.getRange(2, 1, h.getLastRow() - 1, COLUMNAS.length).getValues().forEach(function (r) {
+      if (luminarias.length >= 5000 || !r[0] || String(r[iEli]).toUpperCase().indexOf('S') === 0) return;
+      if (typeof r[iLat] === 'number' && typeof r[iLng] === 'number') luminarias.push({ lat: r[iLat], lng: r[iLng], tec: r[iTec], marca: r[iMarca], tecnologia: r[iTecn] });
+    });
+  });
+  return { ahora: ahora.toISOString(), limite: MINUTOS_SIN_SENAL, tecnicos: tecnicos, luminarias: luminarias };
+}
+
+var PAGINA_EQUIPO = `<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+ html,body{height:100%;margin:0;font:14px/1.35 system-ui,sans-serif;color:#0f1b2d;background:#f4f6fa}
+ #top{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:10px 14px;background:#0f1b2d;color:#f2f6fb}
+ #top b{color:#ffc53d;letter-spacing:.5px} #top label{margin-left:auto;cursor:pointer}
+ #main{display:flex;height:calc(100% - 46px)} #lista{width:320px;max-width:42%;overflow:auto;background:#fff;border-right:1px solid #d5dde9}
+ #map{flex:1}
+ .t{padding:10px 12px;border-bottom:1px solid #e8edf5;cursor:pointer} .t:hover{background:#f4f6fa}
+ .t .n{font-weight:700} .t .s{font-size:12px;color:#5b6b80} .pt{display:inline-block;width:10px;height:10px;border-radius:5px;margin-right:6px}
+ #vacio{padding:16px;color:#5b6b80}
+ @media (max-width:700px){#main{flex-direction:column-reverse}#lista{width:auto;max-width:none;height:38%;border-right:0;border-top:1px solid #d5dde9}}
+</style></head><body>
+<div id="top"><b>ELI-LUMINARIA · Equipo</b><span id="res">Cargando…</span><span id="act"></span>
+ <label><input type="checkbox" id="ver"> ver luminarias</label></div>
+<div id="main"><div id="lista"></div><div id="map"></div></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+var TOKEN = __TOKEN__;
+var COLORES = {'En jornada':'#16a34a','Sin señal':'#ea580c','Pausada':'#2563eb','Terminada':'#6b7280'};
+var ORDEN = {'En jornada':0,'Sin señal':1,'Pausada':2,'Terminada':3};
+var map = L.map('map').setView([4.65,-74.1],6);
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+var capaT = L.layerGroup().addTo(map), capaL = L.layerGroup(), marcas = {}, primera = true;
+document.getElementById('ver').onchange = function(){ if(this.checked) capaL.addTo(map); else map.removeLayer(capaL); };
+
+function hace(iso, ahora){
+  var m = Math.round((new Date(ahora) - new Date(iso)) / 60000);
+  if (isNaN(m)) return '—'; if (m < 1) return 'ahora'; if (m < 60) return 'hace ' + m + ' min';
+  return 'hace ' + Math.floor(m / 60) + ' h ' + (m % 60) + ' min';
+}
+function el(tag, cls, txt){ var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+
+function pintar(d){
+  capaT.clearLayers(); capaL.clearLayers(); marcas = {};
+  var lista = document.getElementById('lista'); lista.innerHTML = '';
+  var cuenta = {'En jornada':0,'Sin señal':0,'Pausada':0,'Terminada':0};
+  d.tecnicos.sort(function(a,b){ return (ORDEN[a.estado]-ORDEN[b.estado]) || String(a.tecnico).localeCompare(b.tecnico); });
+  var puntos = [];
+  d.tecnicos.forEach(function(t){
+    cuenta[t.estado] = (cuenta[t.estado] || 0) + 1;
+    var fila = el('div','t');
+    var n = el('div','n'); var p = el('span','pt'); p.style.background = COLORES[t.estado] || '#6b7280';
+    n.appendChild(p); n.appendChild(document.createTextNode(t.tecnico || 'Sin nombre')); fila.appendChild(n);
+    fila.appendChild(el('div','s', t.estado + ' · ' + hace(t.senal, d.ahora)));
+    fila.appendChild(el('div','s', (t.luminarias || 0) + ' luminarias · ' + (t.proyecto || '—') + ' · ' + (t.plataforma || '')));
+    lista.appendChild(fila);
+    if (t.latitud !== '' && t.latitud != null && t.longitud !== '' && t.longitud != null) {
+      var m = L.circleMarker([t.latitud, t.longitud], {radius:11, color:'#fff', weight:3, fillColor: COLORES[t.estado] || '#6b7280', fillOpacity:1}).addTo(capaT);
+      m.bindTooltip(t.tecnico || 'Sin nombre', {permanent:true, direction:'top', offset:[0,-10]});
+      m.bindPopup('<b>' + esc(t.tecnico) + '</b><br>' + esc(t.estado) + ' · ' + hace(t.senal, d.ahora) + '<br>' + (t.luminarias||0) + ' luminarias');
+      marcas[t.dispositivo] = m; puntos.push([t.latitud, t.longitud]);
+      fila.onclick = (function(mm, la, lo){ return function(){ map.setView([la, lo], 17); mm.openPopup(); }; })(m, t.latitud, t.longitud);
+    }
+  });
+  if (!d.tecnicos.length) lista.appendChild(el('div', null, 'Aún no hay técnicos con jornada.')).id = 'vacio';
+  d.luminarias.forEach(function(l){
+    L.circleMarker([l.lat, l.lng], {radius:3, color:'#475569', weight:1, fillColor:'#94a3b8', fillOpacity:.8}).bindTooltip((l.marca || 'Luminaria') + (l.tec ? ' · ' + l.tec : '')).addTo(capaL);
+  });
+  document.getElementById('res').textContent = cuenta['En jornada'] + ' en jornada · ' + cuenta['Sin señal'] + ' sin señal · ' + cuenta['Pausada'] + ' en pausa';
+  document.getElementById('act').textContent = 'actualizado ' + new Date(d.ahora).toLocaleTimeString();
+  if (primera && puntos.length) { map.fitBounds(puntos, {padding:[60,60], maxZoom:16}); primera = false; }
+}
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function cargar(){
+  google.script.run.withSuccessHandler(pintar)
+    .withFailureHandler(function(e){ document.getElementById('act').textContent = 'Error: ' + (e && e.message || e); })
+    .datosEquipo(TOKEN);
+}
+cargar(); setInterval(cargar, 60000);
+</script></body></html>`;

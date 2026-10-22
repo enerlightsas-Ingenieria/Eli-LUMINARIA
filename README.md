@@ -15,6 +15,8 @@ Identifica con IA (Claude visión) las características básicas y las guarda en
 - **Flotas:** técnico registrado en cada luminaria, configuración de teléfonos por enlace/QR, sincronización automática y proxy de IA con token por técnico (ver `docs/flota.md`).
 - **Sincronización de ida y vuelta** con **Google Sheets** (+ fotos en Drive) o tu servidor: varios técnicos, Android e iOS a la vez,
   ven lo que hacen los demás; ediciones y eliminaciones se propagan sin duplicar ni resucitar registros.
+- **Monitoreo del equipo:** el técnico inicia/pausa/termina su jornada (con aviso de consentimiento); tú ves en un mapa en vivo quién
+  trabaja, quién está sin señal y dónde, más el historial de horas en la hoja. Solo última posición, sin rutas, y nada fuera de la jornada.
 - **Sin señal:** foto + GPS offline, opciones rápidas para llenar a mano, “copiar del último registro”, análisis IA que se rinde
   a los 25 s o se omite, y “Re-analizar con IA” cuando vuelve la conexión.
 - **Exportar** CSV (Excel), **GeoJSON** (QGIS/ArcGIS) y **KML** (Google Earth).

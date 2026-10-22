@@ -151,6 +151,12 @@ export async function borrarLuminaria(l: Luminaria): Promise<void> {
   await db.runAsync('INSERT OR IGNORE INTO tombstones (uuid, proyectoId) VALUES (?,?)', [l.uuid, l.proyectoId]); // se propaga en la próxima sincronización
 }
 
+/** Luminarias que este técnico registró desde una fecha (para el contador de la jornada). */
+export async function contarDesde(tecnico: string, desdeISO: string): Promise<number> {
+  const db = await abrir();
+  return (await db.getFirstAsync<{ c: number }>('SELECT COUNT(*) AS c FROM luminarias WHERE tecnico=? AND creadoEn>=?', [tecnico, desdeISO]))?.c ?? 0;
+}
+
 export async function borradasPendientes(proyectoId: number): Promise<string[]> {
   const db = await abrir();
   return (await db.getAllAsync<{ uuid: string }>('SELECT uuid FROM tombstones WHERE proyectoId=?', [proyectoId])).map((r) => r.uuid);

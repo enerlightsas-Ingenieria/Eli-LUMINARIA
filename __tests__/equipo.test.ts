@@ -1,96 +1,13 @@
 /**
  * Integración: varios técnicos sobre el mismo proyecto.
  * Cada "teléfono" usa su propia base SQLite y el código real de db.ts / sync.ts;
- * el servidor es el script REAL de Google Apps Script (server/google-apps-script.gs) corriendo sobre una hoja simulada.
+ * el servidor es el script REAL de Google Apps Script (server/google-apps-script.gs) sobre una hoja simulada.
  */
-import { DatabaseSync } from 'node:sqlite';
-import * as fs from 'fs';
-import * as path from 'path';
-
-/* ---------- Hoja de cálculo simulada (imita la conversión de Sheets: "150" → 150 salvo columnas de texto) ---------- */
-class Hoja {
-  filas: any[][] = [];
-  formatos: Record<number, string> = {};
-  constructor(public nombre: string) {}
-  getName() { return this.nombre; }
-  getLastRow() { return this.filas.length; }
-  getMaxRows() { return 1000; }
-  setFrozenRows() {}
-  coac(x: any, col: number, cabecera = false) {
-    if (typeof x === 'string' && x.startsWith("'") && /^'[=+@]/.test(x)) return x.slice(1); // el apóstrofo fuerza texto y no se guarda
-    return typeof x === 'string' && !cabecera && this.formatos[col] !== '@' && /^-?\d+(\.\d+)?$/.test(x) ? Number(x) : x;
-  }
-  appendRow(v: any[]) { const cab = this.filas.length === 0; this.filas.push(v.map((x, i) => this.coac(x, i + 1, cab))); }
-  getRange(r: number, c: number, nr = 1, nc = 1) {
-    const h = this;
-    const api: any = {
-      getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => h.filas[r - 1 + i]?.[c - 1 + j] ?? '')),
-      setValues: (vals: any[][]) => vals.forEach((fila, i) => { h.filas[r - 1 + i] ??= []; fila.forEach((x, j) => { h.filas[r - 1 + i][c - 1 + j] = h.coac(x, c + j); }); }),
-      getValue: () => h.filas[r - 1]?.[c - 1] ?? '',
-      setValue: (x: any) => { h.filas[r - 1] ??= []; h.filas[r - 1][c - 1] = x; },
-      setFontWeight: () => api, setBackground: () => api,
-      setNumberFormat: (f: string) => { for (let j = 0; j < nc; j++) h.formatos[c + j] = f; return api; },
-    };
-    return api;
-  }
-}
-
-function crearServidor() {
-  const hojas: Hoja[] = [];
-  const libro = { getSheets: () => hojas, insertSheet: (n: string) => { const h = new Hoja(n); hojas.push(h); return h; } };
-  const fuente = fs.readFileSync(path.join(__dirname, '../server/google-apps-script.gs'), 'utf8');
-  const gs = new Function('SpreadsheetApp', 'LockService', 'ContentService', 'DriveApp', 'Utilities', fuente + '\n;return { doPost };')(
-    { getActiveSpreadsheet: () => libro },
-    { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
-    { createTextOutput: (t: string) => ({ t, setMimeType() { return this; } }), MimeType: { JSON: 'json' } },
-    {}, {},
-  );
-  const llamar = async (_url: string, init: any) => {
-    const salida = gs.doPost({ postData: { contents: init.body } });
-    return { ok: true, status: 200, json: async () => JSON.parse(salida.t) } as any;
-  };
-  return { hojas, llamar };
-}
-
-/* ---------- Teléfono: base propia + módulos reales aislados ---------- */
-function adaptador(motor: DatabaseSync) {
-  return {
-    execAsync: async (sql: string) => { motor.exec(sql); },
-    getFirstAsync: async (sql: string, p: any[] = []) => motor.prepare(sql).get(...p),
-    getAllAsync: async (sql: string, p: any[] = []) => motor.prepare(sql).all(...p),
-    runAsync: async (sql: string, p: any[] = []) => { const r = motor.prepare(sql).run(...p); return { lastInsertRowId: Number(r.lastInsertRowid), changes: Number(r.changes) }; },
-  };
-}
-
-function telefono(tecnico: string) {
-  let t: any;
-  jest.isolateModules(() => {
-    const motor = new DatabaseSync(':memory:');
-    jest.doMock('expo-sqlite', () => ({ openDatabaseAsync: async () => adaptador(motor) }));
-    jest.doMock('expo-crypto', () => ({ randomUUID: () => require('crypto').randomUUID() }));
-    jest.doMock('../src/services/settings', () => ({
-      cargarAjustes: async () => ({ syncUrl: 'https://gs.example/exec', syncToken: 'CAMBIA-ESTE-TOKEN', syncFotos: false, autoSync: true, tecnico }),
-    }));
-    jest.doMock('../src/services/fotos', () => ({ leerBase64: async () => '' }));
-    t = { tecnico, db: require('../src/services/db'), sync: require('../src/services/sync') };
-  });
-  return t as { tecnico: string; db: typeof import('../src/services/db'); sync: typeof import('../src/services/sync') };
-}
-
-const nueva = (t: ReturnType<typeof telefono>, proyectoId: number, o: any = {}) => t.db.guardarLuminaria({
-  ...require('../src/types').caracteristicasVacias(), uuid: require('crypto').randomUUID(), proyectoId,
-  creadoEn: new Date().toISOString(), actualizadoEn: '', fotos: ['file:///local.jpg'], latitud: 4.7, longitud: -74.07,
-  precisionM: 5, direccion: '', codigo: '', tecnico: t.tecnico, confianza: 'alta', ...o,
-});
-
-async function proyectoDe(t: ReturnType<typeof telefono>, nombre: string) {
-  const id = await t.db.crearProyecto(nombre);
-  return (await t.db.listarProyectos()).find((p) => p.id === id)!;
-}
+import { crearServidor, nueva, proyectoDe, telefono, Telefono } from './helpers/equipo';
 
 describe('equipo: varios técnicos, mismo proyecto', () => {
   let srv: ReturnType<typeof crearServidor>;
-  let A: ReturnType<typeof telefono>, B: ReturnType<typeof telefono>;
+  let A: Telefono, B: Telefono;
   let pA: any, pB: any;
 
   beforeEach(async () => {

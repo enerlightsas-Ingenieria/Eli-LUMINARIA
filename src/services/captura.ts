@@ -23,11 +23,16 @@ export async function tomarFoto(origen: 'camara' | 'galeria'): Promise<Foto | nu
   return { uri: small.uri, base64: small.base64 ?? '', exifLat: lat, exifLng: lng };
 }
 
-export async function obtenerPosicion(): Promise<Posicion | null> {
+/** 'alta' para registrar una luminaria; 'balanceada' para los latidos de la jornada (menos batería). */
+export async function obtenerPosicion(precision: 'alta' | 'balanceada' = 'alta'): Promise<Posicion | null> {
   const p = await Location.requestForegroundPermissionsAsync();
   if (!p.granted) return null;
   try {
-    const l = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+    if (precision === 'balanceada') {
+      const reciente = await Location.getLastKnownPositionAsync({ maxAge: 120000 }).catch(() => null);
+      if (reciente) return { latitud: reciente.coords.latitude, longitud: reciente.coords.longitude, precisionM: reciente.coords.accuracy ?? null };
+    }
+    const l = await Location.getCurrentPositionAsync({ accuracy: precision === 'alta' ? Location.Accuracy.High : Location.Accuracy.Balanced });
     return { latitud: l.coords.latitude, longitud: l.coords.longitude, precisionM: l.coords.accuracy ?? null };
   } catch {
     const l = await Location.getLastKnownPositionAsync().catch(() => null);

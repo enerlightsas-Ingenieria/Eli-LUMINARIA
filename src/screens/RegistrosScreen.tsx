@@ -5,6 +5,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Cabecera } from '../components/Cabecera';
+import { TarjetaJornada } from '../components/TarjetaJornada';
 import { Chip, exito, HojaAcciones, toque } from '../components/ui';
 import { useApp } from '../context/AppContext';
 import { borrarLuminaria } from '../services/db';
@@ -92,6 +93,7 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
           { icono: 'cloud-upload-outline', etiqueta: 'Sincronizar', onPress: sync, badge: pendientes },
           { icono: 'share-outline', etiqueta: 'Exportar', onPress: () => setMenuExportar(true) },
         ]} />
+      <TarjetaJornada />
       <View style={s.search}>
         <Ionicons name="search" size={18} color={c.muted} />
         <TextInput value={q} onChangeText={setQ} placeholder="Buscar marca, código, dirección…" placeholderTextColor={c.muted} style={s.input} accessibilityLabel="Buscar" />

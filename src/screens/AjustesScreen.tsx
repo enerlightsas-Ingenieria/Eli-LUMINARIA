@@ -74,7 +74,7 @@ export function AjustesScreen() {
 
         <Seccion>Acerca de</Seccion>
         <Text style={{ color: c.muted, lineHeight: 20 }}>
-          ELI-LUMINARIA {Constants.expoConfig?.version ?? ''}{'\n'}Inventario de luminarias con IA y GPS.{'\n'}Los datos viven en tu teléfono; sólo salen las fotos que envías a analizar y lo que sincronizas.
+          ELI-LUMINARIA {Constants.expoConfig?.version ?? ''}{'\n'}Inventario de luminarias con IA y GPS.{'\n'}Los datos viven en tu teléfono; sólo salen las fotos que envías a analizar y lo que sincronizas.{'\n'}Tu ubicación solo se comparte con tu empresa mientras tienes una jornada ACTIVA (botón en la lista); al pausar o terminar deja de enviarse.
         </Text>
         <Button title="Ver código y documentación" variant="secondary" style={{ marginTop: 12 }}
           onPress={() => Linking.openURL('https://github.com/enerlightsas-ingenieria/eli-luminaria')} />

@@ -52,6 +52,23 @@ conexión la app sincroniza sola (al guardar, al volver a abrirla y cada vez que
   se rinde a los 25 s con señal pobre y se puede omitir. Con señal, "Re-analizar con IA" rellena lo pendiente.
 - La numeración `#12` es **local de cada teléfono**; para referirse a una luminaria entre técnicos usa el **Código del activo**.
 
+## Monitoreo del equipo: quién trabaja y dónde
+Cada técnico usa el botón **Iniciar jornada** (en la lista de luminarias). Mientras la jornada esté activa y la app abierta, la app
+envía cada 5 minutos su ubicación aproximada, la hora y cuántas luminarias lleva.
+
+- **Tú lo ves** en el mapa en vivo (`?vista=equipo&token=<TOKEN_ADMIN>`, ver `docs/google-sheets.md`) y en las pestañas
+  `_Equipo` (estado actual de cada técnico) y `_Jornadas` (historial de horas).
+- **Estados:** *En jornada*, *Sin señal* (activa pero sin latidos por más de 15 min: sin cobertura, teléfono bloqueado o app cerrada),
+  *Pausada* y *Terminada*.
+- **El técnico controla y ve todo:** acepta un aviso la primera vez, ve siempre una tarjeta "Jornada activa", puede **pausar**
+  (almuerzo) o **terminar**; en pausa y al terminar la app **ni consulta el GPS** y se borra su última posición del servidor.
+  Una jornada olvidada se cierra sola a las 14 h.
+- **Solo con la app abierta (no en segundo plano):** si el técnico bloquea el teléfono o abre otra app, los latidos se detienen y
+  verás *Sin señal*; se reanudan al volver a la app. Es la contrapartida de no pedir el permiso de ubicación en segundo plano
+  (menos batería, menos fricción con Google Play y App Store). Pídeles que mantengan la app abierta durante la jornada.
+- **Aviso legal:** informa a los técnicos y obtén su aceptación por escrito según la normativa laboral y de protección de datos
+  de tu país (en Colombia, habeas data / Ley 1581). La app solo mide durante la jornada, pero la política es tuya.
+
 ## Android e iOS a la vez
 - Misma app, mismos datos y misma hoja. Un técnico con iPhone y otro con Android ven los mismos registros.
 - **Fotos de galería:** iOS suele conservar el GPS de la foto; **Android normalmente lo elimina**. La app lo detecta y usa tu
@@ -77,7 +94,7 @@ conexión la app sincroniza sola (al guardar, al volver a abrirla y cada vez que
 - El token de la hoja es **compartido** por el equipo: protege el acceso pero no distingue técnicos al escribir
   (el nombre del técnico lo declara la app). Si necesitas autenticación individual y roles, hay que añadir un backend propio
   (la app ya habla con cualquier servidor que cumpla el contrato descrito en `docs/google-sheets.md`).
-- No hay panel central de control de flota: la hoja (columnas Técnico, Fecha y Recibido) y los logs del proxy son la fuente.
+- El panel de flota es el mapa en vivo y las pestañas `_Equipo` / `_Jornadas`; el consumo de IA se audita en los logs del proxy.
 - Google Apps Script tiene cuotas diarias y un límite de ejecuciones simultáneas; para decenas de técnicos sincronizando
   muy seguido, considera un backend propio (la app habla con cualquiera que cumpla el contrato de `docs/google-sheets.md`).
 - Nada de esto se ha probado todavía con dispositivos reales: haz un piloto con 2–3 técnicos antes de desplegar a todos.
