@@ -50,22 +50,22 @@ export interface Luminaria extends Caracteristicas {
 
 export type LuminariaBorrador = Omit<Luminaria, 'id' | 'sincronizado'> & { id?: number };
 
-export const CAMPOS: { key: keyof Caracteristicas; label: string; hint?: string; multiline?: boolean; numeric?: boolean }[] = [
+export const CAMPOS: { key: keyof Caracteristicas; label: string; hint?: string; multiline?: boolean; numeric?: boolean; opciones?: string[] }[] = [
   { key: 'marca', label: 'Marca', hint: 'Ej. Philips, Schréder, Lumenpulse' },
   { key: 'fabricante', label: 'Fabricante' },
   { key: 'modelo', label: 'Modelo / referencia' },
-  { key: 'tipoLuminaria', label: 'Tipo de luminaria', hint: 'Alumbrado público, proyector, farol, panel...' },
-  { key: 'tecnologia', label: 'Tecnología', hint: 'LED, sodio alta presión, mercurio, metal halide...' },
-  { key: 'potenciaW', label: 'Potencia (W)', numeric: true },
-  { key: 'tensionV', label: 'Tensión (V)', numeric: true },
-  { key: 'fotocelda', label: 'Fotocelda', hint: 'Sin fotocelda, NEMA/twist-lock, integrada, externa' },
-  { key: 'pinesFotocelda', label: 'Pines de la fotocelda', hint: '3, 5 o 7 pines', numeric: true },
-  { key: 'temperaturaColorK', label: 'Temperatura de color (K)', numeric: true },
+  { key: 'tipoLuminaria', opciones: ['Alumbrado público','Proyector','Farol','Panel','Hermética','Bala / downlight'], label: 'Tipo de luminaria', hint: 'Alumbrado público, proyector, farol, panel...' },
+  { key: 'tecnologia', opciones: ['LED','Sodio alta presión','Sodio baja presión','Mercurio','Metal halide','Fluorescente','Inducción'], label: 'Tecnología', hint: 'LED, sodio alta presión, mercurio, metal halide...' },
+  { key: 'potenciaW', opciones: ['30','50','70','100','150','250','400'], label: 'Potencia (W)', numeric: true },
+  { key: 'tensionV', opciones: ['120','208','220','240','277'], label: 'Tensión (V)', numeric: true },
+  { key: 'fotocelda', opciones: ['Sin fotocelda','NEMA / twist-lock','Integrada','Externa'], label: 'Fotocelda', hint: 'Sin fotocelda, NEMA/twist-lock, integrada, externa' },
+  { key: 'pinesFotocelda', opciones: ['3','5','7'], label: 'Pines de la fotocelda', hint: '3, 5 o 7 pines', numeric: true },
+  { key: 'temperaturaColorK', opciones: ['3000','4000','5000','6500'], label: 'Temperatura de color (K)', numeric: true },
   { key: 'flujoLuminosoLm', label: 'Flujo luminoso (lm)', numeric: true },
-  { key: 'ip', label: 'Grado IP' },
-  { key: 'montaje', label: 'Montaje', hint: 'Poste, brazo, pared, suspendida...' },
+  { key: 'ip', opciones: ['IP54','IP65','IP66','IP67'], label: 'Grado IP' },
+  { key: 'montaje', opciones: ['Poste','Brazo','Pared','Suspendida','Techo'], label: 'Montaje', hint: 'Poste, brazo, pared, suspendida...' },
   { key: 'alturaM', label: 'Altura de montaje (m)', hint: 'Estimada', numeric: true },
-  { key: 'estado', label: 'Estado visual', hint: 'Bueno, deteriorado, apagada, sin luminaria...' },
+  { key: 'estado', opciones: ['Bueno','Deteriorado','Apagada','Vandalizada','Sin luminaria'], label: 'Estado visual', hint: 'Bueno, deteriorado, apagada, sin luminaria...' },
   { key: 'observaciones', label: 'Observaciones', multiline: true },
 ];
 

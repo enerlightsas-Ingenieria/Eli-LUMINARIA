@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import * as Crypto from 'expo-crypto';
+import { decidir, Remota } from '../lib/fusion';
 import { Caracteristicas, caracteristicasVacias, Luminaria, LuminariaBorrador, Proyecto } from '../types';
 
 let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
@@ -36,6 +37,7 @@ function abrir() {
     const { user_version } = (await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version'))!;
     if (user_version < 1) await migrarAV1(db);
     if (user_version < 2) await migrarAV2(db);
+    if (user_version < 3) await migrarAV3(db);
     return db;
   })();
   return dbPromise;
@@ -66,6 +68,12 @@ async function migrarAV2(db: SQLite.SQLiteDatabase) {
   const cols = await db.getAllAsync<{ name: string }>('PRAGMA table_info(luminarias)');
   if (!cols.some((c) => c.name === 'tecnico')) await db.execAsync("ALTER TABLE luminarias ADD COLUMN tecnico TEXT DEFAULT ''");
   await db.execAsync('PRAGMA user_version = 2');
+}
+
+/** v2 → v3: registro de borrados pendientes de propagar al equipo. */
+async function migrarAV3(db: SQLite.SQLiteDatabase) {
+  await db.execAsync('CREATE TABLE IF NOT EXISTS tombstones (uuid TEXT PRIMARY KEY, proyectoId INTEGER NOT NULL)');
+  await db.execAsync('PRAGMA user_version = 3');
 }
 
 const aLuminaria = (r: any): Luminaria => ({ ...r, fotos: JSON.parse(r.fotos || '[]'), sincronizado: !!r.sincronizado });
@@ -103,6 +111,7 @@ export async function borrarProyecto(id: number): Promise<string[]> {
   const db = await abrir();
   const fotos = (await db.getAllAsync<{ fotos: string }>('SELECT fotos FROM luminarias WHERE proyectoId=?', [id])).flatMap((r) => JSON.parse(r.fotos || '[]'));
   await db.runAsync('DELETE FROM luminarias WHERE proyectoId=?', [id]);
+  await db.runAsync('DELETE FROM tombstones WHERE proyectoId=?', [id]); // borrar un proyecto NO borra los datos del equipo
   await db.runAsync('DELETE FROM proyectos WHERE id=?', [id]);
   return fotos;
 }
@@ -139,4 +148,44 @@ export async function guardarLuminaria(l: LuminariaBorrador): Promise<number> {
 export async function borrarLuminaria(l: Luminaria): Promise<void> {
   const db = await abrir();
   await db.runAsync('DELETE FROM luminarias WHERE id=?', [l.id]);
+  await db.runAsync('INSERT OR IGNORE INTO tombstones (uuid, proyectoId) VALUES (?,?)', [l.uuid, l.proyectoId]); // se propaga en la próxima sincronización
+}
+
+export async function borradasPendientes(proyectoId: number): Promise<string[]> {
+  const db = await abrir();
+  return (await db.getAllAsync<{ uuid: string }>('SELECT uuid FROM tombstones WHERE proyectoId=?', [proyectoId])).map((r) => r.uuid);
+}
+
+export async function limpiarBorradas(uuids: string[]): Promise<void> {
+  const db = await abrir();
+  for (const u of uuids) await db.runAsync('DELETE FROM tombstones WHERE uuid=?', [u]);
+}
+
+export interface ResultadoFusion { nuevas: number; actualizadas: number; borradas: number }
+
+/** Aplica lo que trajo la hoja (lo de todos los técnicos) respetando los cambios locales sin enviar. */
+export async function fusionarRemotas(proyectoId: number, remotas: Remota[]): Promise<ResultadoFusion> {
+  const db = await abrir();
+  const borradas = new Set(await borradasPendientes(proyectoId));
+  const r: ResultadoFusion = { nuevas: 0, actualizadas: 0, borradas: 0 };
+  const sinFotosNiIds = COLS.filter((c) => c !== 'uuid' && c !== 'proyectoId' && c !== 'fotos');
+
+  for (const x of remotas) {
+    const local = await db.getFirstAsync<{ id: number; sincronizado: number; fotos: string }>('SELECT id, sincronizado, fotos FROM luminarias WHERE uuid=?', [x.uuid]);
+    const accion = decidir(local ? { sincronizado: !!local.sincronizado } : undefined, x, borradas.has(x.uuid));
+    const d: any = x.datos;
+    if (accion === 'insertar') {
+      await db.runAsync(`INSERT INTO luminarias (${COLS.join(',')}, sincronizado) VALUES (${COLS.map(() => '?').join(',')}, 1)`,
+        COLS.map((c) => (c === 'fotos' ? '[]' : c === 'proyectoId' ? proyectoId : d[c] ?? null)));
+      r.nuevas++;
+    } else if (accion === 'actualizar') {
+      await db.runAsync(`UPDATE luminarias SET ${sinFotosNiIds.map((c) => `${c}=?`).join(',')}, sincronizado=1 WHERE uuid=?`,
+        [...sinFotosNiIds.map((c) => d[c] ?? null), x.uuid]); // conserva las fotos locales
+      r.actualizadas++;
+    } else if (accion === 'borrar') {
+      await db.runAsync('DELETE FROM luminarias WHERE uuid=?', [x.uuid]);
+      r.borradas++;
+    }
+  }
+  return r;
 }

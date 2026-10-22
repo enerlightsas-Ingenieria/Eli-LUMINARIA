@@ -86,8 +86,8 @@ describe('db', () => {
   });
 });
 
-describe('migración v1 → v2', () => {
-  it('añade la columna tecnico a una base v1 existente sin perder filas', async () => {
+describe('migración v1 → v3', () => {
+  it('añade tecnico y tombstones a una base v1 existente sin perder filas', async () => {
     mockMotor = new DatabaseSync(':memory:');
     mockMotor.exec(`
       CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT);
@@ -105,6 +105,8 @@ describe('migración v1 → v2', () => {
     expect(ls[0]).toMatchObject({ marca: 'Schréder', tecnico: '' });
     await db.guardarLuminaria({ ...ls[0], tecnico: 'Ana' });
     expect((await db.listarLuminarias(1))[0].tecnico).toBe('Ana');
-    expect((mockMotor.prepare('PRAGMA user_version').get() as any).user_version).toBe(2);
+    expect((mockMotor.prepare('PRAGMA user_version').get() as any).user_version).toBe(3);
+    await db.borrarLuminaria({ ...ls[0], tecnico: 'Ana' } as any);
+    expect(await db.borradasPendientes(1)).toEqual([ls[0].uuid]);
   });
 });

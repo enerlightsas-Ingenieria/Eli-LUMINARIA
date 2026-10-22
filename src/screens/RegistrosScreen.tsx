@@ -5,12 +5,12 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Cabecera } from '../components/Cabecera';
-import { Chip, exito, toque } from '../components/ui';
+import { Chip, exito, HojaAcciones, toque } from '../components/ui';
 import { useApp } from '../context/AppContext';
 import { borrarLuminaria } from '../services/db';
 import { borrarFotos } from '../services/fotos';
 import { exportar, Formato } from '../services/exporter';
-import { sincronizar } from '../services/sync';
+import { resumenSync, sincronizar } from '../services/sync';
 import { cargarAjustes } from '../services/settings';
 import { confianzaColor, radius, useTema } from '../theme';
 import { Luminaria } from '../types';
@@ -27,6 +27,7 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
   const [filtro, setFiltro] = useState<Filtro>('todas');
   const [ocupado, setOcupado] = useState(false);
   const [refrescando, setRefrescando] = useState(false);
+  const [menuExportar, setMenuExportar] = useState(false);
 
   const pendientes = items.filter((l) => !l.sincronizado).length;
   const visibles = useMemo(() => {
@@ -40,16 +41,12 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
     });
   }, [items, q, filtro]);
 
-  const exportarMenu = () =>
-    Alert.alert('Exportar proyecto', `${items.length} luminarias`, [
-      ...(['csv', 'geojson', 'kml'] as Formato[]).map((f) => ({
-        text: f === 'csv' ? 'CSV (Excel)' : f === 'geojson' ? 'GeoJSON (QGIS / ArcGIS)' : 'KML (Google Earth)',
-        onPress: async () => {
-          try { await exportar(f, items, proyecto ?? undefined); } catch (e: any) { Alert.alert('No se pudo exportar', e.message ?? String(e)); }
-        },
-      })),
-      { text: 'Cancelar', style: 'cancel' as const },
-    ]);
+  const opcionesExportar = (['csv', 'geojson', 'kml'] as Formato[]).map((f) => ({
+    texto: f === 'csv' ? 'CSV (Excel)' : f === 'geojson' ? 'GeoJSON (QGIS / ArcGIS)' : 'KML (Google Earth)',
+    onPress: async () => {
+      try { await exportar(f, items, proyecto ?? undefined); } catch (e: any) { Alert.alert('No se pudo exportar', e.message ?? String(e)); }
+    },
+  }));
 
   const sync = async () => {
     if (!proyecto) return;
@@ -63,7 +60,7 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
       const r = await sincronizar(proyecto);
       await refrescar();
       exito();
-      Alert.alert('Sincronizado', r.enviadas ? `${r.enviadas} luminaria(s) enviadas.` : 'Todo estaba al día.');
+      Alert.alert('Sincronizado', resumenSync(r));
     } catch (e: any) {
       Alert.alert('No se pudo sincronizar', e.message ?? String(e));
     } finally { setOcupado(false); }
@@ -93,7 +90,7 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
       <Cabecera titulo="ELI-LUMINARIA" subtitulo={proyecto ? `${proyecto.nombre} · ${items.length} luminarias` : ' '} onSubtitulo={irAProyectos}
         acciones={[
           { icono: 'cloud-upload-outline', etiqueta: 'Sincronizar', onPress: sync, badge: pendientes },
-          { icono: 'share-outline', etiqueta: 'Exportar', onPress: exportarMenu },
+          { icono: 'share-outline', etiqueta: 'Exportar', onPress: () => setMenuExportar(true) },
         ]} />
       <View style={s.search}>
         <Ionicons name="search" size={18} color={c.muted} />
@@ -111,7 +108,12 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
         data={visibles}
         keyExtractor={(l) => String(l.id)}
         contentContainerStyle={{ padding: 16, paddingBottom: 120 + bottom }}
-        refreshControl={<RefreshControl refreshing={refrescando || ocupado} tintColor={c.primary} onRefresh={async () => { setRefrescando(true); await refrescar(); setRefrescando(false); }} />}
+        refreshControl={<RefreshControl refreshing={refrescando || ocupado} tintColor={c.primary} onRefresh={async () => {
+          setRefrescando(true);
+          try { if (proyecto && (await cargarAjustes()).syncUrl) await sincronizar(proyecto); } catch { /* sin señal: se muestra lo local */ }
+          await refrescar();
+          setRefrescando(false);
+        }} />}
         ListEmptyComponent={
           <View style={{ alignItems: 'center', marginTop: 60 }}>
             <Ionicons name="bulb-outline" size={64} color={c.primary} />
@@ -130,6 +132,7 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
               <Text style={s.sub} numberOfLines={1}>
                 {[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.pinesFotocelda && `fotocelda ${l.pinesFotocelda}p`].filter(Boolean).join(' · ') || l.tipoLuminaria || '—'}
               </Text>
+              {!!l.tecnico && <Text style={[s.sub, { fontSize: 12 }]} numberOfLines={1}>Por {l.tecnico}</Text>}
               <Text style={s.coord} numberOfLines={1}>
                 {l.latitud != null ? `📍 ${l.latitud.toFixed(6)}, ${l.longitud?.toFixed(6)}` : '📍 sin coordenada'}
               </Text>
@@ -142,6 +145,7 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
         )}
       />
 
+      <HojaAcciones visible={menuExportar} onClose={() => setMenuExportar(false)} titulo="Exportar proyecto" subtitulo={`${items.length} luminarias`} opciones={opcionesExportar} />
       <Pressable onPress={() => { toque(); nav.navigate('Capturar'); }} style={[s.fab, { bottom: 16 + bottom * 0 }]} accessibilityRole="button" accessibilityLabel="Nueva luminaria">
         <Ionicons name="camera" size={24} color={c.primaryText} />
         <Text style={{ color: c.primaryText, fontWeight: '800', fontSize: 16 }}>Nueva</Text>

@@ -1,15 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, exito, toque } from '../components/ui';
+import { Button, exito, HojaAcciones, toque } from '../components/ui';
 import { useApp } from '../context/AppContext';
 import { analizarFotos } from '../services/analyzer';
 import { direccionDe, Foto, obtenerPosicion, Posicion, tomarFoto } from '../services/captura';
 import { nuevoUuid } from '../services/db';
 import { cargarAjustes } from '../services/settings';
 import { persistirFoto } from '../services/fotos';
+import { hayConexion } from '../services/red';
 import { radius, useTema } from '../theme';
 import { caracteristicasVacias, LuminariaBorrador } from '../types';
 import type { RootStackParams } from '../navigation';
@@ -28,6 +29,9 @@ export function CapturarScreen() {
   const [pos, setPos] = useState<(Posicion & { exif?: boolean }) | null>(null);
   const [buscandoGps, setBuscandoGps] = useState(true);
   const [fase, setFase] = useState<string | null>(null);
+  const [hoja, setHoja] = useState<number | null>(null);
+  const [avisoGps, setAvisoGps] = useState('');
+  const cancelar = useRef<AbortController | null>(null);
 
   const refrescarGps = useCallback(async () => {
     setBuscandoGps(true);
@@ -41,19 +45,19 @@ export function CapturarScreen() {
       const f = await tomarFoto(origen);
       if (!f) return;
       setFotos((p) => p.map((x, j) => (j === i ? f : x)));
-      if (origen === 'galeria' && f.exifLat != null && f.exifLng != null) {
-        setPos({ latitud: f.exifLat, longitud: f.exifLng, precisionM: null, exif: true });
+      if (origen === 'galeria') {
+        if (f.exifLat != null && f.exifLng != null) {
+          setPos({ latitud: f.exifLat, longitud: f.exifLng, precisionM: null, exif: true });
+          setAvisoGps('');
+        } else {
+          // En Android, las fotos de galería suelen venir sin GPS: la coordenada será donde estás ahora.
+          setAvisoGps('La foto de galería no trae GPS: se usará tu ubicación actual. Corrígela en el formulario si hace falta.');
+        }
       }
     } catch (e: any) { Alert.alert('Foto', e.message ?? String(e)); }
   };
 
-  const elegir = (i: number) =>
-    Alert.alert(RANURAS[i].titulo, RANURAS[i].ayuda, [
-      { text: 'Cámara', onPress: () => poner(i, 'camara') },
-      { text: 'Galería', onPress: () => poner(i, 'galeria') },
-      ...(fotos[i] ? [{ text: 'Quitar', style: 'destructive' as const, onPress: () => setFotos((p) => p.map((x, j) => (j === i ? null : x))) }] : []),
-      { text: 'Cancelar', style: 'cancel' as const },
-    ]);
+  const quitar = (i: number) => setFotos((p) => p.map((x, j) => (j === i ? null : x)));
 
   const tomadas = fotos.filter((f): f is Foto => !!f);
 
@@ -63,17 +67,22 @@ export function CapturarScreen() {
     let car = caracteristicasVacias();
     let confianza: LuminariaBorrador['confianza'] = '';
     try {
-      if (conIA) {
+      if (conIA && !(await hayConexion())) {
+        aviso += 'Sin conexión: llena los datos a mano (puedes usar las opciones rápidas). Con señal, toca "Re-analizar con IA". ';
+      } else if (conIA) {
         setFase('Analizando la luminaria con IA…');
+        cancelar.current = new AbortController();
         try {
-          const r = await analizarFotos(tomadas.map((f) => f.base64));
+          const r = await analizarFotos(tomadas.map((f) => f.base64), cancelar.current.signal);
           car = r.caracteristicas; confianza = r.confianza;
         } catch (e: any) { aviso += `${e.message ?? 'No se pudo analizar la foto.'} `; }
+        cancelar.current = null;
       }
       setFase('Guardando fotos…');
       const uris = tomadas.map((f) => persistirFoto(f.uri));
       const p = pos;
       if (!p) aviso += 'No se obtuvo la coordenada: ingrésala manualmente. ';
+      if (avisoGps) aviso += `${avisoGps} `;
       const ahora = new Date().toISOString();
       const tecnico = (await cargarAjustes()).tecnico;
       const borrador: LuminariaBorrador = {
@@ -100,6 +109,7 @@ export function CapturarScreen() {
         Con una foto general basta. Si añades la <Text style={{ color: c.text, fontWeight: '700' }}>placa</Text> y la <Text style={{ color: c.text, fontWeight: '700' }}>fotocelda</Text>, la IA identifica mucho mejor marca, potencia y pines.
       </Text>
 
+      {!!avisoGps && <Text style={{ color: c.warn, marginBottom: 10, lineHeight: 19 }}>{avisoGps}</Text>}
       <View style={s.gps}>
         {buscandoGps ? <ActivityIndicator color={c.primary} /> : <Ionicons name="location" size={22} color={calidadGps ?? c.muted} />}
         <View style={{ flex: 1 }}>
@@ -118,7 +128,7 @@ export function CapturarScreen() {
       <View style={{ flexDirection: 'row', gap: 10 }}>
         {RANURAS.map((r, i) => (
           <View key={r.titulo} style={{ flex: 1 }}>
-            <Pressable onPress={() => { toque(); elegir(i); }} style={s.slot} accessibilityRole="button" accessibilityLabel={`Foto ${r.titulo}`}>
+            <Pressable onPress={() => { toque(); setHoja(i); }} style={s.slot} accessibilityRole="button" accessibilityLabel={`Foto ${r.titulo}`}>
               {fotos[i] ? <Image source={{ uri: fotos[i]!.uri }} style={{ width: '100%', height: '100%' }} /> : (
                 <><Ionicons name={i === 0 ? 'camera' : i === 1 ? 'document-text-outline' : 'sunny-outline'} size={30} color={c.primary} />
                   <Text style={{ color: c.muted, fontSize: 11, marginTop: 4 }}>Añadir</Text></>
@@ -135,11 +145,21 @@ export function CapturarScreen() {
 
     </ScrollView>
       {fase && (
-        <View style={{ ...StyleSheet.absoluteFill, backgroundColor: c.overlay, alignItems: "center", justifyContent: "center", gap: 16 }}>
+        <View style={{ ...StyleSheet.absoluteFill, backgroundColor: c.overlay, alignItems: 'center', justifyContent: 'center', gap: 16 }}>
           <ActivityIndicator size="large" color={c.primary} />
-          <Text style={{ color: c.text, fontSize: 17, fontWeight: "600" }}>{fase}</Text>
+          <Text style={{ color: c.text, fontSize: 17, fontWeight: '600' }}>{fase}</Text>
+          {fase.startsWith('Analizando') && (
+            <Button title="Omitir y llenar manualmente" variant="secondary" onPress={() => cancelar.current?.abort()} style={{ marginTop: 8 }} />
+          )}
         </View>
       )}
+      <HojaAcciones visible={hoja !== null} onClose={() => setHoja(null)} titulo={hoja !== null ? RANURAS[hoja].titulo : ''}
+        subtitulo={hoja !== null ? RANURAS[hoja].ayuda : undefined}
+        opciones={hoja === null ? [] : [
+          { texto: 'Cámara', onPress: () => poner(hoja, 'camara') },
+          { texto: 'Galería', onPress: () => poner(hoja, 'galeria') },
+          ...(fotos[hoja] ? [{ texto: 'Quitar foto', destructivo: true, onPress: () => quitar(hoja) }] : []),
+        ]} />
     </View>
   );
 }

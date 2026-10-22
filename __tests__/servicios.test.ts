@@ -5,6 +5,8 @@ const mockMarcadas: string[] = [];
 jest.mock('../src/services/db', () => ({
   pendientesDeSync: async () => mockPend,
   marcarSincronizadas: async (u: string[]) => { mockMarcadas.push(...u); },
+  borradasPendientes: async () => [], limpiarBorradas: async () => {}, leerKv: async () => null, guardarKv: async () => {},
+  fusionarRemotas: async () => ({ nuevas: 0, actualizadas: 0, borradas: 0 }), listarProyectos: async () => [],
 }));
 jest.mock('../src/services/fotos', () => ({ leerBase64: async () => 'BASE64' }));
 
@@ -44,6 +46,35 @@ describe('analizarFotos', () => {
     await expect(analizarFotos(['A'])).rejects.toThrow(/401/);
   });
 
+  it('sin red no reintenta: falla enseguida con mensaje para trabajar a mano', async () => {
+    const f = jest.fn().mockRejectedValue(new TypeError('Network request failed'));
+    (global as any).fetch = f;
+    await expect(analizarFotos(['A'])).rejects.toThrow(/Sin señal suficiente/);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+
+  it('con señal muy débil se rinde a los 25 s (no a los 2 minutos)', async () => {
+    jest.useFakeTimers();
+    const f = jest.fn((_u: string, init: any) => new Promise((_res, rej) => init.signal.addEventListener('abort', () => rej(new Error('abortado')))));
+    (global as any).fetch = f;
+    const p = analizarFotos(['A']).catch((e) => e);
+    await jest.advanceTimersByTimeAsync(25001);
+    expect(await p).toMatchObject({ message: expect.stringMatching(/Sin señal suficiente/) });
+    expect(f).toHaveBeenCalledTimes(1);
+    jest.useRealTimers();
+  });
+
+  it('el técnico puede omitir el análisis a mitad de camino', async () => {
+    const ctl = new AbortController();
+    (global as any).fetch = (_u: string, init: any) => new Promise((_res, rej) => {
+      if (init.signal.aborted) return rej(new Error('abortado')); // como el fetch real
+      init.signal.addEventListener('abort', () => rej(new Error('abortado')));
+    });
+    const p = analizarFotos(['A'], ctl.signal).catch((e) => e);
+    ctl.abort();
+    expect(await p).toMatchObject({ message: expect.stringMatching(/Análisis omitido/) });
+  });
+
   it('reintenta una vez ante 529', async () => {
     jest.useFakeTimers();
     const f = jest.fn().mockResolvedValueOnce(resp(529, {})).mockResolvedValueOnce(resp(200, { content: [{ type: 'tool_use', input: { marca: 'X', confianza: 'media' } }] }));
@@ -67,7 +98,7 @@ describe('sincronizar', () => {
     (global as any).fetch = f;
     const r = await sincronizar(proyecto);
     expect(r.enviadas).toBe(20);
-    expect(f).toHaveBeenCalledTimes(2); // lotes de 15 + 5
+    expect(f).toHaveBeenCalledTimes(3); // lotes de 15 + 5, y la descarga del equipo
     const b = JSON.parse(f.mock.calls[0][1].body);
     expect(b.token).toBe('tok'); expect(b.proyecto.uuid).toBe('p1'); expect(b.luminarias[0].foto).toBeUndefined();
     expect(mockMarcadas).toHaveLength(20);
@@ -107,6 +138,8 @@ describe('sincronizarTodo (automática)', () => {
       listarProyectos: async () => [{ id: 1, uuid: 'p1', nombre: 'A' }, { id: 2, uuid: 'p2', nombre: 'B' }],
       pendientesDeSync: async (id: number) => (id === 1 ? [{ uuid: 'a1', fotos: [] }, { uuid: 'a2', fotos: [] }] : []),
       marcarSincronizadas: async (u: string[]) => { marcadas.push(...u); },
+      borradasPendientes: async () => [], limpiarBorradas: async () => {}, leerKv: async () => null, guardarKv: async () => {},
+      fusionarRemotas: async () => ({ nuevas: 0, actualizadas: 0, borradas: 0 }),
     }));
     jest.doMock('../src/services/fotos', () => ({ leerBase64: async () => '' }));
     const { sincronizarTodo } = require('../src/services/sync');

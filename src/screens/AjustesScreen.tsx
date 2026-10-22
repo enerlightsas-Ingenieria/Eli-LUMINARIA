@@ -6,7 +6,7 @@ import { Button, Field, Segmented, Seccion } from '../components/ui';
 import { useApp } from '../context/AppContext';
 import { Ajustes, cargarAjustes, ENDPOINT_POR_DEFECTO, guardarAjustes, MODELO_POR_DEFECTO } from '../services/settings';
 import { pedirYAplicar } from '../services/configuracion';
-import { sincronizar } from '../services/sync';
+import { resumenSync, sincronizar } from '../services/sync';
 import { useTema } from '../theme';
 
 export function AjustesScreen() {
@@ -28,7 +28,7 @@ export function AjustesScreen() {
     try {
       const r = await sincronizar(proyecto);
       await refrescar();
-      Alert.alert('Sincronizado', r.enviadas ? `${r.enviadas} luminaria(s) enviadas a tu hoja.` : 'No había cambios pendientes; la conexión funciona.');
+      Alert.alert('Sincronizado', resumenSync(r));
     } catch (e: any) { Alert.alert('No se pudo sincronizar', e.message ?? String(e)); }
     finally { setSync(false); }
   };
@@ -37,7 +37,7 @@ export function AjustesScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: c.bg }}>
       <Cabecera titulo="Ajustes" />
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <Seccion>Técnico y configuración de flota</Seccion>
         <Text style={p}>Tu nombre se registra en cada luminaria. Si tu empresa te dio un enlace o código de configuración, ábrelo o pégalo aquí: deja la app lista sin escribir claves.</Text>
         <Field label="Nombre del técnico" value={a.tecnico} hint="Ej. Juan Pérez" onChangeText={(t) => cambiar({ tecnico: t })} />

@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp, NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ import { analizarFotos } from '../services/analyzer';
 import { tomarFoto } from '../services/captura';
 import { borrarLuminaria, guardarLuminaria } from '../services/db';
 import { borrarFotos, leerBase64, persistirFoto } from '../services/fotos';
+import { hayConexion } from '../services/red';
 import { confianzaColor, radius, useTema } from '../theme';
 import { CAMPOS, LuminariaBorrador } from '../types';
 import type { RootStackParams } from '../navigation';
@@ -55,6 +56,7 @@ export function EditarScreen() {
   };
 
   const reanalizar = async () => {
+    if (!(await hayConexion())) { Alert.alert('Sin conexión', 'Necesitas internet para el análisis con IA. Las fotos quedan guardadas; inténtalo cuando tengas señal.'); return; }
     setOcupado('Analizando con IA…');
     try {
       const r = await analizarFotos(await Promise.all(l.fotos.slice(0, 3).map(leerBase64)));
@@ -65,6 +67,13 @@ export function EditarScreen() {
       exito();
     } catch (e: any) { Alert.alert('No se pudo analizar', e.message ?? String(e)); }
     finally { setOcupado(null); }
+  };
+
+  const anterior = esNuevo ? items[0] : undefined;
+  const copiarDelAnterior = () => {
+    if (!anterior) return;
+    const copia = Object.fromEntries(CAMPOS.filter((f) => f.key !== 'observaciones' && f.key !== 'estado').map((f) => [f.key, anterior[f.key]]));
+    setL((p) => (p ? { ...p, ...copia } : p));
   };
 
   const persistir = async (siguiente: boolean) => {
@@ -108,8 +117,8 @@ export function EditarScreen() {
     ]);
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: c.bg }} behavior="padding">
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }} style={{ marginBottom: 12 }}>
           {l.fotos.map((u) => (
             <View key={u}>
@@ -136,6 +145,11 @@ export function EditarScreen() {
         <Button title="Re-analizar con IA" variant="secondary" loading={!!ocupado} disabled={!l.fotos.length}
           icon={<Ionicons name="sparkles" size={18} color={c.text} />} onPress={reanalizar} />
 
+        {!!anterior && (
+          <Button title="Copiar datos del último registro" variant="secondary" style={{ marginTop: 8 }}
+            icon={<Ionicons name="copy-outline" size={18} color={c.text} />} onPress={copiarDelAnterior} />
+        )}
+
         <Seccion>Identificación y ubicación</Seccion>
         <Field label="Código del activo / n.º de poste" value={l.codigo} onChangeText={(t) => set('codigo', t)} hint="Opcional, el que use tu empresa" />
         <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -151,7 +165,7 @@ export function EditarScreen() {
 
         <Seccion>Características</Seccion>
         {CAMPOS.map((f) => (
-          <Field key={f.key} label={f.label} hint={f.hint} multiline={f.multiline} numeric={f.numeric}
+          <Field key={f.key} label={f.label} hint={f.hint} multiline={f.multiline} numeric={f.numeric} opciones={f.opciones}
             value={l[f.key]} onChangeText={(t) => set(f.key, t)} />
         ))}
 

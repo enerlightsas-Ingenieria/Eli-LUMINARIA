@@ -53,14 +53,19 @@ export class ErrorAnalisis extends Error {}
 
 const ETIQUETAS = ['Foto general', 'Foto de la placa / etiqueta', 'Foto de la fotocelda'];
 
-async function conTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+const TIMEOUT_MS = 25000;
+
+async function conTimeout(url: string, init: RequestInit, ms: number, externa?: AbortSignal): Promise<Response> {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), ms);
-  try { return await fetch(url, { ...init, signal: ctl.signal }); } finally { clearTimeout(t); }
+  const cancelar = () => ctl.abort();
+  if (externa?.aborted) cancelar(); // el técnico pudo omitir antes de que arrancara la petición
+  externa?.addEventListener('abort', cancelar);
+  try { return await fetch(url, { ...init, signal: ctl.signal }); } finally { clearTimeout(t); externa?.removeEventListener('abort', cancelar); }
 }
 
 /** Envía 1-3 fotos (JPEG base64) a Claude con visión y devuelve las características estructuradas. */
-export async function analizarFotos(base64Jpegs: string[]): Promise<ResultadoAnalisis> {
+export async function analizarFotos(base64Jpegs: string[], cancelar?: AbortSignal): Promise<ResultadoAnalisis> {
   const ajustes = await cargarAjustes();
   if (!ajustes.apiKey && ajustes.endpoint.includes('api.anthropic.com')) {
     throw new ErrorAnalisis('Falta la API key. Configúrala en Ajustes o llena los datos manualmente.');
@@ -82,14 +87,15 @@ export async function analizarFotos(base64Jpegs: string[]): Promise<ResultadoAna
   let res: Response | null = null;
   for (let intento = 0; intento < 2; intento++) {
     try {
-      res = await conTimeout(ajustes.endpoint, { method: 'POST', headers, body }, 60000);
+      res = await conTimeout(ajustes.endpoint, { method: 'POST', headers, body }, TIMEOUT_MS, cancelar);
     } catch {
-      res = null;
-      if (intento === 1) throw new ErrorAnalisis('Sin conexión con el servicio de análisis. Puedes completar los datos manualmente o reintentar.');
-      continue;
+      // Sin red, señal muy débil o cancelado por el técnico: no se reintenta (evita esperas largas en campo).
+      if (cancelar?.aborted) throw new ErrorAnalisis('Análisis omitido. Llena los datos a mano; podrás usar "Re-analizar con IA" cuando tengas señal.');
+      throw new ErrorAnalisis('Sin señal suficiente para analizar. Llena los datos a mano; podrás usar "Re-analizar con IA" cuando tengas conexión.');
     }
-    if (res.status === 429 || res.status >= 500) { // reintento único ante sobrecarga
-      if (intento === 0) { await new Promise((r) => setTimeout(r, 1500)); continue; }
+    if ((res.status === 429 || res.status >= 500) && intento === 0) { // reintento único ante sobrecarga del servicio
+      await new Promise((r) => setTimeout(r, 1500));
+      continue;
     }
     break;
   }

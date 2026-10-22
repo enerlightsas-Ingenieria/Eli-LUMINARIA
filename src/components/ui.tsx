@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Colores, radius, useTema } from '../theme';
 
@@ -43,9 +43,9 @@ export function Button({ title, onPress, variant = 'primary', disabled, loading,
   );
 }
 
-export function Field({ label, value, onChangeText, hint, multiline, numeric, secure, url }: {
+export function Field({ label, value, onChangeText, hint, multiline, numeric, secure, url, opciones }: {
   label: string; value: string; onChangeText: (t: string) => void; hint?: string; multiline?: boolean;
-  numeric?: boolean; secure?: boolean; url?: boolean;
+  numeric?: boolean; secure?: boolean; url?: boolean; opciones?: string[];
 }) {
   const { c } = useTema();
   const s = useEstilos();
@@ -59,6 +59,21 @@ export function Field({ label, value, onChangeText, hint, multiline, numeric, se
         autoCapitalize={url || secure || numeric ? 'none' : 'sentences'} autoCorrect={false}
         style={[s.input, multiline && { height: 90, textAlignVertical: 'top' }]}
       />
+      {!!opciones?.length && (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingTop: 8 }}>
+          {opciones.map((o) => {
+            const activa = value.trim().toLowerCase() === o.toLowerCase();
+            return (
+              <Pressable key={o} onPress={() => { toque(); onChangeText(activa ? '' : o); }} accessibilityRole="button"
+                accessibilityLabel={`${label}: ${o}`} accessibilityState={{ selected: activa }}
+                style={{ minHeight: 36, paddingHorizontal: 14, borderRadius: 18, borderWidth: 1, justifyContent: 'center',
+                  borderColor: activa ? c.primary : c.border, backgroundColor: activa ? c.primary : c.surface }}>
+                <Text style={{ color: activa ? c.primaryText : c.text, fontWeight: '600' }}>{o}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -98,4 +113,32 @@ export function Segmented<T extends string>({ value, options, onChange }: {
 export function Seccion({ children }: { children: string }) {
   const s = useEstilos();
   return <Text style={s.section} accessibilityRole="header">{children}</Text>;
+}
+
+export interface OpcionHoja { texto: string; onPress: () => void; destructivo?: boolean }
+
+/** Menú inferior de acciones. Sustituye a Alert con 4+ botones, que Android recorta a 3. */
+export function HojaAcciones({ visible, titulo, subtitulo, opciones, onClose }: {
+  visible: boolean; titulo: string; subtitulo?: string; opciones: OpcionHoja[]; onClose: () => void;
+}) {
+  const { c } = useTema();
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }} onPress={onClose} accessibilityLabel="Cerrar menú">
+        <Pressable onPress={() => {}} style={{ backgroundColor: c.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, paddingBottom: 32 }}>
+          <Text accessibilityRole="header" style={{ color: c.text, fontSize: 17, fontWeight: '800' }}>{titulo}</Text>
+          {!!subtitulo && <Text style={{ color: c.muted, marginTop: 2, marginBottom: 6 }}>{subtitulo}</Text>}
+          {opciones.map((o) => (
+            <Pressable key={o.texto} accessibilityRole="button" onPress={() => { toque(); onClose(); o.onPress(); }}
+              style={({ pressed }) => ({ paddingVertical: 15, borderTopWidth: 1, borderTopColor: c.border, opacity: pressed ? 0.6 : 1 })}>
+              <Text style={{ color: o.destructivo ? c.danger : c.text, fontSize: 16, fontWeight: '600' }}>{o.texto}</Text>
+            </Pressable>
+          ))}
+          <Pressable accessibilityRole="button" onPress={onClose} style={{ paddingVertical: 15, borderTopWidth: 1, borderTopColor: c.border }}>
+            <Text style={{ color: c.muted, fontSize: 16, fontWeight: '600' }}>Cancelar</Text>
+          </Pressable>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
 }

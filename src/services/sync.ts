@@ -1,60 +1,110 @@
-import { Luminaria, Proyecto } from '../types';
-import { listarProyectos, marcarSincronizadas, pendientesDeSync } from './db';
+import { normalizarRemota } from '../lib/fusion';
+import { Proyecto } from '../types';
+import {
+  borradasPendientes, fusionarRemotas, guardarKv, leerKv, limpiarBorradas, listarProyectos, marcarSincronizadas, pendientesDeSync,
+} from './db';
 import { leerBase64 } from './fotos';
-import { cargarAjustes } from './settings';
+import { Ajustes, cargarAjustes } from './settings';
 
 const LOTE = 15;
 
-export interface ResultadoSync { enviadas: number; pendientes: number }
+export interface ResultadoSync { enviadas: number; borradasEnviadas: number; recibidas: number; borradasRemotas: number }
 
-/**
- * Envía las luminarias nuevas/modificadas a la URL configurada (Google Apps Script u otro servidor).
- * Es idempotente: cada luminaria lleva su `uuid`, así que reenviar sólo actualiza la fila existente.
- */
+class SinConexion extends Error {}
+
+async function post(a: Ajustes, cuerpo: object): Promise<any> {
+  let res: Response;
+  try {
+    res = await fetch(a.syncUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain;charset=utf-8' }, // evita preflight en Apps Script
+      body: JSON.stringify({ token: a.syncToken, ...cuerpo }),
+    });
+  } catch { throw new SinConexion(); }
+  const j = await res.json().catch(() => null);
+  if (!res.ok || !j?.ok) throw new Error(j?.error ?? `El servidor respondió ${res.status}. Revisa la URL y el token.`);
+  return j;
+}
+
+const infoProyecto = (p: Proyecto) => ({ uuid: p.uuid, nombre: p.nombre, cliente: p.cliente });
+
+/** Sube lo nuevo/modificado y los borrados. Idempotente: cada luminaria lleva su uuid. */
+async function enviar(a: Ajustes, proyecto: Proyecto, alProgreso?: (hechas: number, total: number) => void) {
+  const pendientes = await pendientesDeSync(proyecto.id);
+  let enviadas = 0;
+  try {
+    for (let i = 0; i < pendientes.length; i += LOTE) {
+      const lote = pendientes.slice(i, i + LOTE);
+      const luminarias = await Promise.all(lote.map(async (l) => ({
+        ...l,
+        fotos: undefined,
+        foto: a.syncFotos && l.fotos[0] ? await leerBase64(l.fotos[0]).catch(() => undefined) : undefined,
+      })));
+      await post(a, { proyecto: infoProyecto(proyecto), luminarias });
+      await marcarSincronizadas(lote.map((l) => l.uuid));
+      enviadas += lote.length;
+      alProgreso?.(enviadas, pendientes.length);
+    }
+    const borradas = await borradasPendientes(proyecto.id);
+    if (borradas.length) {
+      await post(a, { proyecto: infoProyecto(proyecto), luminarias: [], borradas });
+      await limpiarBorradas(borradas);
+    }
+    return { enviadas, borradasEnviadas: borradas.length };
+  } catch (e) {
+    if (e instanceof SinConexion) throw new Error(`Sin conexión. Se enviaron ${enviadas} de ${pendientes.length}; el resto queda pendiente.`);
+    throw e;
+  }
+}
+
+/** Baja lo que hayan registrado, editado o borrado los demás técnicos desde la última descarga. */
+async function descargar(a: Ajustes, proyecto: Proyecto) {
+  const clave = `desde:${proyecto.uuid}`;
+  const desde = (await leerKv(clave)) ?? '';
+  const j = await post(a, { accion: 'listar', proyecto: infoProyecto(proyecto), desde });
+  const remotas = (Array.isArray(j.luminarias) ? j.luminarias : []).map(normalizarRemota).filter((x: any) => !!x);
+  const r = await fusionarRemotas(proyecto.id, remotas);
+  if (typeof j.ahora === 'string') await guardarKv(clave, j.ahora); // el cursor lo pone el servidor: no depende de relojes de teléfonos
+  return r;
+}
+
+/** Envía y después descarga. Si falla la descarga, lo enviado queda confirmado y se avisa. */
 export async function sincronizar(proyecto: Proyecto, alProgreso?: (hechas: number, total: number) => void): Promise<ResultadoSync> {
   const a = await cargarAjustes();
   if (!a.syncUrl) throw new Error('Configura la URL de sincronización en Ajustes.');
-  const pendientes = await pendientesDeSync(proyecto.id);
-  let enviadas = 0;
-
-  for (let i = 0; i < pendientes.length; i += LOTE) {
-    const lote = pendientes.slice(i, i + LOTE);
-    const luminarias = await Promise.all(lote.map(async (l) => ({
-      ...l,
-      fotos: undefined,
-      foto: a.syncFotos && l.fotos[0] ? await leerBase64(l.fotos[0]).catch(() => undefined) : undefined,
-    })));
-    let res: Response;
-    try {
-      res = await fetch(a.syncUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'text/plain;charset=utf-8' }, // evita preflight en Apps Script
-        body: JSON.stringify({ token: a.syncToken, proyecto: { uuid: proyecto.uuid, nombre: proyecto.nombre, cliente: proyecto.cliente }, luminarias }),
-      });
-    } catch {
-      throw new Error(`Sin conexión. Se enviaron ${enviadas} de ${pendientes.length}; el resto queda pendiente.`);
-    }
-    const j = await res.json().catch(() => null);
-    if (!res.ok || !j?.ok) throw new Error(j?.error ?? `El servidor respondió ${res.status}. Revisa la URL y el token.`);
-    await marcarSincronizadas(lote.map((l) => l.uuid));
-    enviadas += lote.length;
-    alProgreso?.(enviadas, pendientes.length);
+  const subida = await enviar(a, proyecto, alProgreso);
+  try {
+    const bajada = await descargar(a, proyecto);
+    return { ...subida, recibidas: bajada.nuevas + bajada.actualizadas, borradasRemotas: bajada.borradas };
+  } catch (e: any) {
+    const motivo = e instanceof SinConexion ? 'sin conexión' : e.message;
+    throw new Error(`Se enviaron ${subida.enviadas} luminaria(s), pero no se pudo descargar lo del equipo: ${motivo}`);
   }
-  return { enviadas, pendientes: 0 };
 }
 
 let corriendo = false;
 
-/** Sincronización silenciosa de todos los proyectos con pendientes. Devuelve cuántas luminarias envió. */
+/** Sincronización silenciosa de todos los proyectos. Devuelve cuántos cambios hubo (enviados + recibidos). */
 export async function sincronizarTodo(): Promise<number> {
   const a = await cargarAjustes();
   if (!a.autoSync || !a.syncUrl || corriendo) return 0;
   corriendo = true;
   try {
-    let total = 0;
+    let cambios = 0;
     for (const p of await listarProyectos()) {
-      if ((await pendientesDeSync(p.id)).length) total += (await sincronizar(p)).enviadas;
+      const r = await sincronizar(p);
+      cambios += r.enviadas + r.borradasEnviadas + r.recibidas + r.borradasRemotas;
     }
-    return total;
+    return cambios;
   } finally { corriendo = false; }
+}
+
+/** Texto para el técnico: qué pasó en la sincronización. */
+export function resumenSync(r: ResultadoSync): string {
+  const partes = [
+    r.enviadas && `${r.enviadas} enviada(s)`,
+    r.recibidas && `${r.recibidas} recibida(s) del equipo`,
+    (r.borradasEnviadas || r.borradasRemotas) && `${r.borradasEnviadas + r.borradasRemotas} eliminación(es)`,
+  ].filter(Boolean);
+  return partes.length ? partes.join(' · ') : 'Todo estaba al día.';
 }

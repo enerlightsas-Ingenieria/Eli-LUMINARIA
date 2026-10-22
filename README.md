@@ -13,7 +13,10 @@ Identifica con IA (Claude visión) las características básicas y las guarda en
 - **Mapa** (OpenStreetMap + satélite, sin claves de API) con marcadores por tecnología y botón “centrar en mí”.
 - **Alerta de duplicados** (otra luminaria a < 8 m) y “Guardar y capturar otra” para trabajo en campo.
 - **Flotas:** técnico registrado en cada luminaria, configuración de teléfonos por enlace/QR, sincronización automática y proxy de IA con token por técnico (ver `docs/flota.md`).
-- **Sincronización** a **Google Sheets** (+ fotos en Drive) o a tu servidor, por lotes e idempotente (upsert por UUID).
+- **Sincronización de ida y vuelta** con **Google Sheets** (+ fotos en Drive) o tu servidor: varios técnicos, Android e iOS a la vez,
+  ven lo que hacen los demás; ediciones y eliminaciones se propagan sin duplicar ni resucitar registros.
+- **Sin señal:** foto + GPS offline, opciones rápidas para llenar a mano, “copiar del último registro”, análisis IA que se rinde
+  a los 25 s o se omite, y “Re-analizar con IA” cuando vuelve la conexión.
 - **Exportar** CSV (Excel), **GeoJSON** (QGIS/ArcGIS) y **KML** (Google Earth).
 - **Offline-first** (SQLite local), tema claro/oscuro/automático, accesibilidad (etiquetas, roles), háptica.
 
