@@ -50,3 +50,9 @@ Casilla "ver luminarias" para superponer lo capturado por el equipo. Trata ese e
 (quien lo tenga ve al equipo); para cambiarlo, cambia `TOKEN_ADMIN` y vuelve a implementar.
 
 Privacidad por diseño: solo se guarda la **última** posición (sin historial de rutas) y se **borra** al pausar o terminar.
+
+## Auditoría de capturas (modo terceros)
+Cada luminaria sincronizada recibe en la columna **Alertas** los códigos que correspondan (`GALERIA`, `SIN_JORNADA`, `FUERA_DE_JORNADA`,
+`UBICACION_SIMULADA`, `GPS_IMPRECISO`, `SALTO_IMPOSIBLE`, `AGRUPADAS`, `JORNADA_NO_CONFIRMADA`; ver `docs/terceros.md`). También hay columnas
+**Origen de la foto**, **Ubicación simulada** e **ID jornada**. Añade un activador por tiempo para `auditarTodo` (cada 15 min). El mapa en vivo
+muestra, por técnico, cuántas capturas llevan y cuántas con alertas.

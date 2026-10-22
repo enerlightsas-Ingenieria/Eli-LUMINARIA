@@ -11,6 +11,7 @@ import { tomarFoto } from '../services/captura';
 import { borrarLuminaria, guardarLuminaria } from '../services/db';
 import { borrarFotos, leerBase64, persistirFoto } from '../services/fotos';
 import { hayConexion } from '../services/red';
+import { cargarAjustes } from '../services/settings';
 import { confianzaColor, radius, useTema } from '../theme';
 import { CAMPOS, LuminariaBorrador } from '../types';
 import type { RootStackParams } from '../navigation';
@@ -26,6 +27,8 @@ export function EditarScreen() {
   const [l, setL] = useState<LuminariaBorrador | null>(existente ?? params.borrador ?? null);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [aviso, setAviso] = useState(params.aviso);
+  const [terceros, setTerceros] = useState(false);
+  useEffect(() => { cargarAjustes().then((a) => setTerceros(a.modoTerceros)); }, []);
   const guardado = useRef(false); // ref: el listener de beforeRemove debe ver el valor al instante
   const fotosOriginales = existente?.fotos ?? [];
 
@@ -153,9 +156,10 @@ export function EditarScreen() {
         <Seccion>Identificación y ubicación</Seccion>
         <Field label="Código del activo / n.º de poste" value={l.codigo} onChangeText={(t) => set('codigo', t)} hint="Opcional, el que use tu empresa" />
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <View style={{ flex: 1 }}><Field label="Latitud" numeric value={l.latitud?.toString() ?? ''} onChangeText={(t) => set('latitud', num(t))} /></View>
-          <View style={{ flex: 1 }}><Field label="Longitud" numeric value={l.longitud?.toString() ?? ''} onChangeText={(t) => set('longitud', num(t))} /></View>
+          <View style={{ flex: 1 }}><Field label="Latitud" numeric soloLectura={terceros} value={l.latitud?.toString() ?? ''} onChangeText={(t) => set('latitud', num(t))} /></View>
+          <View style={{ flex: 1 }}><Field label="Longitud" numeric soloLectura={terceros} value={l.longitud?.toString() ?? ''} onChangeText={(t) => set('longitud', num(t))} /></View>
         </View>
+        {terceros && <Text style={{ color: c.muted, fontSize: 12, marginBottom: 8, marginTop: -6 }}>Modo terceros: la coordenada la registra el GPS y no se edita a mano.</Text>}
         {l.precisionM != null && <Text style={{ color: c.muted, fontSize: 12, marginBottom: 10, marginTop: -6 }}>Precisión GPS ≈ {Math.round(l.precisionM)} m</Text>}
         <Field label="Dirección / referencia" value={l.direccion} onChangeText={(t) => set('direccion', t)} />
         {coordenadaValida(l.latitud, l.longitud) && (

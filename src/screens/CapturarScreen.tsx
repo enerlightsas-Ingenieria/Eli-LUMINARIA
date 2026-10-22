@@ -4,7 +4,10 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Button, exito, HojaAcciones, toque } from '../components/ui';
+import { useEmpezarJornada } from '../components/TarjetaJornada';
 import { useApp } from '../context/AppContext';
+import { useJornada } from '../context/JornadaContext';
+import { evaluarCaptura, galeriaPermitida } from '../lib/politicas';
 import { analizarFotos } from '../services/analyzer';
 import { direccionDe, Foto, obtenerPosicion, Posicion, tomarFoto } from '../services/captura';
 import { nuevoUuid } from '../services/db';
@@ -32,6 +35,11 @@ export function CapturarScreen() {
   const [hoja, setHoja] = useState<number | null>(null);
   const [avisoGps, setAvisoGps] = useState('');
   const cancelar = useRef<AbortController | null>(null);
+  const { estado, reanudar } = useJornada();
+  const { empezar, ocupado: iniciando } = useEmpezarJornada();
+  const [cfg, setCfg] = useState({ modoTerceros: false, precisionMaxM: 20 });
+  useEffect(() => { cargarAjustes().then((a) => setCfg({ modoTerceros: a.modoTerceros, precisionMaxM: a.precisionMaxM })); }, []);
+  const jornadaActiva = estado?.fase === 'activa';
 
   const refrescarGps = useCallback(async () => {
     setBuscandoGps(true);
@@ -40,7 +48,19 @@ export function CapturarScreen() {
   }, []);
   useEffect(() => { refrescarGps(); }, [refrescarGps]);
 
+  // Reglas del modo terceros (jornada activa, GPS preciso, sin ubicación simulada)
+  const evaluacion = evaluarCaptura({ modoTerceros: cfg.modoTerceros, jornadaActiva, posicion: buscandoGps ? null : pos, precisionMaxM: cfg.precisionMaxM });
+
+  // Si falta precisión, reintenta el GPS solo cada 4 s hasta lograrla.
+  useEffect(() => {
+    if (!cfg.modoTerceros || !jornadaActiva || buscandoGps || evaluacion.ok) return;
+    if (evaluacion.motivo !== 'SIN_GPS' && evaluacion.motivo !== 'GPS_IMPRECISO') return;
+    const t = setTimeout(refrescarGps, 4000);
+    return () => clearTimeout(t);
+  }, [cfg.modoTerceros, jornadaActiva, buscandoGps, evaluacion, refrescarGps]);
+
   const poner = async (i: number, origen: 'camara' | 'galeria') => {
+    if (origen === 'galeria' && !galeriaPermitida(cfg.modoTerceros)) return;
     try {
       const f = await tomarFoto(origen);
       if (!f) return;
@@ -63,6 +83,15 @@ export function CapturarScreen() {
 
   const continuar = async (conIA: boolean) => {
     if (!tomadas.length || !proyecto) return;
+    // En modo terceros se vuelve a medir el GPS justo ahora: no basta con la lectura de hace un rato.
+    let posFinal = pos;
+    if (cfg.modoTerceros) {
+      setFase('Verificando ubicación…');
+      posFinal = await obtenerPosicion('alta');
+      setFase(null);
+      const v = evaluarCaptura({ modoTerceros: true, jornadaActiva, posicion: posFinal, precisionMaxM: cfg.precisionMaxM });
+      if (!v.ok) { setPos(posFinal); Alert.alert('No se puede capturar', v.mensaje); return; }
+    }
     let aviso = '';
     let car = caracteristicasVacias();
     let confianza: LuminariaBorrador['confianza'] = '';
@@ -80,7 +109,7 @@ export function CapturarScreen() {
       }
       setFase('Guardando fotos…');
       const uris = tomadas.map((f) => persistirFoto(f.uri));
-      const p = pos;
+      const p = posFinal;
       if (!p) aviso += 'No se obtuvo la coordenada: ingrésala manualmente. ';
       if (avisoGps) aviso += `${avisoGps} `;
       const ahora = new Date().toISOString();
@@ -89,6 +118,9 @@ export function CapturarScreen() {
         ...car, uuid: nuevoUuid(), proyectoId: proyecto.id, creadoEn: ahora, actualizadoEn: ahora, fotos: uris, confianza,
         latitud: p?.latitud ?? null, longitud: p?.longitud ?? null, precisionM: p?.precisionM ?? null,
         direccion: p ? await direccionDe(p.latitud, p.longitud) : '', codigo: '', tecnico,
+        origen: tomadas.some((f) => f.origen === 'galeria') ? 'galeria' : 'camara',
+        ubicacionSimulada: !!p?.simulada,
+        jornadaId: jornadaActiva ? estado!.id : '',
       };
       exito();
       nav.replace('Editar', { borrador, aviso: aviso.trim() || undefined });
@@ -100,6 +132,22 @@ export function CapturarScreen() {
     gps: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surface, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: c.border, marginBottom: 16 },
   }), [c]);
 
+  // Puerta del modo terceros: sin jornada activa no se puede capturar
+  if (cfg.modoTerceros && !jornadaActiva) {
+    return (
+      <View style={{ flex: 1, backgroundColor: c.bg, padding: 24, justifyContent: 'center', gap: 16 }}>
+        <Ionicons name="time-outline" size={56} color={c.primary} style={{ alignSelf: 'center' }} />
+        <Text style={{ color: c.text, fontSize: 18, fontWeight: '800', textAlign: 'center' }}>Inicia tu jornada para capturar</Text>
+        <Text style={{ color: c.muted, textAlign: 'center', lineHeight: 20 }}>
+          Las luminarias se registran durante la jornada de trabajo. Al iniciarla, tu empresa recibe tu ubicación solo mientras esté activa y la app abierta.
+        </Text>
+        {estado?.fase === 'pausada'
+          ? <Button title="Reanudar jornada" onPress={() => reanudar()} />
+          : <Button title="Iniciar jornada" loading={iniciando} onPress={empezar} />}
+      </View>
+    );
+  }
+
   const calidadGps = pos?.precisionM == null ? null : pos.precisionM <= 10 ? c.ok : pos.precisionM <= 30 ? c.warn : c.danger;
 
   return (
@@ -109,6 +157,7 @@ export function CapturarScreen() {
         Con una foto general basta. Si añades la <Text style={{ color: c.text, fontWeight: '700' }}>placa</Text> y la <Text style={{ color: c.text, fontWeight: '700' }}>fotocelda</Text>, la IA identifica mucho mejor marca, potencia y pines.
       </Text>
 
+      {cfg.modoTerceros && !evaluacion.ok && <Text style={{ color: c.warn, marginBottom: 10, lineHeight: 19 }}>{evaluacion.mensaje}</Text>}
       {!!avisoGps && <Text style={{ color: c.warn, marginBottom: 10, lineHeight: 19 }}>{avisoGps}</Text>}
       <View style={s.gps}>
         {buscandoGps ? <ActivityIndicator color={c.primary} /> : <Ionicons name="location" size={22} color={calidadGps ?? c.muted} />}
@@ -140,8 +189,8 @@ export function CapturarScreen() {
       </View>
 
       <Button title="Analizar con IA" icon={<Ionicons name="sparkles" size={20} color={c.primaryText} />} onPress={() => continuar(true)}
-        disabled={!tomadas.length} style={{ marginTop: 24 }} />
-      <Button title="Llenar manualmente" variant="secondary" onPress={() => continuar(false)} disabled={!tomadas.length} style={{ marginTop: 10 }} />
+        disabled={!tomadas.length || !evaluacion.ok} style={{ marginTop: 24 }} />
+      <Button title="Llenar manualmente" variant="secondary" onPress={() => continuar(false)} disabled={!tomadas.length || !evaluacion.ok} style={{ marginTop: 10 }} />
 
     </ScrollView>
       {fase && (
@@ -157,7 +206,7 @@ export function CapturarScreen() {
         subtitulo={hoja !== null ? RANURAS[hoja].ayuda : undefined}
         opciones={hoja === null ? [] : [
           { texto: 'Cámara', onPress: () => poner(hoja, 'camara') },
-          { texto: 'Galería', onPress: () => poner(hoja, 'galeria') },
+          ...(galeriaPermitida(cfg.modoTerceros) ? [{ texto: 'Galería', onPress: () => poner(hoja, 'galeria') }] : []),
           ...(fotos[hoja] ? [{ texto: 'Quitar foto', destructivo: true, onPress: () => quitar(hoja) }] : []),
         ]} />
     </View>

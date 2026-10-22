@@ -69,6 +69,10 @@ envía cada 5 minutos su ubicación aproximada, la hora y cuántas luminarias ll
 - **Aviso legal:** informa a los técnicos y obtén su aceptación por escrito según la normativa laboral y de protección de datos
   de tu país (en Colombia, habeas data / Ley 1581). La app solo mide durante la jornada, pero la política es tuya.
 
+## Técnicos de terceros
+Para contratistas que trabajan en el horario que ellos eligen, usa el **modo terceros** (`--terceros` en `make-config.js`): verifica cada captura
+sin seguirlos fuera de su jornada. Detalle, alertas, cláusulas y notas de tiendas en `docs/terceros.md`.
+
 ## Android e iOS a la vez
 - Misma app, mismos datos y misma hoja. Un técnico con iPhone y otro con Android ven los mismos registros.
 - **Fotos de galería:** iOS suele conservar el GPS de la foto; **Android normalmente lo elimina**. La app lo detecta y usa tu

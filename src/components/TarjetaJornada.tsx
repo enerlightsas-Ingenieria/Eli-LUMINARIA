@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Button } from './ui';
@@ -18,12 +18,10 @@ const AVISO =
   '• Fuera de la jornada tu ubicación no se comparte.\n' +
   '• Verás siempre que la jornada está activa.\n\n¿Aceptas?';
 
-export function TarjetaJornada() {
-  const { c } = useTema();
-  const { estado, ultimoEnvio, iniciar, pausar, reanudar, terminar } = useJornada();
+/** Inicia la jornada pidiendo antes (una sola vez) el consentimiento. Reutilizado por la tarjeta y por la pantalla de captura. */
+export function useEmpezarJornada() {
+  const { iniciar } = useJornada();
   const [ocupado, setOcupado] = useState(false);
-  if (!estado) return null;
-
   const correr = async (f: () => Promise<void>) => { setOcupado(true); try { await f(); } finally { setOcupado(false); } };
 
   const empezar = async () => {
@@ -38,6 +36,20 @@ export function TarjetaJornada() {
       { text: 'Acepto', onPress: async () => { await registrarConsentimiento(); lanzar(); } },
     ]);
   };
+  return { empezar, ocupado };
+}
+
+export function TarjetaJornada() {
+  const { c } = useTema();
+  const { estado, ultimoEnvio, pausar, reanudar, terminar } = useJornada();
+  const { empezar, ocupado: iniciando } = useEmpezarJornada();
+  const [ocupadoAccion, setOcupado] = useState(false);
+  const [terceros, setTerceros] = useState(false);
+  useEffect(() => { cargarAjustes().then((a) => setTerceros(a.modoTerceros)); }, []);
+  if (!estado) return null;
+  const ocupado = iniciando || ocupadoAccion;
+
+  const correr = async (f: () => Promise<void>) => { setOcupado(true); try { await f(); } finally { setOcupado(false); } };
 
   const confirmarFin = () => Alert.alert('Terminar jornada', '¿Terminar la jornada? Se dejará de enviar tu ubicación.', [
     { text: 'Cancelar', style: 'cancel' },
@@ -71,6 +83,9 @@ export function TarjetaJornada() {
             <Button title="Terminar" variant="danger" style={{ flex: 1 }} onPress={confirmarFin} />
           </View>
         </>
+      )}
+      {terceros && (
+        <Text style={{ color: c.muted, fontSize: 12, marginTop: 8 }}>Modo terceros: solo puedes capturar luminarias con la jornada activa.</Text>
       )}
       {estado.fase === 'terminada' && estado.sinEnviar && (
         <Text style={{ color: c.warn, fontSize: 12, marginTop: 8 }}>El cierre de la jornada se enviará cuando haya conexión.</Text>

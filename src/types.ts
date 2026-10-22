@@ -45,6 +45,12 @@ export interface Luminaria extends Caracteristicas {
   /** Técnico que hizo el registro (para flotas). */
   tecnico: string;
   confianza: Confianza | '';
+  /** Cómo se obtuvo la foto: con la cámara de la app o desde la galería. */
+  origen: 'camara' | 'galeria' | '';
+  /** Android detectó una app de ubicación simulada al capturar. */
+  ubicacionSimulada: boolean;
+  /** Jornada durante la que se capturó (vacío si no había jornada activa). */
+  jornadaId: string;
   sincronizado: boolean;
 }
 

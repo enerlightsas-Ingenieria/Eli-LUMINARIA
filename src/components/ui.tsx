@@ -43,9 +43,9 @@ export function Button({ title, onPress, variant = 'primary', disabled, loading,
   );
 }
 
-export function Field({ label, value, onChangeText, hint, multiline, numeric, secure, url, opciones }: {
+export function Field({ label, value, onChangeText, hint, multiline, numeric, secure, url, opciones, soloLectura }: {
   label: string; value: string; onChangeText: (t: string) => void; hint?: string; multiline?: boolean;
-  numeric?: boolean; secure?: boolean; url?: boolean; opciones?: string[];
+  numeric?: boolean; secure?: boolean; url?: boolean; opciones?: string[]; soloLectura?: boolean;
 }) {
   const { c } = useTema();
   const s = useEstilos();
@@ -57,7 +57,8 @@ export function Field({ label, value, onChangeText, hint, multiline, numeric, se
         placeholderTextColor={c.muted} multiline={multiline} secureTextEntry={secure}
         keyboardType={numeric ? 'decimal-pad' : url ? 'url' : 'default'}
         autoCapitalize={url || secure || numeric ? 'none' : 'sentences'} autoCorrect={false}
-        style={[s.input, multiline && { height: 90, textAlignVertical: 'top' }]}
+        editable={!soloLectura}
+        style={[s.input, multiline && { height: 90, textAlignVertical: 'top' }, soloLectura && { opacity: 0.6 }]}
       />
       {!!opciones?.length && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingTop: 8 }}>

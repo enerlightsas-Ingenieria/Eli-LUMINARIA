@@ -8,7 +8,7 @@ let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 const CAR_COLS = Object.keys(caracteristicasVacias()) as (keyof Caracteristicas)[];
 const COLS = [
   'uuid', 'proyectoId', 'creadoEn', 'actualizadoEn', 'fotos', 'latitud', 'longitud', 'precisionM', 'direccion',
-  'codigo', 'tecnico', 'confianza', ...CAR_COLS,
+  'codigo', 'tecnico', 'origen', 'ubicacionSimulada', 'jornadaId', 'confianza', ...CAR_COLS,
 ] as const;
 
 export const nuevoUuid = () => Crypto.randomUUID();
@@ -23,7 +23,7 @@ const SCHEMA = `
     id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
     proyectoId INTEGER NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
     creadoEn TEXT NOT NULL, actualizadoEn TEXT NOT NULL, fotos TEXT NOT NULL DEFAULT '[]',
-    latitud REAL, longitud REAL, precisionM REAL, direccion TEXT DEFAULT '', codigo TEXT DEFAULT '', tecnico TEXT DEFAULT '',
+    latitud REAL, longitud REAL, precisionM REAL, direccion TEXT DEFAULT '', codigo TEXT DEFAULT '', tecnico TEXT DEFAULT '', origen TEXT DEFAULT '', ubicacionSimulada INTEGER NOT NULL DEFAULT 0, jornadaId TEXT DEFAULT '',
     confianza TEXT DEFAULT '', sincronizado INTEGER NOT NULL DEFAULT 0,
     ${CAR_COLS.map((c) => `${c} TEXT DEFAULT ''`).join(', ')}
   );
@@ -38,6 +38,7 @@ function abrir() {
     if (user_version < 1) await migrarAV1(db);
     if (user_version < 2) await migrarAV2(db);
     if (user_version < 3) await migrarAV3(db);
+    if (user_version < 4) await migrarAV4(db);
     return db;
   })();
   return dbPromise;
@@ -55,7 +56,7 @@ async function migrarAV1(db: SQLite.SQLiteDatabase) {
   if (esV0) {
     const filas = await db.getAllAsync<any>('SELECT * FROM luminarias_v0');
     for (const r of filas) {
-      const l: any = { ...r, uuid: nuevoUuid(), proyectoId, actualizadoEn: r.creadoEn, fotos: JSON.stringify([r.fotoUri]), codigo: '', tecnico: '', alturaM: '' };
+      const l: any = { ...r, uuid: nuevoUuid(), proyectoId, actualizadoEn: r.creadoEn, fotos: JSON.stringify([r.fotoUri]), codigo: '', tecnico: '', alturaM: '', origen: '', ubicacionSimulada: 0, jornadaId: '' };
       await db.runAsync(`INSERT INTO luminarias (${COLS.join(',')}) VALUES (${COLS.map(() => '?').join(',')})`, COLS.map((c) => l[c] ?? null));
     }
     await db.execAsync('DROP TABLE luminarias_v0');
@@ -76,7 +77,24 @@ async function migrarAV3(db: SQLite.SQLiteDatabase) {
   await db.execAsync('PRAGMA user_version = 3');
 }
 
-const aLuminaria = (r: any): Luminaria => ({ ...r, fotos: JSON.parse(r.fotos || '[]'), sincronizado: !!r.sincronizado });
+/** v3 → v4: evidencia de cada captura (origen de la foto, ubicación simulada, jornada). */
+async function migrarAV4(db: SQLite.SQLiteDatabase) {
+  const cols = (await db.getAllAsync<{ name: string }>('PRAGMA table_info(luminarias)')).map((c) => c.name);
+  if (!cols.includes('origen')) await db.execAsync("ALTER TABLE luminarias ADD COLUMN origen TEXT DEFAULT ''");
+  if (!cols.includes('ubicacionSimulada')) await db.execAsync('ALTER TABLE luminarias ADD COLUMN ubicacionSimulada INTEGER NOT NULL DEFAULT 0');
+  if (!cols.includes('jornadaId')) await db.execAsync("ALTER TABLE luminarias ADD COLUMN jornadaId TEXT DEFAULT ''");
+  await db.execAsync('PRAGMA user_version = 4');
+}
+
+/** SQLite no acepta booleanos: se guardan como 0/1. */
+const aSql = (v: any) => (typeof v === 'boolean' ? (v ? 1 : 0) : v ?? null);
+/** La columna booleana es NOT NULL: un valor ausente cuenta como false. */
+const aSqlCol = (c: string, v: any) => (c === 'ubicacionSimulada' ? (v ? 1 : 0) : aSql(v));
+
+const aLuminaria = (r: any): Luminaria => ({
+  ...r, fotos: JSON.parse(r.fotos || '[]'), sincronizado: !!r.sincronizado,
+  ubicacionSimulada: !!r.ubicacionSimulada, origen: r.origen ?? '', jornadaId: r.jornadaId ?? '',
+});
 
 /* ---------- kv ---------- */
 export async function leerKv(k: string): Promise<string | null> {
@@ -130,7 +148,7 @@ export async function marcarSincronizadas(uuids: string[]): Promise<void> {
   for (const u of uuids) await db.runAsync('UPDATE luminarias SET sincronizado=1 WHERE uuid=?', [u]);
 }
 
-const valores = (l: LuminariaBorrador) => COLS.map((c) => (c === 'fotos' ? JSON.stringify(l.fotos) : (l as any)[c]) ?? null);
+const valores = (l: LuminariaBorrador) => COLS.map((c) => (c === 'fotos' ? JSON.stringify(l.fotos) : aSqlCol(c, (l as any)[c])));
 
 export async function guardarLuminaria(l: LuminariaBorrador): Promise<number> {
   const db = await abrir();
@@ -182,11 +200,11 @@ export async function fusionarRemotas(proyectoId: number, remotas: Remota[]): Pr
     const d: any = x.datos;
     if (accion === 'insertar') {
       await db.runAsync(`INSERT INTO luminarias (${COLS.join(',')}, sincronizado) VALUES (${COLS.map(() => '?').join(',')}, 1)`,
-        COLS.map((c) => (c === 'fotos' ? '[]' : c === 'proyectoId' ? proyectoId : d[c] ?? null)));
+        COLS.map((c) => (c === 'fotos' ? '[]' : c === 'proyectoId' ? proyectoId : aSqlCol(c, d[c]))));
       r.nuevas++;
     } else if (accion === 'actualizar') {
       await db.runAsync(`UPDATE luminarias SET ${sinFotosNiIds.map((c) => `${c}=?`).join(',')}, sincronizado=1 WHERE uuid=?`,
-        [...sinFotosNiIds.map((c) => d[c] ?? null), x.uuid]); // conserva las fotos locales
+        [...sinFotosNiIds.map((c) => aSqlCol(c, d[c])), x.uuid]); // conserva las fotos locales
       r.actualizadas++;
     } else if (accion === 'borrar') {
       await db.runAsync('DELETE FROM luminarias WHERE uuid=?', [x.uuid]);

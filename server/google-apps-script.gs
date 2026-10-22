@@ -14,7 +14,14 @@
 var TOKEN = 'CAMBIA-ESTE-TOKEN';           // el mismo que pondrás en la app (Ajustes → Token secreto)
 var CARPETA_FOTOS = 'ELI-LUMINARIA Fotos';  // carpeta de Drive para las fotos (se crea sola)
 var TOKEN_ADMIN = 'CAMBIA-ESTE-TOKEN-ADMIN'; // SOLO para ti: abre el mapa en vivo del equipo (distinto del token del equipo)
-var MINUTOS_SIN_SENAL = 15;                  // una jornada activa sin latidos por más de esto se muestra "Sin señal"
+var MINUTOS_SIN_SENAL = 15;
+// Auditoría de capturas (modo terceros): umbrales de las alertas de la columna "Alertas"
+var LIMITE_PRECISION_M = 25;      // GPS_IMPRECISO si la precisión del GPS es peor que esto
+var VELOCIDAD_MAX_KMH = 120;      // SALTO_IMPOSIBLE: dos capturas del mismo técnico a mayor velocidad que esta
+var AGRUPADAS_RADIO_M = 3;        // AGRUPADAS: 4 o más capturas del mismo técnico en este radio...
+var AGRUPADAS_MIN = 4;
+var AGRUPADAS_VENTANA_MIN = 10;   // ...dentro de esta ventana de tiempo
+var TOLERANCIA_JORNADA_MIN = 2;   // margen al comprobar que la captura cae dentro de su jornada                  // una jornada activa sin latidos por más de esto se muestra "Sin señal"
 var HOJA_EQUIPO = '_Equipo', HOJA_JORNADAS = '_Jornadas'; // pestañas del sistema (los proyectos no pueden empezar por "_")
 
 var COLUMNAS = [
@@ -25,6 +32,7 @@ var COLUMNAS = [
   ['tensionV', 'Tensión (V)'], ['fotocelda', 'Fotocelda'], ['pinesFotocelda', 'Pines fotocelda'],
   ['temperaturaColorK', 'Temp. color (K)'], ['flujoLuminosoLm', 'Flujo (lm)'], ['ip', 'IP'], ['montaje', 'Montaje'],
   ['alturaM', 'Altura (m)'], ['estado', 'Estado'], ['confianza', 'Confianza IA'], ['observaciones', 'Observaciones'],
+  ['origen', 'Origen de la foto'], ['ubicacionSimulada', 'Ubicación simulada'], ['jornadaId', 'ID jornada'], ['alertas', 'Alertas'],
   ['mapa', 'Enlace mapa'], ['foto', 'Foto'], ['eliminada', 'Eliminada'], ['recibidoEn', 'Recibido']
 ];
 // Columnas que se dejan como número (para sumar/graficar); el resto se fuerza a texto para que Sheets no
@@ -58,6 +66,8 @@ function doPost(e) {
       l.mapa = (l.latitud != null && l.longitud != null) ? 'https://maps.google.com/?q=' + l.latitud + ',' + l.longitud : '';
       l.eliminada = '';
       l.recibidoEn = ahora;
+      l.ubicacionSimulada = l.ubicacionSimulada ? 'SÍ' : '';
+      l.alertas = ''; // la auditoría las recalcula al final de este envío
       var valores = COLUMNAS.map(function (c) { return textoSeguro(l[c[0]]); });
       var n = fila[l.uuid];
       if (n) {
@@ -76,6 +86,7 @@ function doPost(e) {
       hoja.getRange(n, iE + 1).setValue('SÍ');
       hoja.getRange(n, col('recibidoEn') + 1).setValue(ahora);
     });
+    if ((d.luminarias || []).length || (d.borradas || []).length) auditarHoja(hoja);
     return salida({ ok: true, recibidas: (d.luminarias || []).length, borradas: (d.borradas || []).length });
   } catch (err) {
     return salida({ ok: false, error: 'Servidor ocupado o error: ' + String(err) });
@@ -153,6 +164,101 @@ function buscarHoja(libro, nombre) {
   var hojas = libro.getSheets();
   for (var i = 0; i < hojas.length; i++) if (hojas[i].getName().toLowerCase() === nombre.toLowerCase()) return hojas[i];
   return null;
+}
+
+/* ---------------- Auditoría de capturas ---------------- */
+
+function distanciaM(lat1, lng1, lat2, lng2) {
+  var R = 6371000, rad = Math.PI / 180;
+  var dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad;
+  var h = Math.pow(Math.sin(dLat / 2), 2) + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.pow(Math.sin(dLng / 2), 2);
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function tiempo(v) {
+  var t = v instanceof Date ? v.getTime() : new Date(v).getTime();
+  return isNaN(t) ? null : t;
+}
+
+function esSi(v) { return v === true || String(v === undefined || v === null ? '' : v).toUpperCase().indexOf('S') === 0; }
+
+/**
+ * Calcula las alertas de cada captura. 'filas' = objetos con las claves de COLUMNAS; 'jornadas' = {id: {inicio, fin|null}} en ms.
+ * Devuelve un arreglo paralelo de listas de códigos:
+ *   UBICACION_SIMULADA, GALERIA, SIN_JORNADA, JORNADA_NO_CONFIRMADA, FUERA_DE_JORNADA, GPS_IMPRECISO, SALTO_IMPOSIBLE, AGRUPADAS
+ * Los registros sin 'origen' (apps antiguas) no se evalúan contra la jornada. Es información para el supervisor, no un veredicto.
+ */
+function calcularAlertas(filas, jornadas) {
+  var res = filas.map(function () { return []; });
+  var porTecnico = {};
+  var tol = TOLERANCIA_JORNADA_MIN * 60000;
+  filas.forEach(function (f, i) {
+    if (!f.uuid || esSi(f.eliminada)) return;
+    var a = res[i];
+    var t = tiempo(f.creadoEn);
+    if (esSi(f.ubicacionSimulada)) a.push('UBICACION_SIMULADA');
+    if (f.origen === 'galeria') a.push('GALERIA');
+    if (f.origen) {
+      if (!f.jornadaId) a.push('SIN_JORNADA');
+      else {
+        var j = jornadas[f.jornadaId];
+        if (!j) a.push('JORNADA_NO_CONFIRMADA'); // puede deberse a que su jornada aún no ha sincronizado; se reevalúa en la próxima auditoría
+        else if (t !== null && (t < j.inicio - tol || (j.fin !== null && t > j.fin + tol))) a.push('FUERA_DE_JORNADA');
+      }
+    }
+    if (typeof f.precisionM === 'number' && f.precisionM > LIMITE_PRECISION_M) a.push('GPS_IMPRECISO');
+    if (typeof f.latitud === 'number' && typeof f.longitud === 'number' && t !== null) {
+      (porTecnico[f.tecnico] = porTecnico[f.tecnico] || []).push({ i: i, t: t, lat: f.latitud, lng: f.longitud });
+    }
+  });
+  Object.keys(porTecnico).forEach(function (k) {
+    var p = porTecnico[k].sort(function (x, y) { return x.t - y.t; });
+    var ventana = AGRUPADAS_VENTANA_MIN * 60000;
+    for (var x = 1; x < p.length; x++) {
+      var d = distanciaM(p[x - 1].lat, p[x - 1].lng, p[x].lat, p[x].lng);
+      var dt = (p[x].t - p[x - 1].t) / 1000;
+      if (d > 300 && (dt <= 0 || (d / dt) * 3.6 > VELOCIDAD_MAX_KMH)) res[p[x].i].push('SALTO_IMPOSIBLE');
+    }
+    for (var m = 0; m < p.length; m++) {
+      var cerca = 0;
+      for (var y = m - 1; y >= 0 && p[m].t - p[y].t <= ventana; y--) if (distanciaM(p[m].lat, p[m].lng, p[y].lat, p[y].lng) <= AGRUPADAS_RADIO_M) cerca++;
+      for (var z = m + 1; z < p.length && p[z].t - p[m].t <= ventana; z++) if (distanciaM(p[m].lat, p[m].lng, p[z].lat, p[z].lng) <= AGRUPADAS_RADIO_M) cerca++;
+      if (cerca >= AGRUPADAS_MIN - 1) res[p[m].i].push('AGRUPADAS');
+    }
+  });
+  return res;
+}
+
+function leerJornadas() {
+  var out = {};
+  var h = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_JORNADAS);
+  if (!h || h.getLastRow() < 2) return out;
+  h.getRange(2, 1, h.getLastRow() - 1, COL_JORNADAS.length).getValues().forEach(function (r) {
+    var inicio = tiempo(r[3]);
+    if (r[0] && inicio !== null) out[r[0]] = { inicio: inicio, fin: r[4] === '' ? null : tiempo(r[4]) };
+  });
+  return out;
+}
+
+/** Recalcula la columna "Alertas" de toda la pestaña de un proyecto. */
+function auditarHoja(hoja) {
+  var n = hoja.getLastRow();
+  if (n < 2) return;
+  var datos = hoja.getRange(2, 1, n - 1, COLUMNAS.length).getValues();
+  var filas = datos.map(function (r) {
+    var o = {};
+    COLUMNAS.forEach(function (c, i) { o[c[0]] = r[i]; });
+    return o;
+  });
+  var alertas = calcularAlertas(filas, leerJornadas());
+  hoja.getRange(2, col('alertas') + 1, n - 1, 1).setValues(alertas.map(function (a) { return [a.join(', ')]; }));
+}
+
+/** Para un activador por tiempo (cada 10-15 min): re-audita todos los proyectos (p. ej. cuando llega una jornada tardía). */
+function auditarTodo() {
+  SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(function (h) {
+    if (h.getName().charAt(0) !== '_') auditarHoja(h);
+  });
 }
 
 /* ---------------- Monitoreo del equipo (jornadas) ---------------- */
@@ -259,15 +365,20 @@ function datosEquipo(token) {
   }
 
   var luminarias = [];
+  var calidad = {};
+  var iAl = col('alertas');
   var iLat = col('latitud'), iLng = col('longitud'), iTec = col('tecnico'), iMarca = col('marca'), iTecn = col('tecnologia'), iEli = col('eliminada');
   libro.getSheets().forEach(function (h) {
     if (h.getName().charAt(0) === '_' || h.getLastRow() < 2 || luminarias.length >= 5000) return;
     h.getRange(2, 1, h.getLastRow() - 1, COLUMNAS.length).getValues().forEach(function (r) {
       if (luminarias.length >= 5000 || !r[0] || String(r[iEli]).toUpperCase().indexOf('S') === 0) return;
+      var q = calidad[r[iTec]] = calidad[r[iTec]] || { total: 0, conAlertas: 0, codigos: {} };
+      q.total++;
+      if (r[iAl]) { q.conAlertas++; String(r[iAl]).split(', ').forEach(function (c) { q.codigos[c] = (q.codigos[c] || 0) + 1; }); }
       if (typeof r[iLat] === 'number' && typeof r[iLng] === 'number') luminarias.push({ lat: r[iLat], lng: r[iLng], tec: r[iTec], marca: r[iMarca], tecnologia: r[iTecn] });
     });
   });
-  return { ahora: ahora.toISOString(), limite: MINUTOS_SIN_SENAL, tecnicos: tecnicos, luminarias: luminarias };
+  return { ahora: ahora.toISOString(), limite: MINUTOS_SIN_SENAL, tecnicos: tecnicos, luminarias: luminarias, calidad: calidad };
 }
 
 var PAGINA_EQUIPO = `<!doctype html><html><head><meta charset="utf-8">
@@ -317,6 +428,13 @@ function pintar(d){
     n.appendChild(p); n.appendChild(document.createTextNode(t.tecnico || 'Sin nombre')); fila.appendChild(n);
     fila.appendChild(el('div','s', t.estado + ' · ' + hace(t.senal, d.ahora)));
     fila.appendChild(el('div','s', (t.luminarias || 0) + ' luminarias · ' + (t.proyecto || '—') + ' · ' + (t.plataforma || '')));
+    var q = (d.calidad || {})[t.tecnico];
+    if (q) {
+      var cods = Object.keys(q.codigos).map(function(k){ return k + ' ×' + q.codigos[k]; }).join(', ');
+      var linea = el('div', 's', q.total + ' capturas · ' + q.conAlertas + ' con alertas' + (cods ? ' (' + cods + ')' : ''));
+      if (q.conAlertas) linea.style.color = '#c2410c';
+      fila.appendChild(linea);
+    }
     lista.appendChild(fila);
     if (t.latitud !== '' && t.latitud != null && t.longitud !== '' && t.longitud != null) {
       var m = L.circleMarker([t.latitud, t.longitud], {radius:11, color:'#fff', weight:3, fillColor: COLORES[t.estado] || '#6b7280', fillOpacity:1}).addTo(capaT);

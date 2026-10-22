@@ -27,6 +27,9 @@ const COLUMNAS: [string, (l: Luminaria, p?: Proyecto) => string | number | null]
   ['Altura (m)', (l) => l.alturaM],
   ['Estado', (l) => l.estado],
   ['Confianza IA', (l) => l.confianza],
+  ['Origen de la foto', (l) => l.origen],
+  ['Ubicación simulada', (l) => (l.ubicacionSimulada ? 'Sí' : '')],
+  ['ID jornada', (l) => l.jornadaId],
   ['Observaciones', (l) => l.observaciones],
   ['Enlace mapa', (l) => (coordenadaValida(l.latitud, l.longitud) ? enlaceMapa(l.latitud!, l.longitud!) : '')],
 ];
@@ -56,7 +59,7 @@ export function aGeoJson(items: Luminaria[], proyecto?: Proyecto): string {
         modelo: l.modelo, tipo: l.tipoLuminaria, tecnologia: l.tecnologia, potencia_w: l.potenciaW,
         tension_v: l.tensionV, fotocelda: l.fotocelda, pines_fotocelda: l.pinesFotocelda,
         temperatura_color_k: l.temperaturaColorK, flujo_lm: l.flujoLuminosoLm, ip: l.ip, montaje: l.montaje,
-        altura_m: l.alturaM, estado: l.estado, confianza_ia: l.confianza, direccion: l.direccion,
+        altura_m: l.alturaM, estado: l.estado, confianza_ia: l.confianza, origen: l.origen, ubicacion_simulada: l.ubicacionSimulada, jornada_id: l.jornadaId, direccion: l.direccion,
         observaciones: l.observaciones, fecha: l.creadoEn,
       },
     }));
@@ -65,7 +68,7 @@ export function aGeoJson(items: Luminaria[], proyecto?: Proyecto): string {
 
 const xml = (t: string) => t.replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]!));
 
-const EXCLUIDAS_KML = ['ID', 'Proyecto', 'Fecha', 'Latitud', 'Longitud', 'Precisión (m)', 'Enlace mapa'];
+const EXCLUIDAS_KML = ['ID', 'Proyecto', 'Fecha', 'Latitud', 'Longitud', 'Precisión (m)', 'Enlace mapa', 'ID jornada', 'Origen de la foto', 'Ubicación simulada'];
 
 export function aKml(items: Luminaria[], proyecto?: Proyecto): string {
   const marcas = items

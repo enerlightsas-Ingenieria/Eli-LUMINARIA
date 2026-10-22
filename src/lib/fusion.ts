@@ -41,6 +41,9 @@ export function normalizarRemota(fila: Record<string, unknown>): Remota | null {
       direccion: texto(fila.direccion),
       codigo: texto(fila.codigo),
       tecnico: texto(fila.tecnico),
+      origen: (['camara', 'galeria'].includes(texto(fila.origen)) ? texto(fila.origen) : '') as 'camara' | 'galeria' | '',
+      ubicacionSimulada: fila.ubicacionSimulada === true || texto(fila.ubicacionSimulada).toUpperCase().startsWith('S'),
+      jornadaId: texto(fila.jornadaId),
       confianza: (['alta', 'media', 'baja'].includes(conf) ? conf : '') as Confianza | '',
     },
   };

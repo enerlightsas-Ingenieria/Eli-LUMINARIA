@@ -13,6 +13,10 @@ export interface ConfigFlota {
   syncFotos?: boolean;
   tecnico?: string;
   proyectos?: string[];
+  /** Capturas solo con jornada activa, solo cámara, GPS preciso y coordenadas no editables. */
+  modoTerceros?: boolean;
+  /** Precisión GPS máxima exigida (5–100 m) en modo terceros. */
+  precisionMaxM?: number;
 }
 
 export const PREFIJO = 'ELI1.';
@@ -68,6 +72,11 @@ export function decodificar(entrada: string): ConfigFlota {
   const st = txt(bruto.syncToken, 300); if (st) cfg.syncToken = st;
   const tc = txt(bruto.tecnico, 80); if (tc) cfg.tecnico = tc;
   if (typeof bruto.syncFotos === 'boolean') cfg.syncFotos = bruto.syncFotos;
+  if (typeof bruto.modoTerceros === 'boolean') cfg.modoTerceros = bruto.modoTerceros;
+  if (bruto.precisionMaxM !== undefined) {
+    if (typeof bruto.precisionMaxM !== 'number' || bruto.precisionMaxM < 5 || bruto.precisionMaxM > 100) throw new Error('La precisión GPS máxima debe estar entre 5 y 100 m.');
+    cfg.precisionMaxM = Math.round(bruto.precisionMaxM);
+  }
   if (Array.isArray(bruto.proyectos)) {
     cfg.proyectos = bruto.proyectos.map((p: unknown) => txt(p, 80)).filter((p: string | undefined): p is string => !!p).slice(0, 50);
   }
@@ -84,5 +93,6 @@ export function describir(cfg: ConfigFlota): string {
     cfg.endpoint && `Análisis con IA → ${host(cfg.endpoint)}`,
     cfg.syncUrl && `Sincronización → ${host(cfg.syncUrl)}`,
     cfg.proyectos?.length && `Proyectos: ${cfg.proyectos.join(', ')}`,
+    cfg.modoTerceros && `Modo terceros: solo podrás capturar con la jornada activa, con la cámara de la app y con GPS de ±${cfg.precisionMaxM ?? 20} m o mejor. Cada captura se registra con su hora, ubicación y jornada.`,
   ].filter(Boolean).join('\n');
 }

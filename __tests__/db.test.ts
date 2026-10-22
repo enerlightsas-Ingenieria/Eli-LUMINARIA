@@ -86,8 +86,8 @@ describe('db', () => {
   });
 });
 
-describe('migración v1 → v3', () => {
-  it('añade tecnico y tombstones a una base v1 existente sin perder filas', async () => {
+describe('migración v1 → v4', () => {
+  it('añade tecnico, tombstones y la evidencia de captura a una base v1 sin perder filas', async () => {
     mockMotor = new DatabaseSync(':memory:');
     mockMotor.exec(`
       CREATE TABLE kv (k TEXT PRIMARY KEY, v TEXT);
@@ -105,7 +105,10 @@ describe('migración v1 → v3', () => {
     expect(ls[0]).toMatchObject({ marca: 'Schréder', tecnico: '' });
     await db.guardarLuminaria({ ...ls[0], tecnico: 'Ana' });
     expect((await db.listarLuminarias(1))[0].tecnico).toBe('Ana');
-    expect((mockMotor.prepare('PRAGMA user_version').get() as any).user_version).toBe(3);
+    expect((mockMotor.prepare('PRAGMA user_version').get() as any).user_version).toBe(4);
+    expect(ls[0]).toMatchObject({ origen: '', ubicacionSimulada: false, jornadaId: '' });
+    await db.guardarLuminaria({ ...ls[0], origen: 'camara', ubicacionSimulada: true, jornadaId: 'j9' });
+    expect((await db.listarLuminarias(1))[0]).toMatchObject({ origen: 'camara', ubicacionSimulada: true, jornadaId: 'j9' });
     await db.borrarLuminaria({ ...ls[0], tecnico: 'Ana' } as any);
     expect(await db.borradasPendientes(1)).toEqual([ls[0].uuid]);
   });

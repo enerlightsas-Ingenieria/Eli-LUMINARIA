@@ -42,7 +42,7 @@ export function crearServidor() {
   const fuente = fs.readFileSync(path.join(__dirname, '../../server/google-apps-script.gs'), 'utf8');
   const html = { createHtmlOutput: (h: string) => ({ html: h, setTitle() { return this; }, addMetaTag() { return this; } }) };
   const gs = new Function('SpreadsheetApp', 'LockService', 'ContentService', 'DriveApp', 'Utilities', 'HtmlService',
-    fuente + '\n;return { doPost, doGet, datosEquipo };')(
+    fuente + '\n;return { doPost, doGet, datosEquipo, calcularAlertas, auditarTodo };')(
     { getActiveSpreadsheet: () => libro },
     { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     { createTextOutput: (t: string) => ({ t, setMimeType() { return this; } }), MimeType: { JSON: 'json' } },
@@ -97,7 +97,7 @@ export function telefono(tecnico: string): Telefono {
 export const nueva = (t: Telefono, proyectoId: number, o: any = {}) => t.db.guardarLuminaria({
   ...require('../../src/types').caracteristicasVacias(), uuid: require('crypto').randomUUID(), proyectoId,
   creadoEn: new Date().toISOString(), actualizadoEn: '', fotos: ['file:///local.jpg'], latitud: 4.7, longitud: -74.07,
-  precisionM: 5, direccion: '', codigo: '', tecnico: t.tecnico, confianza: 'alta', ...o,
+  precisionM: 5, direccion: '', codigo: '', tecnico: t.tecnico, confianza: 'alta', origen: 'camara', ubicacionSimulada: false, jornadaId: '', ...o,
 });
 
 export async function proyectoDe(t: Telefono, nombre: string) {

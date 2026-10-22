@@ -17,6 +17,9 @@ Identifica con IA (Claude visión) las características básicas y las guarda en
   ven lo que hacen los demás; ediciones y eliminaciones se propagan sin duplicar ni resucitar registros.
 - **Monitoreo del equipo:** el técnico inicia/pausa/termina su jornada (con aviso de consentimiento); tú ves en un mapa en vivo quién
   trabaja, quién está sin señal y dónde, más el historial de horas en la hoja. Solo última posición, sin rutas, y nada fuera de la jornada.
+- **Técnicos de terceros (modo terceros):** capturas solo con jornada activa, solo cámara, GPS preciso y coordenada no editable; el servidor
+  audita cada registro (galería, GPS falso, saltos imposibles, ráfagas, fuera de jornada) y muestra las alertas al supervisor. Sin rastreo en
+  segundo plano. Ver `docs/terceros.md`.
 - **Sin señal:** foto + GPS offline, opciones rápidas para llenar a mano, “copiar del último registro”, análisis IA que se rinde
   a los 25 s o se omite, y “Re-analizar con IA” cuando vuelve la conexión.
 - **Exportar** CSV (Excel), **GeoJSON** (QGIS/ArcGIS) y **KML** (Google Earth).

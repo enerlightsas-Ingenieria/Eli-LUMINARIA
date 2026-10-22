@@ -33,6 +33,19 @@ describe('configuración de flota', () => {
     expect(decodificar(sucio)).toEqual({ tecnico: 'A', proyectos: ['ok'] });
   });
 
+  it('modo terceros y precisión viajan en la configuración y se muestran al técnico antes de aceptar', () => {
+    const c = decodificar(codificar({ ...cfg, modoTerceros: true, precisionMaxM: 15 }));
+    expect(c).toMatchObject({ modoTerceros: true, precisionMaxM: 15 });
+    const d = describir(c);
+    expect(d).toContain('Modo terceros'); expect(d).toContain('±15 m'); expect(d).toContain('jornada');
+    const { generar } = require('../server/make-config.js');
+    expect(decodificar(generar({ terceros: true, precision: '25' }).enlace)).toEqual({ modoTerceros: true, precisionMaxM: 25 });
+  });
+
+  it('rechaza una precisión fuera de 5–100 m o de tipo inválido', () => {
+    for (const p of [0, 4, 101, '20', -1]) expect(() => decodificar(codificar({ precisionMaxM: p as any }))).toThrow(/precisión/i);
+  });
+
   it('describe a qué servidores apuntará (para que el técnico confirme)', () => {
     const d = describir(cfg);
     expect(d).toContain('proxy.example.workers.dev'); expect(d).toContain('script.google.com'); expect(d).not.toContain('tok-juan');

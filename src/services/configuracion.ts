@@ -15,6 +15,8 @@ export async function aplicarConfig(cfg: ConfigFlota): Promise<{ proyectosNuevos
     syncToken: cfg.syncToken ?? a.syncToken,
     syncFotos: cfg.syncFotos ?? a.syncFotos,
     tecnico: cfg.tecnico ?? a.tecnico,
+    modoTerceros: cfg.modoTerceros ?? a.modoTerceros,
+    precisionMaxM: cfg.precisionMaxM ?? a.precisionMaxM,
   });
   const existentes = new Set((await listarProyectos()).map((p) => p.nombre.trim().toLowerCase()));
   let proyectosNuevos = 0;
