@@ -6,15 +6,17 @@ export interface ResultadoAnalisis {
   confianza: Confianza;
 }
 
-const PROMPT = `Eres un técnico experto en alumbrado público e iluminación exterior/interior.
-Analiza la foto de una luminaria y extrae sus características básicas.
+const PROMPT = `Eres un técnico experto en alumbrado público e iluminación exterior/interior (normas ANSI C136, RETILAP, IEC).
+Recibes de 1 a 3 fotos de UNA misma luminaria (general, placa/etiqueta, fotocelda). Extrae sus características básicas.
 
 Reglas:
-- Lee cualquier etiqueta, placa o texto visible (marca, modelo, potencia, tensión, IP, lm, K).
-- Si un dato NO se puede ver ni deducir con razonable certeza, devuelve cadena vacía "". No inventes.
-- Si deduces un dato sólo por la forma/aspecto (p. ej. tecnología por el tipo de lámpara o carcasa), añade "(est.)" al final.
-- Fotocelda: indica si hay (NEMA/twist-lock, integrada, externa) o no, y cuenta los pines/contactos visibles del receptáculo (3, 5 o 7) en "pinesFotocelda".
-- Responde en español, valores cortos y sin unidades dentro de los campos numéricos (potencia en W, tensión en V, K, lm).
+- Lee cualquier etiqueta, placa, grabado o texto visible (marca, modelo, potencia, tensión, IP, lm, K, fabricante, país).
+- Si un dato NO se puede ver ni deducir con razonable certeza, devuelve cadena vacía "". No inventes cifras.
+- Si deduces un dato sólo por la forma/aspecto, añade " (est.)" al final.
+- Fotocelda: indica si hay (NEMA/twist-lock ANSI C136.10, integrada, externa) o no. Cuenta los pines/contactos visibles del receptáculo: 3 pines = on/off estándar; 5 pines = con dimming 0-10V/DALI; 7 pines = dimming + datos/telegestión (ANSI C136.41). Ponlo en "pinesFotocelda" (solo el número).
+- Tecnología por aspecto: lámpara tubular/elipsoidal visible tras vidrio = sodio/mercurio/halogenuro; módulo de LEDs/óptica con lentes = LED.
+- Responde en español, valores cortos. Campos numéricos sin unidad (W, V, K, lm, m).
+- altura: estimación aproximada en metros sólo si hay referencias claras (poste, personas, vehículos).
 - Usa la herramienta registrar_luminaria para responder.`;
 
 const campo = (description: string) => ({ type: 'string', description });
@@ -38,51 +40,60 @@ const TOOL = {
       flujoLuminosoLm: campo('Flujo luminoso en lúmenes'),
       ip: campo('Grado de protección IP'),
       montaje: campo('Poste, brazo, pared, techo, suspendida, etc.'),
+      alturaM: campo('Altura de montaje estimada en metros'),
       estado: campo('Estado visual: bueno, deteriorado, apagada, vandalizada...'),
-      observaciones: campo('Notas útiles: altura estimada, brazo, color, daños, texto leído'),
+      observaciones: campo('Notas útiles: brazo, color, daños, texto leído'),
       confianza: { type: 'string', enum: ['alta', 'media', 'baja'], description: 'Confianza global en la identificación' },
     },
-    required: [
-      'marca', 'fabricante', 'modelo', 'tipoLuminaria', 'tecnologia', 'potenciaW', 'tensionV', 'fotocelda',
-      'pinesFotocelda', 'temperaturaColorK', 'flujoLuminosoLm', 'ip', 'montaje', 'estado', 'observaciones', 'confianza',
-    ],
+    required: [...Object.keys(caracteristicasVacias()), 'confianza'],
   },
 };
 
 export class ErrorAnalisis extends Error {}
 
-/** Envía la foto (JPEG base64) a Claude con visión y devuelve las características estructuradas. */
-export async function analizarFoto(base64Jpeg: string): Promise<ResultadoAnalisis> {
+const ETIQUETAS = ['Foto general', 'Foto de la placa / etiqueta', 'Foto de la fotocelda'];
+
+async function conTimeout(url: string, init: RequestInit, ms: number): Promise<Response> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try { return await fetch(url, { ...init, signal: ctl.signal }); } finally { clearTimeout(t); }
+}
+
+/** Envía 1-3 fotos (JPEG base64) a Claude con visión y devuelve las características estructuradas. */
+export async function analizarFotos(base64Jpegs: string[]): Promise<ResultadoAnalisis> {
   const ajustes = await cargarAjustes();
   if (!ajustes.apiKey && ajustes.endpoint.includes('api.anthropic.com')) {
     throw new ErrorAnalisis('Falta la API key. Configúrala en Ajustes o llena los datos manualmente.');
   }
-
   const headers: Record<string, string> = { 'content-type': 'application/json', 'anthropic-version': '2023-06-01' };
   if (ajustes.apiKey) headers['x-api-key'] = ajustes.apiKey;
 
-  let res: Response;
-  try {
-    res = await fetch(ajustes.endpoint, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model: ajustes.modelo,
-        max_tokens: 1024,
-        tools: [TOOL],
-        tool_choice: { type: 'tool', name: TOOL.name },
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64Jpeg } },
-            { type: 'text', text: PROMPT },
-          ],
-        }],
-      }),
-    });
-  } catch {
-    throw new ErrorAnalisis('Sin conexión con el servicio de análisis. Puedes completar los datos manualmente.');
+  const content: any[] = [];
+  base64Jpegs.slice(0, 3).forEach((data, i) => {
+    content.push({ type: 'text', text: ETIQUETAS[i] + ':' });
+    content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } });
+  });
+  content.push({ type: 'text', text: PROMPT });
+  const body = JSON.stringify({
+    model: ajustes.modelo, max_tokens: 1024, tools: [TOOL], tool_choice: { type: 'tool', name: TOOL.name },
+    messages: [{ role: 'user', content }],
+  });
+
+  let res: Response | null = null;
+  for (let intento = 0; intento < 2; intento++) {
+    try {
+      res = await conTimeout(ajustes.endpoint, { method: 'POST', headers, body }, 60000);
+    } catch {
+      res = null;
+      if (intento === 1) throw new ErrorAnalisis('Sin conexión con el servicio de análisis. Puedes completar los datos manualmente o reintentar.');
+      continue;
+    }
+    if (res.status === 429 || res.status >= 500) { // reintento único ante sobrecarga
+      if (intento === 0) { await new Promise((r) => setTimeout(r, 1500)); continue; }
+    }
+    break;
   }
+  if (!res) throw new ErrorAnalisis('Sin respuesta del servicio de análisis.');
 
   if (!res.ok) {
     const detalle = await res.text().catch(() => '');
@@ -95,9 +106,8 @@ export async function analizarFoto(base64Jpeg: string): Promise<ResultadoAnalisi
   const bloque = (json.content ?? []).find((b: any) => b.type === 'tool_use');
   if (!bloque) throw new ErrorAnalisis('La IA no devolvió datos estructurados.');
 
-  const base = caracteristicasVacias();
-  const out: Caracteristicas = { ...base };
-  for (const k of Object.keys(base) as (keyof Caracteristicas)[]) {
+  const out = caracteristicasVacias();
+  for (const k of Object.keys(out) as (keyof Caracteristicas)[]) {
     const v = bloque.input?.[k];
     out[k] = typeof v === 'string' ? v.trim() : v != null ? String(v) : '';
   }

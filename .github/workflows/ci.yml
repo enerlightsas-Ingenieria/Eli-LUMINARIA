@@ -1,0 +1,19 @@
+name: CI
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Bundle Android e iOS
+        run: |
+          npx expo export --platform android --output-dir dist-android
+          npx expo export --platform ios --output-dir dist-ios

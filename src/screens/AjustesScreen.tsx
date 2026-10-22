@@ -1,0 +1,71 @@
+import React, { useEffect, useState } from 'react';
+import { Alert, Linking, ScrollView, Switch, Text, View } from 'react-native';
+import Constants from 'expo-constants';
+import { Cabecera } from '../components/Cabecera';
+import { Button, Field, Segmented, Seccion } from '../components/ui';
+import { useApp } from '../context/AppContext';
+import { Ajustes, cargarAjustes, ENDPOINT_POR_DEFECTO, guardarAjustes, MODELO_POR_DEFECTO } from '../services/settings';
+import { sincronizar } from '../services/sync';
+import { useTema } from '../theme';
+
+export function AjustesScreen() {
+  const { c, setPref } = useTema();
+  const { proyecto, refrescar } = useApp();
+  const [a, setA] = useState<Ajustes | null>(null);
+  const [sync, setSync] = useState(false);
+  useEffect(() => { cargarAjustes().then(setA); }, []);
+  if (!a) return null;
+
+  const cambiar = (p: Partial<Ajustes>) => setA((x) => ({ ...x!, ...p }));
+  const guardar = async () => { await guardarAjustes(a); Alert.alert('Listo', 'Ajustes guardados.'); };
+
+  const sincronizarYa = async () => {
+    if (!proyecto) return;
+    await guardarAjustes(a);
+    setSync(true);
+    try {
+      const r = await sincronizar(proyecto);
+      await refrescar();
+      Alert.alert('Sincronizado', r.enviadas ? `${r.enviadas} luminaria(s) enviadas a tu hoja.` : 'No había cambios pendientes; la conexión funciona.');
+    } catch (e: any) { Alert.alert('No se pudo sincronizar', e.message ?? String(e)); }
+    finally { setSync(false); }
+  };
+
+  const p = { color: c.muted, lineHeight: 20, marginBottom: 14 } as const;
+  return (
+    <View style={{ flex: 1, backgroundColor: c.bg }}>
+      <Cabecera titulo="Ajustes" />
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
+        <Seccion>Apariencia</Seccion>
+        <Segmented value={a.tema} onChange={(tema) => { cambiar({ tema }); setPref(tema); }}
+          options={[{ value: 'auto', label: 'Automático' }, { value: 'claro', label: 'Claro' }, { value: 'oscuro', label: 'Oscuro' }]} />
+
+        <Seccion>Análisis con IA</Seccion>
+        <Text style={p}>Usa Claude (visión) para leer la foto. Tu API key se guarda cifrada en el llavero del teléfono. En producción es mejor apuntar al proxy propio (ver carpeta server/) y no repartir la clave.</Text>
+        <Field label="API key de Anthropic" value={a.apiKey} secure hint="sk-ant-..." onChangeText={(t) => cambiar({ apiKey: t })} />
+        <Field label="Endpoint" url value={a.endpoint} onChangeText={(t) => cambiar({ endpoint: t })} />
+        <Field label="Modelo" value={a.modelo} onChangeText={(t) => cambiar({ modelo: t })} />
+        <Button title="Restablecer endpoint y modelo" variant="secondary" onPress={() => cambiar({ endpoint: ENDPOINT_POR_DEFECTO, modelo: MODELO_POR_DEFECTO })} />
+
+        <Seccion>Sincronización (Google Sheets / servidor)</Seccion>
+        <Text style={p}>Pega la URL de tu Web App de Google Apps Script (ver docs/google-sheets.md). Cada proyecto crea su pestaña y cada luminaria se actualiza sin duplicarse.</Text>
+        <Field label="URL de sincronización" url value={a.syncUrl} hint="https://script.google.com/macros/s/.../exec" onChangeText={(t) => cambiar({ syncUrl: t })} />
+        <Field label="Token secreto" secure value={a.syncToken} onChangeText={(t) => cambiar({ syncToken: t })} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <Text style={{ color: c.text, flex: 1, paddingRight: 12 }}>Incluir la primera foto (guarda en Drive)</Text>
+          <Switch value={a.syncFotos} onValueChange={(syncFotos) => cambiar({ syncFotos })} trackColor={{ true: c.primary }} />
+        </View>
+        <Button title={`Sincronizar "${proyecto?.nombre ?? ''}" ahora`} variant="secondary" loading={sync} disabled={!a.syncUrl} onPress={sincronizarYa} />
+
+        <Button title="Guardar ajustes" onPress={guardar} style={{ marginTop: 22 }} />
+
+        <Seccion>Acerca de</Seccion>
+        <Text style={{ color: c.muted, lineHeight: 20 }}>
+          ELI-LUMINARIA {Constants.expoConfig?.version ?? ''}{'\n'}Inventario de luminarias con IA y GPS.{'\n'}Los datos viven en tu teléfono; sólo salen las fotos que envías a analizar y lo que sincronizas.
+        </Text>
+        <Button title="Ver código y documentación" variant="secondary" style={{ marginTop: 12 }}
+          onPress={() => Linking.openURL('https://github.com/enerlightsas-ingenieria/eli-luminaria')} />
+      </ScrollView>
+    </View>
+  );
+}

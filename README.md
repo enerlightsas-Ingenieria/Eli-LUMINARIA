@@ -1,39 +1,44 @@
 # ELI-LUMINARIA
 
-App móvil (Android / iOS) para inventariar luminarias a partir de una foto. Identifica con IA (Claude visión)
-las características básicas y las guarda en una tabla junto con la **coordenada GPS**.
+App móvil (**Android e iOS**, Expo / React Native + TypeScript) para inventariar luminarias a partir de una foto.
+Identifica con IA (Claude visión) las características básicas y las guarda en una tabla junto con la **coordenada GPS**.
 
-## Qué identifica
-Marca · fabricante · modelo · tipo de luminaria · tecnología (LED, sodio, mercurio, metal halide…) · potencia (W) ·
-tensión · fotocelda (tipo y **nº de pines: 3/5/7**) · temperatura de color · flujo luminoso · IP · montaje · estado ·
-observaciones · nivel de confianza. Lo que no se ve en la foto se deja vacío (no se inventa); los valores deducidos
-sólo por aspecto se marcan "(est.)". Todo es editable antes de guardar.
-
-## Flujo
-1. **Nueva** → cámara o galería.
-2. La app toma la coordenada (GPS, o el EXIF de la foto si viene de galería) y la dirección aproximada.
-3. La foto se reduce y se envía a Claude → formulario prellenado.
-4. Revisas/corriges → **Guardar** (SQLite local, offline).
-5. **Exportar CSV** (UTF‑8 con BOM, abre bien en Excel) con latitud, longitud, enlace a mapa y todos los datos.
+## Funciones
+- **Captura guiada con 1–3 fotos** (general, placa/etiqueta, fotocelda) → la IA combina las tres para acertar más.
+- **Identifica:** marca · fabricante · modelo · tipo · tecnología (LED, sodio, mercurio, metal halide…) · potencia ·
+  tensión · fotocelda y **nº de pines (3/5/7)** · temperatura de color · flujo · IP · montaje · altura estimada · estado ·
+  observaciones · confianza. Lo que no se ve queda vacío (no inventa); lo deducido por aspecto se marca “(est.)”.
+- **GPS** con precisión visible; usa el EXIF si la foto viene de galería; dirección aproximada.
+- **Proyectos**: agrupa levantamientos por zona/cliente, con resumen (kW instalados, por tecnología, por pines de fotocelda).
+- **Mapa** (OpenStreetMap + satélite, sin claves de API) con marcadores por tecnología y botón “centrar en mí”.
+- **Alerta de duplicados** (otra luminaria a < 8 m) y “Guardar y capturar otra” para trabajo en campo.
+- **Sincronización** a **Google Sheets** (+ fotos en Drive) o a tu servidor, por lotes e idempotente (upsert por UUID).
+- **Exportar** CSV (Excel), **GeoJSON** (QGIS/ArcGIS) y **KML** (Google Earth).
+- **Offline-first** (SQLite local), tema claro/oscuro/automático, accesibilidad (etiquetas, roles), háptica.
 
 ## Ejecutar
 ```bash
 npm install
-npx expo start        # escanea el QR con Expo Go, o: npm run android / npm run ios
+npx expo start            # QR con Expo Go, o: npm run android / npm run ios
+npm run typecheck && npm test
 ```
-En **Ajustes** pega tu API key de Anthropic (se guarda en el almacén seguro del teléfono). Sin clave, la app
-funciona en modo manual.
+En **Ajustes** pega tu API key de Anthropic (se guarda en el llavero/Keystore). Sin clave, funciona en modo manual.
 
-## Generar APK / instalable
+## Instalables (Android APK/AAB e iOS IPA)
 ```bash
 npm i -g eas-cli && eas login
-eas build -p android --profile preview   # APK instalable
-eas build -p ios --profile production
+eas build -p android --profile preview      # APK para instalar directo
+eas build -p android --profile production   # AAB para Google Play
+eas build -p ios --profile production       # IPA para TestFlight / App Store (requiere cuenta Apple Developer)
 ```
+Bundle ID / package: `co.enerlight.eliluminaria` (cámbialo en `app.json` si usas otro).
 
-## Notas
-- **Seguridad:** para uso en producción/flota, apunta el campo *Endpoint* a tu propio proxy que guarde la clave
-  en servidor; no distribuyas la API key en los teléfonos.
-- La IA es una ayuda: la confianza depende de la foto (etiqueta/placa legible, receptáculo de fotocelda visible).
-  Para mejores resultados toma una foto general y otra cercana a la placa.
-- Estructura: `src/services` (analyzer IA, db SQLite, captura cámara/GPS, exporter CSV, settings), `src/screens`, `App.tsx`.
+## Seguridad y producción
+- No repartas la API key en los teléfonos de una flota: despliega `server/worker.js` (proxy Cloudflare) y apunta
+  *Endpoint* a él; el “API key” de la app pasa a ser un token del equipo.
+- La URL de Apps Script queda protegida por un token secreto (ver `docs/google-sheets.md`).
+- Los CSV neutralizan inyección de fórmulas (`=`, `+`, `@`).
+
+## Estructura
+`App.tsx` (navegación/tema) · `src/screens` · `src/services` (analyzer IA, db SQLite + migraciones, captura, sync, exporter, fotos, settings)
+· `src/lib` (geo, formatos, estadísticas, HTML del mapa — lógica pura con pruebas) · `server/` · `docs/` · `__tests__/`.
