@@ -24,8 +24,11 @@ Para activar la administración:
 - **Clave filtrada o teléfono perdido:** toca la persona → *Generar clave nueva*. La anterior deja de servir.
 - No puedes quitarte a ti mismo el rol de administrador ni darte de baja.
 
+## Inteligencia artificial
+En la misma pantalla de administración se elige qué IA va primero (Gemini o Claude) y se prueba que funcione. Ver `docs/ia.md`.
+
 ## Dónde se guarda
-En la pestaña `_Usuarios` de tu hoja de Google (nombre, rol, clave, activo). También puedes editarla a mano (menú **ELI-LUMINARIA → Generar claves faltantes**).
+En la pestaña `_Usuarios` de tu hoja de Google (nombre, rol, clave, activo). La IA elegida está en `_Config`. También puedes editarla a mano (menú **ELI-LUMINARIA → Generar claves faltantes**).
 
 ## Seguridad
 - El enlace de cada persona contiene su clave: envíalo en privado, nunca en un grupo.

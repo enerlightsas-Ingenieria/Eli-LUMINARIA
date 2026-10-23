@@ -7,11 +7,12 @@ El servidor (proxy de Cloudflare) acepta dos proveedores. La app no distingue cu
 | **Gemini** (Google) | Tiene capa gratuita con límites de uso | `GEMINI_API_KEY` (aistudio.google.com → *Get API key*) |
 | **Claude** (Anthropic) | De pago, por foto | `ANTHROPIC_API_KEY` (console.anthropic.com) |
 
-## Cómo se elige
-- Si solo cargas una clave, se usa esa.
-- Si cargas las dos, `ORDEN_IA` define el orden y **si el primero falla (sin créditos, límite de uso, caída) responde el siguiente automáticamente**.
-  - `ORDEN_IA="claude,gemini"` (por defecto): Claude primero y Gemini de respaldo.
-  - `ORDEN_IA="gemini,claude"`: Gemini primero (gratis) y Claude solo cuando Gemini falle o llegue a su límite.
+## Cómo se elige (desde la app)
+Por defecto analiza **Gemini**. El administrador cambia la IA principal en **Ajustes → Administración de usuarios → Inteligencia artificial** (Gemini o Claude). El cambio vale para todos y se aplica en un minuto como máximo.
+- La otra IA queda de **respaldo automático**: si la principal falla (sin créditos, límite de uso, caída), responde la otra, siempre que tenga clave en el servidor.
+- Si solo cargaste una clave, se usa esa.
+- **Probar la IA:** el botón llama a cada proveedor y dice si funciona o por qué falla (por ejemplo, "modelo no encontrado" o "clave inválida"), sin mostrar claves. Es lo primero que hay que usar cuando "no analiza".
+- Sin elección guardada manda `ORDEN_IA` (por defecto `gemini,claude`).
 
 ## Puesta en marcha sin costo
 ```powershell

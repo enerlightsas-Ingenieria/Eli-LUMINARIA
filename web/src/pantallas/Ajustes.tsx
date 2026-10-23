@@ -60,7 +60,7 @@ export function AjustesPantalla() {
 
       <Seccion>Análisis con IA</Seccion>
       <label className="interruptor"><input type="checkbox" checked={a.iaActiva !== false} onChange={(e) => cambiar({ iaActiva: e.target.checked })} /> Usar análisis con IA (cada análisis consume crédito de la API)</label>
-      <p className="muted" style={{ marginBottom: 12 }}>Apágalo para trabajar 100 % manual, sin ningún costo de IA. Usa Claude (visión) a través del servidor de tu empresa, que guarda la clave de la IA. Aquí va el <b>token personal</b> que te dieron, no la clave de Anthropic.</p>
+      <p className="muted" style={{ marginBottom: 12 }}>Apágalo para trabajar 100 % manual, sin ningún costo de IA. Usa la IA (Gemini o Claude, la que elija el administrador) a través del servidor de tu empresa, que guarda la clave. Aquí va el <b>token personal</b> que te dieron, no la clave de Anthropic.</p>
       <Campo etiqueta="Servidor (URL del proxy)" tipo="url" valor={a.endpoint} alCambiar={(t) => cambiar({ endpoint: t })} />
       <Campo etiqueta="Token personal" secreto valor={a.apiKey} alCambiar={(t) => cambiar({ apiKey: t })} />
       <Campo etiqueta="Modelo" valor={a.modelo} alCambiar={(t) => cambiar({ modelo: t })} />

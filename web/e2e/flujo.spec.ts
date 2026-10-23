@@ -237,6 +237,14 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await expect(admin.page.getByTestId('cuenta')).toContainText('Administrador');
   await admin.page.getByRole('button', { name: 'Administración de usuarios' }).click();
 
+  // IA: el administrador ve qué claves hay, prueba cada proveedor y elige cuál va primero
+  await expect(admin.page.getByText('Gemini ❌ falta')).toBeVisible();                       // en esta prueba solo hay clave de Claude
+  await admin.page.getByRole('button', { name: 'Probar la IA' }).click();
+  await expect(admin.page.getByText('Claude: ✅ funciona')).toBeVisible();
+  await expect(admin.page.getByText(/Gemini: ❌.*Sin clave configurada/)).toBeVisible();
+  await admin.page.getByRole('tab', { name: 'Claude' }).click();
+  await expect.poll(() => b.gs.hoja('_Config')?.filas[1]?.join('=')).toBe('ia=claude');
+
   await admin.page.getByRole('button', { name: 'Nuevo usuario' }).click();
   await admin.page.getByLabel('Nombre', { exact: true }).fill('Carla Gómez');
   await admin.page.getByRole('button', { name: 'Crear y ver enlace' }).click();

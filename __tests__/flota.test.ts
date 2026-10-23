@@ -1,5 +1,5 @@
 import { aEnlace, codificar, decodificar, describir } from '../src/lib/config';
-import { identificar, manejar, validarCuerpo, vaciarCacheUsuarios, aGemini, deGemini, proveedores } from '../server/worker';
+import { identificar, manejar, validarCuerpo, vaciarCacheUsuarios, vaciarCacheIA, aGemini, deGemini, proveedores } from '../server/worker';
 import { TOOL } from '../src/services/analyzer';
 
 jest.mock('../src/services/settings', () => ({ cargarAjustes: async () => ({}) }));
@@ -337,12 +337,15 @@ describe('IA con dos proveedores: Claude y Gemini (respaldo)', () => {
   const gem = (args: any = { fabricante: 'Philips', tecnologia: 'LED', potenciaW: '150', confianza: 'alta' }) =>
     new Response(JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { name: 'registrar_luminaria', args } }] } }] }), { status: 200 });
   const claude = (status = 200) => new Response(status === 200 ? JSON.stringify({ content: [{ type: 'tool_use', input: { fabricante: 'Schréder' } }] }) : '{"error":{"message":"Your credit balance is too low"}}', { status });
-  const envBase = { APP_TOKENS: 'juan:tokJ', ANTHROPIC_API_KEY: 'sk-a', GEMINI_API_KEY: 'AIza-g' };
+  const envBase = { APP_TOKENS: 'juan:tokJ', ANTHROPIC_API_KEY: 'sk-a', GEMINI_API_KEY: 'AIza-g', ORDEN_IA: 'claude,gemini' };   // los tests de respaldo parten de Claude primero
   const ruta = (f: jest.Mock) => f.mock.calls.map((c: any) => String(c[0]).includes('anthropic') ? 'claude' : 'gemini');
 
-  it('el orden por defecto es Claude y luego Gemini; solo cuentan los que tienen clave', () => {
+  it('el orden por defecto es Gemini y luego Claude; solo cuentan los que tienen clave', () => {
+    const { ORDEN_IA, ...sinOrden } = envBase;
+    expect(proveedores(sinOrden)).toEqual(['gemini', 'claude']);
     expect(proveedores(envBase)).toEqual(['claude', 'gemini']);
-    expect(proveedores({ ...envBase, ORDEN_IA: 'gemini,claude' })).toEqual(['gemini', 'claude']);
+    expect(proveedores(sinOrden, 'claude')).toEqual(['claude', 'gemini']);   // lo que elige el administrador manda
+    expect(proveedores({ ANTHROPIC_API_KEY: 'x' }, 'gemini')).toEqual(['claude']);   // el elegido no tiene clave → el otro
     expect(proveedores({ ANTHROPIC_API_KEY: 'x' })).toEqual(['claude']);
     expect(proveedores({ GEMINI_API_KEY: 'x' })).toEqual(['gemini']);
     expect(proveedores({ ...envBase, ORDEN_IA: 'gemini' })).toEqual(['gemini']);
@@ -495,5 +498,84 @@ describe('administración de usuarios desde la app (rol admin)', () => {
     expect((await r.json()).ok).toBe(false);
     const r2 = await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'usuarios_guardar', nombre: 'Hacker', rol: 'admin' }) });
     expect((await r2.json()).ok).toBe(false);
+  });
+});
+
+describe('el administrador elige la IA y la prueba desde la app', () => {
+  const { crearServidor } = require('./helpers/hoja');
+  const imagen = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' } };
+  const analisis = JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 1024, tools: [TOOL], tool_choice: { type: 'tool', name: 'registrar_luminaria' }, messages: [{ role: 'user', content: [imagen, { type: 'text', text: 'x' }] }] });
+  const gemOk = () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { name: 'registrar_luminaria', args: { fabricante: 'G' } } }] } }] }), { status: 200 });
+  const claudeOk = () => new Response(JSON.stringify({ content: [{ type: 'tool_use', input: { fabricante: 'C' } }] }), { status: 200 });
+  const montar = (extra: any = {}) => {
+    const gs = crearServidor();
+    const env: any = { ANTHROPIC_API_KEY: 'sk-a', GEMINI_API_KEY: 'AIza-g', SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, ADMIN_TOKENS: 'jefe:claveJefe', APP_TOKENS: 'juan:tokJ', ...extra };
+    const llamadas: string[] = [];
+    const f = jest.fn(async (u: any, i: any) => {
+      const url = String(u);
+      if (url.includes('gs.example')) return gs.llamar(u, i);
+      llamadas.push(url.includes('anthropic') ? 'claude' : 'gemini');
+      return url.includes('anthropic') ? claudeOk() : gemOk();
+    });
+    const pet = (ruta: string, clave: string, cuerpo: string) => new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave }, body: cuerpo });
+    return { gs, env, f, llamadas, pet, ia: async (clave: string, cuerpo: any) => { const r = await manejar(pet('/ia', clave, JSON.stringify(cuerpo)), env, f as any); return { status: r.status, j: await r.json() }; } };
+  };
+  beforeEach(() => { vaciarCacheUsuarios(); vaciarCacheIA(); });
+
+  it('por defecto analiza con Gemini; el administrador cambia a Claude y el cambio se aplica al instante, con el otro de respaldo', async () => {
+    const m = montar();
+    let r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
+    expect(r.headers.get('x-ia-proveedor')).toBe('gemini');
+    expect((await m.ia('claveJefe', { accion: 'estado' })).j).toMatchObject({ ok: true, principal: 'gemini', disponibles: { claude: true, gemini: true } });
+    const g = await m.ia('claveJefe', { accion: 'guardar', proveedor: 'claude' });
+    expect(g.j.principal).toBe('claude');
+    r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
+    expect(r.headers.get('x-ia-proveedor')).toBe('claude');
+    expect(m.gs.hoja('_Config')!.filas[1]).toEqual(['ia', 'claude']);
+    await m.ia('claveJefe', { accion: 'guardar', proveedor: 'gemini' });
+    expect((await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any)).headers.get('x-ia-proveedor')).toBe('gemini');
+  });
+
+  it('solo los administradores ven y cambian la IA; valores raros se rechazan', async () => {
+    const m = montar();
+    expect((await m.ia('tokJ', { accion: 'estado' })).status).toBe(401);
+    expect((await m.ia('tokJ', { accion: 'guardar', proveedor: 'claude' })).status).toBe(401);
+    expect((await m.ia('claveJefe', { accion: 'guardar', proveedor: 'gpt' })).status).toBe(400);
+    expect((await m.ia('claveJefe', { accion: 'borrar' })).status).toBe(400);
+    const r = await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'config_guardar', clave: 'ia', valor: 'claude' }) });
+    expect((await r.json()).ok).toBe(false);          // el token del equipo no puede cambiar ajustes
+    const raro = await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN-ADMIN', accion: 'config_guardar', clave: 'otra', valor: 'x' }) });
+    expect((await raro.json()).ok).toBe(false);
+  });
+
+  it('si el elegido no tiene clave se usa el otro; si la hoja no responde se usa el orden por defecto', async () => {
+    const m = montar({ GEMINI_API_KEY: undefined });
+    await m.ia('claveJefe', { accion: 'guardar', proveedor: 'gemini' });
+    const r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
+    expect(r.headers.get('x-ia-proveedor')).toBe('claude');
+  });
+
+  it('"probar" informa por proveedor si funciona o por qué falla, sin mostrar claves', async () => {
+    const m = montar();
+    const f = jest.fn(async (u: any, i: any) => {
+      const url = String(u);
+      if (url.includes('gs.example')) return m.gs.llamar(u, i);
+      if (url.includes('generativelanguage')) return new Response(JSON.stringify({ error: { message: 'models/gemini-x is not found. key=AIza-g' } }), { status: 404 });
+      return new Response('{}', { status: 200 });
+    });
+    const r = await manejar(m.pet('/ia', 'claveJefe', JSON.stringify({ accion: 'probar' })), m.env, f as any);
+    const j = await r.json();
+    expect(j.resultados.claude).toMatchObject({ ok: true });
+    expect(j.resultados.gemini).toMatchObject({ ok: false, estado: 404 });
+    expect(j.resultados.gemini.mensaje).toContain('not found'); expect(JSON.stringify(j)).not.toMatch(/AIza-g|sk-a/);
+    const sin = await manejar(m.pet('/ia', 'claveJefe', JSON.stringify({ accion: 'probar' })), { ...m.env, GEMINI_API_KEY: undefined }, f as any);
+    expect((await sin.json()).resultados.gemini).toMatchObject({ ok: false, mensaje: 'Sin clave configurada en el servidor.' });
+  });
+
+  it('si fallan los dos, el error dice cuál falló y con qué estado', async () => {
+    const m = montar();
+    const f = jest.fn(async (u: any, i: any) => (String(u).includes('gs.example') ? m.gs.llamar(u, i) : new Response('{}', { status: 404 })));
+    const r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, f as any);
+    expect(r.status).toBe(404); expect((await r.json()).error).toContain('gemini 404; claude 404');
   });
 });

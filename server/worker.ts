@@ -13,6 +13,7 @@
  *                      técnico lo pone el proxy según SU token, no lo declara el cliente)
  *   /equipo         → datos del mapa/panel de supervisión (supervisores y administradores)
  *   /yo             → quién soy (nombre y rol según la clave)
+ *   /ia             → administración de la IA: estado, elegir principal (Gemini/Claude), probar (solo administradores)
  *   /usuarios       → menú de administración: listar/crear/editar personas (solo administradores)
  *
  * Usuarios:  lo normal es la pestaña "_Usuarios" de la hoja de Google (nombre, rol, clave, activo): el administrador crea
@@ -24,8 +25,9 @@
  *            wrangler secret put SYNC_TOKEN        # = TOKEN del script
  *            wrangler secret put ADMIN_TOKENS      # "admin:claveAdmin"  (los administradores iniciales; después se crean personas desde la app)
  *            wrangler secret put SYNC_TOKEN_ADMIN  # = TOKEN_ADMIN del script
- * IA:        ANTHROPIC_API_KEY (Claude) y/o GEMINI_API_KEY (Gemini, tiene capa gratuita). ORDEN_IA="claude,gemini" (por defecto): si el
- *            primero falla —sin créditos, límite, caída— se usa el siguiente. Para usar primero la gratuita: ORDEN_IA="gemini,claude".
+ * IA:        ANTHROPIC_API_KEY (Claude) y/o GEMINI_API_KEY (Gemini, tiene capa gratuita). ORDEN_IA="gemini,claude" (por defecto): si el
+ *            primero falla —sin créditos, límite, caída— se usa el siguiente. El administrador cambia cuál va primero desde la app
+ *            (Administración → Inteligencia artificial), y eso manda sobre ORDEN_IA.
  *            GEMINI_MODEL (por defecto gemini-2.5-flash). Con la capa gratuita Google puede usar las fotos para mejorar sus productos.
  * Opcional:  USUARIOS_CACHE_SEG = 60  (segundos que el proxy recuerda una clave antes de volver a preguntar a la hoja)
  *            MODELOS_PERMITIDOS = "claude-sonnet-5-5,claude-haiku-5-5"
@@ -216,9 +218,17 @@ async function conGemini(cuerpo: any, env: any, llamar: typeof fetch): Promise<I
   return { ok: true, respuesta: new Response(JSON.stringify(convertida), { status: 200, headers: { 'content-type': 'application/json' } }) };
 }
 
-/** Proveedores de IA con clave configurada, en el orden de ORDEN_IA (por defecto Claude primero y Gemini de respaldo). */
-export function proveedores(env: any): ('claude' | 'gemini')[] {
-  const orden = String(env.ORDEN_IA ?? 'claude,gemini').split(',').map((x) => x.trim().toLowerCase());
+export type Proveedor = 'claude' | 'gemini';
+const otro = (p: Proveedor): Proveedor => (p === 'claude' ? 'gemini' : 'claude');
+
+/**
+ * Proveedores de IA con clave configurada, en orden. `principal` (lo que el administrador eligió en la app) va primero y el otro
+ * queda de respaldo; sin elección se usa ORDEN_IA (por defecto Gemini primero y Claude de respaldo).
+ */
+export function proveedores(env: any, principal?: Proveedor): Proveedor[] {
+  const orden = principal
+    ? [principal, otro(principal)]
+    : String(env.ORDEN_IA ?? 'gemini,claude').split(',').map((x) => x.trim().toLowerCase());
   return (['claude', 'gemini'] as const)
     .filter((p) => orden.includes(p) && !!(p === 'claude' ? env.ANTHROPIC_API_KEY : env.GEMINI_API_KEY))
     .sort((a, b) => orden.indexOf(a) - orden.indexOf(b));
@@ -231,10 +241,11 @@ async function analizar(request: Request, env: any, llamar: typeof fetch, tecnic
   const v = validarCuerpo(texto, modelos);
   if (!v.ok) return json(400, { error: v.error });
 
-  const lista = proveedores(env);
+  const lista = proveedores(env, await iaPrincipal(env, llamar));
   if (!lista.length) return json(503, { error: 'La IA no está configurada en el servidor (falta ANTHROPIC_API_KEY o GEMINI_API_KEY).' });
 
   let ultimo = 502;
+  const detalle: string[] = [];
   for (const p of lista) {
     let intento: Intento;
     try { intento = p === 'claude' ? await conClaude(v.cuerpo, env, llamar) : await conGemini(v.cuerpo, env, llamar); }
@@ -245,8 +256,72 @@ async function analizar(request: Request, env: any, llamar: typeof fetch, tecnic
       return new Response(intento.respuesta.body, { status: 200, headers: h });
     }
     ultimo = intento.estado;   // sin créditos, límite, caída o error: se prueba el siguiente
+    detalle.push(`${p} ${intento.estado}`);
   }
-  return json(ultimo === 429 ? 429 : ultimo === 401 || ultimo === 403 ? 502 : ultimo, { error: `El servicio de IA no respondió (${ultimo}).` });
+  return json(ultimo === 429 ? 429 : ultimo === 401 || ultimo === 403 ? 502 : ultimo, { error: `El servicio de IA no respondió (${detalle.join('; ')}).` });
+}
+
+const cacheIA = new Map<string, { v: Proveedor | undefined; hasta: number }>();
+export const vaciarCacheIA = () => cacheIA.clear();
+
+/** Qué IA eligió el administrador (pestaña _Config), con memoria corta. Si la hoja no responde, se usa el orden por defecto. */
+async function iaPrincipal(env: any, llamar: typeof fetch): Promise<Proveedor | undefined> {
+  if (!env.SYNC_URL || !env.SYNC_TOKEN) return undefined;
+  const ttl = Math.max(0, Number(env.USUARIOS_CACHE_SEG ?? 60)) * 1000;
+  const g = cacheIA.get(env.SYNC_URL);
+  if (g && g.hasta > Date.now()) return g.v;
+  try {
+    const r = await haciaHojas({ accion: 'config' }, env.SYNC_TOKEN, env, llamar);
+    const c: any = await r.json();
+    const v: Proveedor | undefined = c?.ok && (c.config?.ia === 'claude' || c.config?.ia === 'gemini') ? c.config.ia : undefined;
+    if (ttl > 0) cacheIA.set(env.SYNC_URL, { v, hasta: Date.now() + ttl });
+    return v;
+  } catch { return undefined; }
+}
+
+const SIN_CLAVES = (txt: string, env: any) => [env.ANTHROPIC_API_KEY, env.GEMINI_API_KEY].filter(Boolean).reduce((t: string, k: string) => t.split(k).join('***'), txt);
+
+/** Llamada mínima a un proveedor para el botón "Probar la IA" del administrador: dice si funciona y, si no, por qué (sin claves). */
+async function probarProveedor(p: Proveedor, env: any, llamar: typeof fetch): Promise<{ ok: boolean; estado: number; mensaje: string }> {
+  try {
+    const r = p === 'claude'
+      ? await llamar('https://api.anthropic.com/v1/messages', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', 'x-api-key': env.ANTHROPIC_API_KEY },
+        body: JSON.stringify({ model: String(env.MODELOS_PERMITIDOS ?? 'claude-haiku-5-5').split(',')[0].trim(), max_tokens: 8, messages: [{ role: 'user', content: 'Responde solo: ok' }] }),
+      })
+      : await llamar(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL || 'gemini-2.5-flash')}:generateContent`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
+        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Responde solo: ok' }] }], generationConfig: { maxOutputTokens: 8 } }),
+      });
+    if (r.ok) { await r.body?.cancel().catch(() => {}); return { ok: true, estado: r.status, mensaje: 'Funciona.' }; }
+    const j: any = await r.json().catch(() => null);
+    const msg = String(j?.error?.message ?? j?.error ?? '').slice(0, 220);
+    return { ok: false, estado: r.status, mensaje: SIN_CLAVES(msg, env) || `Respondió ${r.status}.` };
+  } catch { return { ok: false, estado: 0, mensaje: 'No se pudo conectar con el proveedor.' }; }
+}
+
+/** Menú de administración → Inteligencia artificial: ver estado, elegir cuál va primero, probar. Solo administradores. */
+async function administrarIA(request: Request, env: any, llamar: typeof fetch): Promise<Response> {
+  const texto = await request.text();
+  if (texto.length > 2000) return json(413, { ok: false, error: 'Payload too large' });
+  let c: any;
+  try { c = JSON.parse(texto); } catch { return json(400, { ok: false, error: 'JSON inválido' }); }
+  const disponibles = { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_API_KEY };
+  const estado = async () => ({ ok: true, principal: (await iaPrincipal(env, llamar)) ?? proveedores({ ...env, ANTHROPIC_API_KEY: 'x', GEMINI_API_KEY: 'x' })[0], disponibles, modeloGemini: env.GEMINI_MODEL || 'gemini-2.5-flash' });
+  if (c?.accion === 'estado') { cacheIA.clear(); return json(200, await estado()); }
+  if (c?.accion === 'guardar') {
+    if (c.proveedor !== 'claude' && c.proveedor !== 'gemini') return json(400, { ok: false, error: 'Proveedor inválido' });
+    const r = await haciaHojas({ accion: 'config_guardar', clave: 'ia', valor: c.proveedor }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    cacheIA.clear();
+    const j: any = await r.clone().json().catch(() => null);
+    return j?.ok ? json(200, await estado()) : r;
+  }
+  if (c?.accion === 'probar') {
+    const res: Record<string, any> = {};
+    for (const p of ['gemini', 'claude'] as Proveedor[]) res[p] = disponibles[p] ? await probarProveedor(p, env, llamar) : { ok: false, estado: 0, mensaje: 'Sin clave configurada en el servidor.' };
+    return json(200, { ok: true, resultados: res });
+  }
+  return json(400, { ok: false, error: 'Acción no permitida' });
 }
 
 const ACCIONES_SYNC = [undefined, 'listar', 'latido'];
@@ -298,7 +373,7 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   const ruta = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
   const clave = request.headers.get('x-api-key') ?? '';
 
-  if (!['/', '/analizar', '/sync', '/equipo', '/yo', '/usuarios'].includes(ruta)) return json(404, { error: 'Not found' });
+  if (!['/', '/analizar', '/sync', '/equipo', '/yo', '/usuarios', '/ia'].includes(ruta)) return json(404, { error: 'Not found' });
 
   let quien: Identidad | null;
   try { quien = await autenticar(clave, env, llamar); }
@@ -309,6 +384,10 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   if (ruta === '/equipo') {
     if (quien.rol === 'tecnico') return json(401, { error: 'Unauthorized' });
     return haciaHojas({ accion: 'equipo' }, env.SYNC_TOKEN_ADMIN, env, llamar);
+  }
+  if (ruta === '/ia') {
+    if (quien.rol !== 'admin') return json(401, { error: 'Unauthorized' });
+    return administrarIA(request, env, llamar);
   }
   if (ruta === '/usuarios') {
     if (quien.rol !== 'admin') return json(401, { error: 'Unauthorized' });

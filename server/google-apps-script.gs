@@ -11,6 +11,7 @@
  *   { token: TOKEN_ADMIN, accion:'equipo' }                                 → datos del panel/mapa de supervisión (lo usa la web)
  *   { token, accion:'usuario', clave }                                      → quién es esa clave según la pestaña _Usuarios (lo usa el proxy)
  *   { token: TOKEN_ADMIN, accion:'usuarios_listar' | 'usuarios_guardar' }   → menú de administración de la web (crear/editar usuarios)
+ *   { token, accion:'config' } / { token: TOKEN_ADMIN, accion:'config_guardar', clave, valor } → ajustes del sistema (pestaña _Config), p. ej. qué IA va primero
  * Mapa en vivo para el administrador: <URL de la Web App>?vista=equipo&token=<TOKEN_ADMIN>
  * El orden lo pone EL SERVIDOR (columna "Recibido"), no los relojes de los teléfonos.
  */
@@ -28,7 +29,7 @@ var AGRUPADAS_MIN = 4;
 var AGRUPADAS_VENTANA_MIN = 10;   // ...dentro de esta ventana de tiempo
 var TOLERANCIA_JORNADA_MIN = 2;   // margen al comprobar que la captura cae dentro de su jornada
 var AUDITORIA_EN_LINEA_MAX_FILAS = 3000; // en pestañas más grandes la auditoría la hace solo el activador por tiempo (auditarTodo), no cada envío
-var HOJA_EQUIPO = '_Equipo', HOJA_JORNADAS = '_Jornadas', HOJA_USUARIOS = '_Usuarios'; // pestañas del sistema (los proyectos no pueden empezar por "_")
+var HOJA_EQUIPO = '_Equipo', HOJA_JORNADAS = '_Jornadas', HOJA_USUARIOS = '_Usuarios', HOJA_CONFIG = '_Config'; // pestañas del sistema (los proyectos no pueden empezar por "_")
 
 var COLUMNAS = [
   ['uuid', 'UUID'], ['id', 'ID (local del teléfono)'], ['codigoPoste', 'Código del poste'], ['codigo', 'Código de la luminaria'], ['creadoEn', 'Fecha'],
@@ -56,13 +57,15 @@ function doPost(e) {
     lock.waitLock(30000);
     var d = JSON.parse(e.postData.contents);
     // 'equipo' y la administración de usuarios exigen TOKEN_ADMIN; todo lo demás, el token del equipo
-    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar'].indexOf(d.accion) >= 0;
+    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'config_guardar'].indexOf(d.accion) >= 0;
     var esAdmin = soloAdmin && d.token === TOKEN_ADMIN;
     if (soloAdmin ? !esAdmin : d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' }); // las acciones de administración NO sirven con el token del equipo
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
     if (d.accion === 'equipo') { var datos = datosEquipo(TOKEN_ADMIN); datos.ok = true; return salida(datos); }
     if (d.accion === 'latido') return salida(registrarLatido(d, ahora));
     if (d.accion === 'usuario') return salida({ ok: true, usuario: buscarUsuario(d.clave) });
+    if (d.accion === 'config') return salida({ ok: true, config: leerConfig() });
+    if (d.accion === 'config_guardar') return salida(guardarConfig(d));
     if (d.accion === 'usuarios_listar') return salida({ ok: true, usuarios: listarUsuarios() });
     if (d.accion === 'usuarios_guardar') return salida(guardarUsuario(d));
     var hoja = obtenerHoja(d.proyecto && d.proyecto.nombre);
@@ -379,6 +382,32 @@ function upsert(hoja, columnas, iClave, clave, obj, conservar) {
 }
 
 function texto(v, max) { return String(v === undefined || v === null ? '' : v).substring(0, max); }
+
+/* ---------------- Ajustes del sistema (pestaña _Config) ---------------- */
+
+var COLUMNAS_CONFIG = [['clave', 'Clave'], ['valor', 'Valor']];
+var CONFIG_PERMITIDA = { ia: ['gemini', 'claude'] }; // qué IA se intenta primero
+
+/** { clave: valor } de la pestaña _Config (solo claves conocidas). */
+function leerConfig() {
+  var hoja = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_CONFIG);
+  var cfg = {};
+  if (!hoja || hoja.getLastRow() < 2) return cfg;
+  hoja.getRange(2, 1, hoja.getLastRow() - 1, 2).getValues().forEach(function (r) {
+    var k = String(r[0]).trim(), v = String(r[1]).trim().toLowerCase();
+    if (CONFIG_PERMITIDA[k] && CONFIG_PERMITIDA[k].indexOf(v) >= 0) cfg[k] = v;
+  });
+  return cfg;
+}
+
+function guardarConfig(d) {
+  var k = String(d.clave || ''), v = String(d.valor || '').trim().toLowerCase();
+  if (!CONFIG_PERMITIDA[k] || CONFIG_PERMITIDA[k].indexOf(v) < 0) return { ok: false, error: 'Ajuste no permitido.' };
+  var hoja = hojaSistema(HOJA_CONFIG, COLUMNAS_CONFIG, ['clave', 'valor']);
+  var enc = buscarFila(hoja, COLUMNAS_CONFIG, 0, k);
+  if (enc.fila) hoja.getRange(enc.fila, 2).setValue(v); else hoja.appendRow([k, v]);
+  return { ok: true, config: leerConfig() };
+}
 
 /* ---------------- Usuarios (pestaña _Usuarios: el administrador crea personas y roles aquí) ---------------- */
 

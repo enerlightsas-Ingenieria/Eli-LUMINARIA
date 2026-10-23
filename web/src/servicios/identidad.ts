@@ -58,3 +58,13 @@ export async function enlaceDeAcceso(u: Usuario, opciones: { proyectos?: string[
   if (opciones.terceros) { cfg.modoTerceros = true; cfg.precisionMaxM = opciones.precision ?? 20; }
   return `${location.origin}${location.pathname}#/config?c=${codificar(cfg)}`;
 }
+
+export type Proveedor = 'gemini' | 'claude';
+export interface EstadoIA { ok: true; principal: Proveedor; disponibles: Record<Proveedor, boolean>; modeloGemini: string }
+export interface ResultadoPrueba { ok: boolean; estado: number; mensaje: string }
+
+export const estadoIA = (): Promise<EstadoIA> => llamarProxy('/ia', { accion: 'estado' });
+export const elegirIA = (proveedor: Proveedor): Promise<EstadoIA> => llamarProxy('/ia', { accion: 'guardar', proveedor });
+export async function probarIA(): Promise<Record<Proveedor, ResultadoPrueba>> {
+  return (await llamarProxy('/ia', { accion: 'probar' }, 40000)).resultados;
+}

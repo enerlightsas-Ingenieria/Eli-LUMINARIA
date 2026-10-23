@@ -4,7 +4,7 @@ import { avisar, confirmar } from '../componentes/dialogos';
 import { Boton, Cabecera, Campo, Cargando, Ficha, Hoja, Seccion, Segmentado } from '../componentes/ui';
 import { useApp } from '../contexto/App';
 import { ir } from '../router';
-import { enlaceDeAcceso, guardarUsuario, listarUsuarios, type Usuario } from '../servicios/identidad';
+import { elegirIA, enlaceDeAcceso, estadoIA, guardarUsuario, listarUsuarios, probarIA, type EstadoIA, type Proveedor, type ResultadoPrueba, type Usuario } from '../servicios/identidad';
 
 const ROLES: { valor: Rol; texto: string }[] = [{ valor: 'tecnico', texto: 'Técnico' }, { valor: 'supervisor', texto: 'Supervisor' }, { valor: 'admin', texto: 'Administrador' }];
 const TEXTO_ROL: Record<Rol, string> = { tecnico: 'Técnico', supervisor: 'Supervisor', admin: 'Administrador' };
@@ -19,11 +19,24 @@ export function Administracion() {
   const [edicion, setEdicion] = useState<Edicion | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [enlace, setEnlace] = useState<{ usuario: Usuario; url: string } | null>(null);
+  const [ia, setIa] = useState<EstadoIA | null>(null);
+  const [prueba, setPrueba] = useState<Record<Proveedor, ResultadoPrueba> | null>(null);
+  const [probando, setProbando] = useState(false);
 
   const cargar = useCallback(async () => {
     try { setLista(await listarUsuarios()); setError(''); } catch (e: any) { setError(e.message ?? String(e)); }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => { estadoIA().then(setIa).catch(() => {}); }, []);
+
+  const cambiarIA = async (p: Proveedor) => {
+    try { setIa(await elegirIA(p)); setPrueba(null); } catch (e: any) { await avisar('No se pudo cambiar la IA', e.message ?? String(e)); }
+  };
+  const probar = async () => {
+    setProbando(true); setPrueba(null);
+    try { setPrueba(await probarIA()); } catch (e: any) { await avisar('No se pudo probar la IA', e.message ?? String(e)); }
+    finally { setProbando(false); }
+  };
 
   if (rolDe(ajustes) !== 'admin') return <><Cabecera titulo="Administración" atras={() => ir('/ajustes')} /><p className="muted">Solo los administradores pueden gestionar usuarios.</p></>;
 
@@ -68,6 +81,16 @@ export function Administracion() {
       <p className="muted" style={{ marginBottom: 12 }}>
         <b>Técnico:</b> captura y ve sus registros. <b>Supervisor:</b> además ve el panel del equipo y puede capturar. <b>Administrador:</b> además crea y da de baja usuarios.
       </p>
+      <Seccion>Inteligencia artificial</Seccion>
+      <p className="muted" style={{ marginBottom: 8 }}>Elige cuál IA analiza primero las fotos. Si falla (sin créditos, límite de uso o caída), el sistema usa la otra automáticamente, si tiene clave.</p>
+      <Segmentado valor={ia?.principal ?? 'gemini'} alCambiar={cambiarIA} opciones={[{ valor: 'gemini', texto: 'Gemini (gratis)' }, { valor: 'claude', texto: 'Claude' }]} />
+      {ia && <p className="muted" style={{ margin: '8px 0' }}>Claves en el servidor: Gemini {ia.disponibles.gemini ? '✅' : '❌ falta'} · Claude {ia.disponibles.claude ? '✅' : '❌ falta'}. Modelo de Gemini: {ia.modeloGemini}.</p>}
+      <Boton texto="Probar la IA" variante="secundario" cargando={probando} onClick={probar} />
+      {prueba && (['gemini', 'claude'] as Proveedor[]).map((p) => (
+        <p key={p} role="status" style={{ margin: '8px 0' }}><b>{p === 'gemini' ? 'Gemini' : 'Claude'}:</b> {prueba[p].ok ? '✅ funciona' : `❌ ${prueba[p].estado ? `error ${prueba[p].estado} — ` : ''}${prueba[p].mensaje}`}</p>
+      ))}
+
+      <Seccion>Personas</Seccion>
       {!!error && <p className="aviso" role="alert">{error}</p>}
       {!lista && !error && <Cargando texto="Cargando usuarios…" />}
       {lista && !lista.length && <p className="muted">Aún no hay usuarios. Toca + para crear el primero.</p>}
