@@ -17,6 +17,7 @@ export async function aplicarConfig(cfg: ConfigFlota): Promise<{ proyectosNuevos
     modoTerceros: cfg.modoTerceros ?? a.modoTerceros,
     precisionMaxM: cfg.precisionMaxM ?? a.precisionMaxM,
     supervisor: cfg.supervisor ?? a.supervisor,
+    rol: cfg.apiKey && cfg.apiKey !== a.apiKey ? undefined : a.rol,   // otra cuenta en este teléfono: el rol se vuelve a pedir al servidor
   });
   const existentes = new Set((await listarProyectos()).map((p) => p.nombre.trim().toLowerCase()));
   let proyectosNuevos = 0;

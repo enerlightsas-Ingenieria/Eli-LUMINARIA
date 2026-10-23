@@ -4,27 +4,24 @@ import { coordenadaValida, enlaceMapa } from './geo';
 const COLUMNAS: [string, (l: Luminaria, p?: Proyecto) => string | number | null][] = [
   ['ID', (l) => l.id],
   ['Proyecto', (_l, p) => p?.nombre ?? ''],
-  ['Código activo', (l) => l.codigo],
+  ['Código del poste', (l) => l.codigoPoste],
+  ['Código de la luminaria', (l) => l.codigo],
   ['Fecha', (l) => l.creadoEn],
   ['Técnico', (l) => l.tecnico],
   ['Latitud', (l) => l.latitud],
   ['Longitud', (l) => l.longitud],
   ['Precisión (m)', (l) => (l.precisionM != null ? Math.round(l.precisionM) : null)],
   ['Dirección', (l) => l.direccion],
-  ['Marca', (l) => l.marca],
   ['Fabricante', (l) => l.fabricante],
   ['Modelo', (l) => l.modelo],
-  ['Tipo de luminaria', (l) => l.tipoLuminaria],
   ['Tecnología', (l) => l.tecnologia],
   ['Potencia (W)', (l) => l.potenciaW],
   ['Tensión (V)', (l) => l.tensionV],
   ['Fotocelda', (l) => l.fotocelda],
   ['Pines fotocelda', (l) => l.pinesFotocelda],
   ['Temp. color (K)', (l) => l.temperaturaColorK],
-  ['Flujo (lm)', (l) => l.flujoLuminosoLm],
   ['IP', (l) => l.ip],
   ['Montaje', (l) => l.montaje],
-  ['Altura (m)', (l) => l.alturaM],
   ['Estado', (l) => l.estado],
   ['Confianza IA', (l) => l.confianza],
   ['Origen de la foto', (l) => l.origen],
@@ -55,11 +52,11 @@ export function aGeoJson(items: Luminaria[], proyecto?: Proyecto): string {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [l.longitud, l.latitud] },
       properties: {
-        id: l.id, proyecto: proyecto?.nombre ?? '', codigo: l.codigo, tecnico: l.tecnico, marca: l.marca, fabricante: l.fabricante,
-        modelo: l.modelo, tipo: l.tipoLuminaria, tecnologia: l.tecnologia, potencia_w: l.potenciaW,
+        id: l.id, proyecto: proyecto?.nombre ?? '', codigo_poste: l.codigoPoste, codigo_luminaria: l.codigo, tecnico: l.tecnico, fabricante: l.fabricante,
+        modelo: l.modelo, tecnologia: l.tecnologia, potencia_w: l.potenciaW,
         tension_v: l.tensionV, fotocelda: l.fotocelda, pines_fotocelda: l.pinesFotocelda,
-        temperatura_color_k: l.temperaturaColorK, flujo_lm: l.flujoLuminosoLm, ip: l.ip, montaje: l.montaje,
-        altura_m: l.alturaM, estado: l.estado, confianza_ia: l.confianza, origen: l.origen, ubicacion_simulada: l.ubicacionSimulada, jornada_id: l.jornadaId, direccion: l.direccion,
+        temperatura_color_k: l.temperaturaColorK, ip: l.ip, montaje: l.montaje,
+        estado: l.estado, confianza_ia: l.confianza, origen: l.origen, ubicacion_simulada: l.ubicacionSimulada, jornada_id: l.jornadaId, direccion: l.direccion,
         observaciones: l.observaciones, fecha: l.creadoEn,
       },
     }));
@@ -74,7 +71,7 @@ export function aKml(items: Luminaria[], proyecto?: Proyecto): string {
   const marcas = items
     .filter((l) => coordenadaValida(l.latitud, l.longitud))
     .map((l) => {
-      const nombre = l.codigo || [l.marca, l.modelo].filter(Boolean).join(' ') || `Luminaria ${l.id}`;
+      const nombre = l.codigo || l.codigoPoste || [l.fabricante, l.modelo].filter(Boolean).join(' ') || `Luminaria ${l.id}`;
       const desc = COLUMNAS.filter(([h]) => !EXCLUIDAS_KML.includes(h))
         .map(([h, f]) => ({ h, v: f(l, proyecto) }))
         .filter((x) => x.v !== '' && x.v != null)

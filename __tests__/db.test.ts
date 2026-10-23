@@ -22,7 +22,7 @@ const cargarDb = () => { let m: typeof import('../src/services/db'); jest.isolat
 const borrador = (proyectoId: number, o: any = {}) => ({
   ...require('../src/types').caracteristicasVacias(), uuid: require('crypto').randomUUID(), proyectoId,
   creadoEn: '2026-01-01T00:00:00Z', actualizadoEn: '', fotos: ['file:///a.jpg'], latitud: 4.7, longitud: -74.07,
-  precisionM: 6, direccion: 'Cra 7', codigo: 'P-1', tecnico: 'Ana', confianza: 'alta', marca: 'Philips', tecnologia: 'LED', ...o,
+  precisionM: 6, direccion: 'Cra 7', codigo: 'P-1', tecnico: 'Ana', confianza: 'alta', fabricante: 'Philips', tecnologia: 'LED', ...o,
 });
 
 describe('db', () => {
@@ -36,14 +36,14 @@ describe('db', () => {
     const id = await db.guardarLuminaria(borrador(ps[0].id));
     let ls = await db.listarLuminarias(ps[0].id);
     expect(ls).toHaveLength(1);
-    expect(ls[0]).toMatchObject({ marca: 'Philips', fotos: ['file:///a.jpg'], sincronizado: false, latitud: 4.7 });
+    expect(ls[0]).toMatchObject({ fabricante: 'Philips', fotos: ['file:///a.jpg'], sincronizado: false, latitud: 4.7 });
 
     await db.marcarSincronizadas([{ uuid: ls[0].uuid, actualizadoEn: ls[0].actualizadoEn }]);
     expect(await db.pendientesDeSync(ps[0].id)).toHaveLength(0);
 
-    await db.guardarLuminaria({ ...ls[0], id, marca: 'Schréder' }); // editar reabre pendiente
+    await db.guardarLuminaria({ ...ls[0], id, fabricante: 'Schréder' }); // editar reabre pendiente
     ls = await db.listarLuminarias(ps[0].id);
-    expect(ls[0].marca).toBe('Schréder'); expect(ls[0].sincronizado).toBe(false);
+    expect(ls[0].fabricante).toBe('Schréder'); expect(ls[0].sincronizado).toBe(false);
     expect(await db.pendientesDeSync(ps[0].id)).toHaveLength(1);
 
     await db.borrarLuminaria(ls[0]);
@@ -80,13 +80,13 @@ describe('db', () => {
     const [p] = await db.listarProyectos();
     const ls = await db.listarLuminarias(p.id);
     expect(ls).toHaveLength(1);
-    expect(ls[0]).toMatchObject({ marca: 'Lumenpulse', potenciaW: '150', pinesFotocelda: '7', fotos: ['file:///v0.jpg'], latitud: 4.5, longitud: -74.1 });
+    expect(ls[0]).toMatchObject({ fabricante: 'Lumenpulse', potenciaW: '150', pinesFotocelda: '7', fotos: ['file:///v0.jpg'], latitud: 4.5, longitud: -74.1 });
     expect(ls[0].uuid).toHaveLength(36);
     expect(mockMotor.prepare("SELECT name FROM sqlite_master WHERE name='luminarias_v0'").get()).toBeUndefined();
   });
 });
 
-describe('migración v1 → v4', () => {
+describe('migración v1 → v5', () => {
   it('añade tecnico, tombstones y la evidencia de captura a una base v1 sin perder filas', async () => {
     mockMotor = new DatabaseSync(':memory:');
     mockMotor.exec(`
@@ -105,7 +105,7 @@ describe('migración v1 → v4', () => {
     expect(ls[0]).toMatchObject({ marca: 'Schréder', tecnico: '' });
     await db.guardarLuminaria({ ...ls[0], tecnico: 'Ana' });
     expect((await db.listarLuminarias(1))[0].tecnico).toBe('Ana');
-    expect((mockMotor.prepare('PRAGMA user_version').get() as any).user_version).toBe(4);
+    expect((mockMotor.prepare('PRAGMA user_version').get() as any).user_version).toBe(5);
     expect(ls[0]).toMatchObject({ origen: '', ubicacionSimulada: false, jornadaId: '' });
     await db.guardarLuminaria({ ...ls[0], origen: 'camara', ubicacionSimulada: true, jornadaId: 'j9' });
     expect((await db.listarLuminarias(1))[0]).toMatchObject({ origen: 'camara', ubicacionSimulada: true, jornadaId: 'j9' });

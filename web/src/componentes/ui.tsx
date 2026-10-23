@@ -1,5 +1,6 @@
 import { ReactNode, useEffect } from 'react';
 import { Icono } from './Icono';
+import { esOpcionAbierta, PREFIJO_OTRA } from '@compartido/types';
 
 export function Boton({ texto, onClick, variante = 'primario', deshabilitado, cargando, icono, bloque = true, tipo = 'button' }: {
   texto: string; onClick?: () => void; variante?: 'primario' | 'secundario' | 'peligro'; deshabilitado?: boolean; cargando?: boolean;
@@ -32,8 +33,10 @@ export function Campo({ etiqueta, valor, alCambiar, pista, multilinea, numerico,
       {!!opciones?.length && (
         <div className="fichas" role="group" aria-label={`Opciones para ${etiqueta}`}>
           {opciones.map((o) => {
-            const activa = valor.trim().toLowerCase() === o.toLowerCase();
-            return <button key={o} type="button" className={`ficha${activa ? ' activa' : ''}`} aria-pressed={activa} onClick={() => alCambiar(activa ? '' : o)}>{o}</button>;
+            const abierta = esOpcionAbierta(o);
+            const activa = abierta ? /^otra\b/i.test(valor.trim()) : valor.trim().toLowerCase() === o.toLowerCase();
+            return <button key={o} type="button" className={`ficha${activa ? ' activa' : ''}`} aria-pressed={activa}
+              onClick={() => { if (activa) alCambiar(''); else { alCambiar(abierta ? PREFIJO_OTRA : o); if (abierta) document.getElementById(id)?.focus(); } }}>{o}</button>;
           })}
         </div>
       )}

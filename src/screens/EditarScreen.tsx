@@ -106,7 +106,7 @@ export function EditarScreen() {
     if (coordenadaValida(l.latitud, l.longitud)) {
       const cerca = masCercano({ latitud: l.latitud!, longitud: l.longitud! }, items.filter((x) => x.id !== l.id), 8);
       if (cerca) {
-        Alert.alert('Posible duplicado', `Ya hay una luminaria (#${cerca.item.id}${cerca.item.codigo ? ' · ' + cerca.item.codigo : ''}) a ${Math.round(cerca.metros)} m de esta coordenada.`, [
+        Alert.alert('Posible duplicado', `Ya hay una luminaria (#${cerca.item.id}${cerca.item.codigo || cerca.item.codigoPoste ? ' · ' + (cerca.item.codigo || cerca.item.codigoPoste) : ''}) a ${Math.round(cerca.metros)} m de esta coordenada.`, [
           { text: 'Ver la otra', onPress: () => nav.push('Editar', { id: cerca.item.id }) },
           { text: 'Guardar igual', onPress: () => persistir(siguiente) },
           { text: 'Cancelar', style: 'cancel' },
@@ -161,7 +161,8 @@ export function EditarScreen() {
         )}
 
         <Seccion>Identificación y ubicación</Seccion>
-        <Field label="Código del activo / n.º de poste" value={l.codigo} onChangeText={(t) => set('codigo', t)} hint="Opcional, el que use tu empresa" />
+        <Field label="Código del poste" value={l.codigoPoste ?? ''} onChangeText={(t) => set('codigoPoste', t)} hint="Opcional" />
+        <Field label="Código de la luminaria" value={l.codigo} onChangeText={(t) => set('codigo', t)} hint="Opcional" />
         <View style={{ flexDirection: 'row', gap: 10 }}>
           <View style={{ flex: 1 }}><Field label="Latitud" numeric signed soloLectura={terceros} value={coordTxt.lat} onChangeText={(t) => { setCoordTxt((p) => ({ ...p, lat: t })); set('latitud', num(t)); }} /></View>
           <View style={{ flex: 1 }}><Field label="Longitud" numeric signed soloLectura={terceros} value={coordTxt.lng} onChangeText={(t) => { setCoordTxt((p) => ({ ...p, lng: t })); set('longitud', num(t)); }} /></View>

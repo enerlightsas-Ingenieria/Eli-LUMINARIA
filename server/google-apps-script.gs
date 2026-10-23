@@ -10,6 +10,7 @@
  *   { token, accion:'latido', dispositivo, tecnico, estado, ... }           → monitoreo de jornada (pestañas _Equipo y _Jornadas)
  *   { token: TOKEN_ADMIN, accion:'equipo' }                                 → datos del panel/mapa de supervisión (lo usa la web)
  *   { token, accion:'usuario', clave }                                      → quién es esa clave según la pestaña _Usuarios (lo usa el proxy)
+ *   { token: TOKEN_ADMIN, accion:'usuarios_listar' | 'usuarios_guardar' }   → menú de administración de la web (crear/editar usuarios)
  * Mapa en vivo para el administrador: <URL de la Web App>?vista=equipo&token=<TOKEN_ADMIN>
  * El orden lo pone EL SERVIDOR (columna "Recibido"), no los relojes de los teléfonos.
  */
@@ -30,20 +31,22 @@ var AUDITORIA_EN_LINEA_MAX_FILAS = 3000; // en pestañas más grandes la auditor
 var HOJA_EQUIPO = '_Equipo', HOJA_JORNADAS = '_Jornadas', HOJA_USUARIOS = '_Usuarios'; // pestañas del sistema (los proyectos no pueden empezar por "_")
 
 var COLUMNAS = [
-  ['uuid', 'UUID'], ['id', 'ID (local del teléfono)'], ['codigo', 'Código activo'], ['creadoEn', 'Fecha'],
+  ['uuid', 'UUID'], ['id', 'ID (local del teléfono)'], ['codigoPoste', 'Código del poste'], ['codigo', 'Código de la luminaria'], ['creadoEn', 'Fecha'],
   ['tecnico', 'Técnico'], ['latitud', 'Latitud'], ['longitud', 'Longitud'], ['precisionM', 'Precisión (m)'],
-  ['direccion', 'Dirección'], ['marca', 'Marca'], ['fabricante', 'Fabricante'], ['modelo', 'Modelo'],
-  ['tipoLuminaria', 'Tipo de luminaria'], ['tecnologia', 'Tecnología'], ['potenciaW', 'Potencia (W)'],
+  ['direccion', 'Dirección'], ['fabricante', 'Fabricante'], ['modelo', 'Modelo'],
+  ['tecnologia', 'Tecnología'], ['potenciaW', 'Potencia (W)'],
   ['tensionV', 'Tensión (V)'], ['fotocelda', 'Fotocelda'], ['pinesFotocelda', 'Pines fotocelda'],
-  ['temperaturaColorK', 'Temp. color (K)'], ['flujoLuminosoLm', 'Flujo (lm)'], ['ip', 'IP'], ['montaje', 'Montaje'],
-  ['alturaM', 'Altura (m)'], ['estado', 'Estado'], ['confianza', 'Confianza IA'], ['observaciones', 'Observaciones'],
+  ['temperaturaColorK', 'Temp. color (K)'], ['ip', 'IP'], ['montaje', 'Montaje'],
+  ['estado', 'Estado'], ['confianza', 'Confianza IA'], ['observaciones', 'Observaciones'],
   ['mapa', 'Enlace mapa'], ['foto', 'Foto'], ['eliminada', 'Eliminada'], ['recibidoEn', 'Recibido'],
   // Las columnas nuevas se AÑADEN SIEMPRE AL FINAL: todo el script lee por posición y así las pestañas ya creadas siguen siendo válidas.
   ['origen', 'Origen de la foto'], ['ubicacionSimulada', 'Ubicación simulada'], ['jornadaId', 'ID jornada'], ['alertas', 'Alertas']
 ];
+// Encabezados de la versión anterior (con Marca, Tipo de luminaria, Flujo y Altura): esas pestañas se archivan, no se mezclan.
+var ENCABEZADOS_RETIRADOS = ['Marca', 'Tipo de luminaria', 'Flujo (lm)', 'Altura (m)', 'Código activo'];
 // Columnas que se dejan como número (para sumar/graficar); el resto se fuerza a texto para que Sheets no
 // convierta modelos como "1-2" en fechas ni recorte ceros.
-var NUMERICAS = ['id', 'latitud', 'longitud', 'precisionM', 'potenciaW', 'tensionV', 'pinesFotocelda', 'temperaturaColorK', 'flujoLuminosoLm', 'alturaM'];
+var NUMERICAS = ['id', 'latitud', 'longitud', 'precisionM', 'potenciaW', 'tensionV', 'pinesFotocelda', 'temperaturaColorK'];
 
 function col(clave) { for (var i = 0; i < COLUMNAS.length; i++) if (COLUMNAS[i][0] === clave) return i; return -1; }
 
@@ -52,13 +55,16 @@ function doPost(e) {
   try {
     lock.waitLock(30000);
     var d = JSON.parse(e.postData.contents);
-    // 'equipo' (panel de supervisión de la web) exige TOKEN_ADMIN; todo lo demás, el token del equipo
-    var esAdmin = d.accion === 'equipo' && d.token === TOKEN_ADMIN;
-    if (!esAdmin && d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' });
+    // 'equipo' y la administración de usuarios exigen TOKEN_ADMIN; todo lo demás, el token del equipo
+    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar'].indexOf(d.accion) >= 0;
+    var esAdmin = soloAdmin && d.token === TOKEN_ADMIN;
+    if (soloAdmin ? !esAdmin : d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' }); // las acciones de administración NO sirven con el token del equipo
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
     if (d.accion === 'equipo') { var datos = datosEquipo(TOKEN_ADMIN); datos.ok = true; return salida(datos); }
     if (d.accion === 'latido') return salida(registrarLatido(d, ahora));
     if (d.accion === 'usuario') return salida({ ok: true, usuario: buscarUsuario(d.clave) });
+    if (d.accion === 'usuarios_listar') return salida({ ok: true, usuarios: listarUsuarios() });
+    if (d.accion === 'usuarios_guardar') return salida(guardarUsuario(d));
     var hoja = obtenerHoja(d.proyecto && d.proyecto.nombre);
 
     if (d.accion === 'listar') return salida({ ok: true, ahora: ahora, luminarias: listar(hoja, d.desde || '') });
@@ -120,7 +126,9 @@ function obtenerHoja(nombreProyecto) {
   // Se normaliza el nombre (espacios y mayúsculas) para que "Barrio A" y "barrio  a" sean la misma pestaña.
   var limpio = String(nombreProyecto || 'General').replace(/[\\\/\?\*\[\]:]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 90) || 'General';
   limpio = limpio.replace(/^_+/, '').trim() || 'General'; // "_" está reservado para las pestañas del sistema
-  var hoja = buscarHoja(libro, limpio) || libro.insertSheet(limpio);
+  var hoja = buscarHoja(libro, limpio);
+  if (hoja && esDisenoAnterior(hoja)) { archivarHoja(libro, hoja); hoja = null; }
+  hoja = hoja || libro.insertSheet(limpio);
   if (hoja.getLastRow() > 0) asegurarEncabezados(hoja);
   if (hoja.getLastRow() === 0) {
     hoja.appendRow(COLUMNAS.map(function (c) { return c[1]; }));
@@ -131,6 +139,22 @@ function obtenerHoja(nombreProyecto) {
     });
   }
   return hoja;
+}
+
+/** ¿La pestaña tiene el diseño anterior de columnas (con campos que ya no existen)? */
+function esDisenoAnterior(hoja) {
+  if (hoja.getLastRow() < 1) return false;
+  var n = Math.min(hoja.getMaxColumns(), 60);
+  var cab = hoja.getRange(1, 1, 1, n).getValues()[0];
+  for (var i = 0; i < cab.length; i++) if (ENCABEZADOS_RETIRADOS.indexOf(String(cab[i])) >= 0) return true;
+  return false;
+}
+
+/** Aparta la pestaña anterior sin borrar nada: "Proyecto" → "Proyecto (anterior)". La pestaña nueva nace con el diseño actual. */
+function archivarHoja(libro, hoja) {
+  var base = hoja.getName() + ' (anterior)', nombre = base, k = 2;
+  while (buscarHoja(libro, nombre)) nombre = base + ' ' + k++;
+  hoja.setName(nombre);
 }
 
 /** Completa encabezados y columnas de pestañas creadas con una versión anterior del script (nunca toca los datos existentes). */
@@ -358,7 +382,7 @@ function texto(v, max) { return String(v === undefined || v === null ? '' : v).s
 
 /* ---------------- Usuarios (pestaña _Usuarios: el administrador crea personas y roles aquí) ---------------- */
 
-var COLUMNAS_USUARIOS = [['nombre', 'Nombre'], ['rol', 'Rol (tecnico o supervisor)'], ['clave', 'Clave'], ['activo', 'Activo (si/no)']];
+var COLUMNAS_USUARIOS = [['nombre', 'Nombre'], ['rol', 'Rol (tecnico, supervisor o administrador)'], ['clave', 'Clave'], ['activo', 'Activo (si/no)']];
 
 /** Crea la pestaña si no existe y la deja lista. También se puede ejecutar a mano. */
 function prepararUsuarios() {
@@ -377,11 +401,19 @@ function generarClavesFaltantes() {
   var hechas = 0;
   datos.forEach(function (r, i) {
     if (String(r[0]).trim() && !String(r[2]).trim() && !usuarioInactivo(r[3])) { // la fila de ejemplo (Activo = no) se deja como está
-      hoja.getRange(i + 2, 3).setValue(Utilities.getUuid().replace(/-/g, '').substring(0, 12));
+      hoja.getRange(i + 2, 3).setValue(nuevaClave());
       hechas++;
     }
   });
   return hechas;
+}
+
+/** Clave aleatoria de 20 caracteres (≈ 76 bits): se entrega dentro del enlace de cada persona. */
+function nuevaClave() { return Utilities.getUuid().replace(/-/g, '').substring(0, 20); }
+
+function rolDe(texto) {
+  var r = String(texto === undefined || texto === null ? '' : texto).trim().toLowerCase();
+  return r.indexOf('adm') === 0 ? 'admin' : r.indexOf('sup') === 0 ? 'supervisor' : 'tecnico'; // lo desconocido → el menor privilegio
 }
 
 function onOpen() {
@@ -411,10 +443,49 @@ function buscarUsuario(clave) {
     if (usuarioInactivo(r[3])) return null;
     var nombre = String(r[0]).trim();
     if (!nombre) return null;
-    var rol = String(r[1]).trim().toLowerCase().indexOf('sup') === 0 ? 'supervisor' : 'tecnico';
-    return { nombre: nombre, rol: rol };
+    return { nombre: nombre, rol: rolDe(r[1]) };
   }
   return null;
+}
+
+/** Todas las personas (con su clave: solo la ve el administrador a través del proxy). */
+function listarUsuarios() {
+  var hoja = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
+  if (!hoja || hoja.getLastRow() < 2) return [];
+  return hoja.getRange(2, 1, hoja.getLastRow() - 1, 4).getValues()
+    .filter(function (r) { return String(r[0]).trim(); })
+    .map(function (r) { return { nombre: String(r[0]).trim(), rol: rolDe(r[1]), clave: String(r[2]).trim(), activo: !usuarioInactivo(r[3]) }; });
+}
+
+/**
+ * Crea o edita una persona por su nombre. { nombre, rol, activo, claveNueva:true, por }.
+ * Reglas: el administrador no puede quitarse a sí mismo el rol ni darse de baja (se quedaría sin acceso), y los nombres no se repiten.
+ */
+function guardarUsuario(d) {
+  var nombre = String(d.nombre === undefined || d.nombre === null ? '' : d.nombre).trim().replace(/\s+/g, ' ');
+  if (!nombre || nombre.length > 60) return { ok: false, error: 'El nombre es obligatorio (máximo 60 caracteres).' };
+  if (/^[=+\-@_]/.test(nombre)) return { ok: false, error: 'El nombre no puede empezar por = + - @ _' };
+  var rol = rolDe(d.rol);
+  var activo = d.activo !== false;
+  var propio = String(d.por || '').trim().toLowerCase() === nombre.toLowerCase();
+  if (propio && (!activo || rol !== 'admin')) return { ok: false, error: 'No puedes quitarte el rol de administrador ni darte de baja a ti mismo.' };
+
+  var hoja = prepararUsuarios();
+  var n = hoja.getLastRow();
+  var datos = n > 1 ? hoja.getRange(2, 1, n - 1, 4).getValues() : [];
+  var fila = 0;
+  datos.forEach(function (r, i) { if (!fila && String(r[0]).trim().toLowerCase() === nombre.toLowerCase()) fila = i + 2; });
+  // la fila de ejemplo que crea el sistema (inactiva y sin clave) se reutiliza en vez de dejarla ahí
+  if (!fila) datos.forEach(function (r, i) { if (!fila && String(r[0]).trim() === 'Ejemplo Técnico' && !String(r[2]).trim()) fila = i + 2; });
+
+  var clave = fila ? String(hoja.getRange(fila, 3).getValue()).trim() : '';
+  if (!clave || d.claveNueva === true) {
+    do { clave = nuevaClave(); } while (datos.some(function (r) { return String(r[2]).trim() === clave; }));
+  }
+  var valores = [textoSeguro(nombre), rol, clave, activo ? 'si' : 'no'];
+  if (fila) hoja.getRange(fila, 1, 1, 4).setValues([valores]);
+  else { hoja.appendRow(valores); }
+  return { ok: true, usuario: { nombre: nombre, rol: rol, clave: clave, activo: activo } };
 }
 
 /** Un latido por teléfono con jornada: sobrescribe SU fila (solo se guarda la última posición, sin historial de rutas). */
@@ -487,7 +558,7 @@ function datosEquipo(token) {
   var luminarias = [];
   var calidad = {};
   var iAl = col('alertas');
-  var iLat = col('latitud'), iLng = col('longitud'), iTec = col('tecnico'), iMarca = col('marca'), iTecn = col('tecnologia'), iEli = col('eliminada');
+  var iLat = col('latitud'), iLng = col('longitud'), iTec = col('tecnico'), iFab = col('fabricante'), iTecn = col('tecnologia'), iEli = col('eliminada');
   libro.getSheets().forEach(function (h) {
     if (h.getName().charAt(0) === '_' || h.getLastRow() < 2 || luminarias.length >= 5000) return;
     leerFilas(h).forEach(function (r) {
@@ -495,7 +566,7 @@ function datosEquipo(token) {
       var q = calidad[r[iTec]] = calidad[r[iTec]] || { total: 0, conAlertas: 0, codigos: {} };
       q.total++;
       if (r[iAl]) { q.conAlertas++; String(r[iAl]).split(', ').forEach(function (c) { q.codigos[c] = (q.codigos[c] || 0) + 1; }); }
-      if (typeof r[iLat] === 'number' && typeof r[iLng] === 'number') luminarias.push({ lat: r[iLat], lng: r[iLng], tec: r[iTec], marca: r[iMarca], tecnologia: r[iTecn] });
+      if (typeof r[iLat] === 'number' && typeof r[iLng] === 'number') luminarias.push({ lat: r[iLat], lng: r[iLng], tec: r[iTec], fab: r[iFab], tecnologia: r[iTecn] });
     });
   });
   return { ahora: ahora.toISOString(), limite: MINUTOS_SIN_SENAL, tecnicos: tecnicos, luminarias: luminarias, calidad: calidad };
@@ -566,7 +637,7 @@ function pintar(d){
   });
   if (!d.tecnicos.length) lista.appendChild(el('div', null, 'Aún no hay técnicos con jornada.')).id = 'vacio';
   d.luminarias.forEach(function(l){
-    L.circleMarker([l.lat, l.lng], {radius:3, color:'#475569', weight:1, fillColor:'#94a3b8', fillOpacity:.8}).bindTooltip(esc((l.marca || 'Luminaria') + (l.tec ? ' · ' + l.tec : ''))).addTo(capaL);
+    L.circleMarker([l.lat, l.lng], {radius:3, color:'#475569', weight:1, fillColor:'#94a3b8', fillOpacity:.8}).bindTooltip(esc((l.fab || 'Luminaria') + (l.tec ? ' · ' + l.tec : ''))).addTo(capaL);
   });
   document.getElementById('res').textContent = cuenta['En jornada'] + ' en jornada · ' + cuenta['Sin señal'] + ' sin señal · ' + cuenta['Pausada'] + ' en pausa';
   document.getElementById('act').textContent = 'actualizado ' + new Date(d.ahora).toLocaleTimeString();

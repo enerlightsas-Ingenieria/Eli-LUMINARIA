@@ -56,17 +56,17 @@ test('técnico: configura por enlace, captura con IA, guarda y se sincroniza a l
   expect(imagenes[0].source.media_type).toBe('image/jpeg');
   expect(imagenes[0].source.data.length).toBeGreaterThan(500);                      // una foto real de la cámara simulada
 
-  await expect(page.getByLabel('Marca', { exact: true })).toHaveValue('Philips');   // la IA rellenó el formulario
+  await expect(page.getByLabel('Fabricante', { exact: true })).toHaveValue('Philips');   // la IA rellenó el formulario
   await expect(page.getByLabel('Pines de la fotocelda', { exact: true })).toHaveValue('7');
   await expect(page.getByLabel('Latitud', { exact: true })).toHaveValue('4.711');
   await expect(page.getByLabel('Longitud', { exact: true })).toHaveValue('-74.0721');
-  await page.getByLabel('Código del activo / n.º de poste').fill('P-001');
+  await page.getByLabel('Código de la luminaria', { exact: true }).fill('P-001');
   await guardar(page);
 
   await expect(page.getByText('P-001 · Philips')).toBeVisible();
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);   // sincronización automática (3 s después de guardar)
   const fila = filas(b, 'Barrio A')[0];
-  expect(fila).toMatchObject({ Marca: 'Philips', 'Código activo': 'P-001', Técnico: 'Ana', Tecnología: 'LED', 'Pines fotocelda': 7, Latitud: 4.711, Longitud: -74.0721, 'Origen de la foto': 'camara' });
+  expect(fila).toMatchObject({ Fabricante: 'Philips', 'Código de la luminaria': 'P-001', Técnico: 'Ana', Tecnología: 'LED', 'Pines fotocelda': 7, Latitud: 4.711, Longitud: -74.0721, 'Origen de la foto': 'camara' });
   await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);                          // ya no figura como pendiente
 });
 
@@ -108,7 +108,7 @@ test('sin conexión: captura manual con opciones rápidas y se envía sola al vo
 
   await ctx.setOffline(true);
   await capturar(page, 'manual');
-  await page.getByLabel('Marca', { exact: true }).fill('Schréder');
+  await page.getByLabel('Fabricante', { exact: true }).fill('Schréder');
   await page.getByRole('group', { name: 'Opciones para Tecnología' }).getByRole('button', { name: 'LED', exact: true }).click();
   await page.getByRole('group', { name: 'Opciones para Pines de la fotocelda' }).getByRole('button', { name: '7', exact: true }).click();
   await expect(page.getByLabel('Tecnología', { exact: true })).toHaveValue('LED');
@@ -119,7 +119,7 @@ test('sin conexión: captura manual con opciones rápidas y se envía sola al vo
 
   await ctx.setOffline(false);                                                       // vuelve la señal
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);
-  expect(filas(b, 'Barrio A')[0]).toMatchObject({ Marca: 'Schréder', Tecnología: 'LED', 'Pines fotocelda': 7 });
+  expect(filas(b, 'Barrio A')[0]).toMatchObject({ Fabricante: 'Schréder', Tecnología: 'LED', 'Pines fotocelda': 7 });
   await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);
 });
 
@@ -134,21 +134,21 @@ test('jornada: el supervisor ve en su panel quién trabaja, dónde, y cuándo pa
   await boton(ana.page, 'Acepto');
   await expect(ana.page.getByTestId('tarjeta-jornada')).toContainText('Jornada activa');
   await expect.poll(() => filas(b, '_Equipo').length, { timeout: 15_000 }).toBe(1);
-  expect(filas(b, '_Equipo')[0]).toMatchObject({ Técnico: 'ana', Estado: 'En jornada', Plataforma: 'web', Latitud: 4.711, Longitud: -74.0721 });  // el nombre lo pone el proxy según el token
+  expect(filas(b, '_Equipo')[0]).toMatchObject({ Técnico: 'Ana', Estado: 'En jornada', Plataforma: 'web', Latitud: 4.711, Longitud: -74.0721 });  // el nombre lo pone el proxy según el token
 
   await configurar(sup.page, enlace({ token: 'tokSup', supervisor: true }));
   await expect(sup.page.getByRole('heading', { name: 'Equipo' })).toBeVisible();
-  await expect(sup.page.getByTestId('lista-equipo')).toContainText('ana');
+  await expect(sup.page.getByTestId('lista-equipo')).toContainText('Ana');
   await expect(sup.page.getByTestId('lista-equipo')).toContainText('En jornada');
   await expect(sup.page.getByText('1 en jornada')).toBeVisible();
-  await expect(sup.page.locator('.leaflet-tooltip', { hasText: 'ana' })).toHaveCount(1);   // marcador con su nombre
+  await expect(sup.page.locator('.leaflet-tooltip', { hasText: 'Ana' })).toHaveCount(1);   // marcador con su nombre
 
   await ana.page.getByRole('button', { name: 'Pausar' }).click();
   await expect(ana.page.getByTestId('tarjeta-jornada')).toContainText('Jornada en pausa');
   await expect.poll(() => filas(b, '_Equipo')[0].Estado).toBe('Pausada');                // el servidor ya lo sabe
   await sup.page.getByRole('button', { name: 'Actualizar' }).click();
   await expect(sup.page.getByTestId('lista-equipo')).toContainText('Pausada');
-  await expect(sup.page.locator('.leaflet-tooltip', { hasText: 'ana' })).toHaveCount(0);   // en pausa no hay ubicación
+  await expect(sup.page.locator('.leaflet-tooltip', { hasText: 'Ana' })).toHaveCount(0);   // en pausa no hay ubicación
 
   await ana.page.getByRole('button', { name: 'Terminar' }).click();
   await boton(ana.page, 'Terminar');
@@ -223,8 +223,54 @@ test('errores: token de IA inválido → aviso y sigue a mano; enlace de configu
   await usarProyecto(page, 'Barrio A');
   await capturar(page, 'ia');
   await expect(page.getByRole('status').filter({ hasText: '401' })).toBeVisible();   // avisa del token inválido…
-  await page.getByLabel('Marca', { exact: true }).fill('Manual');                     // …y se puede seguir a mano
+  await page.getByLabel('Fabricante', { exact: true }).fill('Manual');                     // …y se puede seguir a mano
   await guardar(page);
   await expect(page.getByText('Manual')).toBeVisible();
   expect(b.estado.llamadasIA).toBe(0);                                                // el proxy rechazó antes de llegar a la IA
+});
+
+test('administración: el administrador crea un técnico en la app, le entrega su enlace y esa persona entra con su rol y trabaja', async ({ browser }) => {
+  const b = crearBackend();
+  const admin = await telefono(browser, b);
+  await configurar(admin.page, enlace({ token: 'tokSup' }));          // la clave inicial del administrador (ADMIN_TOKENS)
+  await admin.page.getByRole('link', { name: 'Ajustes' }).click();
+  await expect(admin.page.getByTestId('cuenta')).toContainText('Administrador');
+  await admin.page.getByRole('button', { name: 'Administración de usuarios' }).click();
+
+  await admin.page.getByRole('button', { name: 'Nuevo usuario' }).click();
+  await admin.page.getByLabel('Nombre', { exact: true }).fill('Carla Gómez');
+  await admin.page.getByRole('button', { name: 'Crear y ver enlace' }).click();
+  const url = await admin.page.getByLabel('Enlace de acceso').inputValue();
+  expect(url).toContain('#/config?c=ELI1.');
+  expect(url).not.toContain('tokSup');                                  // el enlace lleva la clave de Carla, no la del administrador
+  expect(b.gs.hoja('_Usuarios')!.filas.some((f: any[]) => f[0] === 'Carla Gómez' && f[1] === 'tecnico' && /^[0-9a-f]{20}$/.test(f[2]))).toBe(true);
+
+  // Carla abre su enlace en su teléfono: queda como técnico, sin panel ni administración, y captura
+  const carla = await telefono(browser, b);
+  await configurar(carla.page, url.replace(WEB, WEB));
+  await carla.page.getByRole('link', { name: 'Ajustes' }).click();
+  await expect(carla.page.getByTestId('cuenta')).toContainText('Carla Gómez · Técnico');
+  await expect(carla.page.getByRole('button', { name: 'Administración de usuarios' })).toHaveCount(0);
+  await expect(carla.page.getByRole('link', { name: 'Panel' })).toHaveCount(0);
+  await carla.page.getByRole('link', { name: 'Registros' }).click();
+  await capturar(carla.page, 'manual');
+  await carla.page.getByLabel('Fabricante', { exact: true }).fill('Schréder');
+  await carla.page.getByRole('button', { name: 'LED', exact: true }).click();
+  await carla.page.getByRole('button', { name: 'Otra (¿cuál?)' }).click();
+  await expect(carla.page.getByLabel('Tecnología', { exact: true })).toHaveValue('Otra: ');
+  await carla.page.getByLabel('Tecnología', { exact: true }).fill('Otra: Plasma');
+  await guardar(carla.page);
+  await expect.poll(() => filas(b, 'General').length, { timeout: 20_000 }).toBe(1);
+  expect(filas(b, 'General')[0]).toMatchObject({ Técnico: 'Carla Gómez', Fabricante: 'Schréder', Tecnología: 'Otra: Plasma' });
+  expect(Object.keys(filas(b, 'General')[0])).not.toContain('Marca');
+
+  // el administrador la hace supervisora: ahora ve el panel y también puede capturar
+  await admin.page.getByRole('dialog').getByRole('button', { name: 'Cancelar' }).click();
+  await admin.page.getByRole('button', { name: /Carla Gómez/ }).click();
+  await admin.page.getByRole('tab', { name: 'Supervisor' }).click();
+  await admin.page.getByRole('button', { name: 'Guardar y ver enlace' }).click();
+  await expect(admin.page.getByRole('dialog', { name: 'Acceso de Carla Gómez' })).toBeVisible();
+  await carla.page.reload();
+  await expect(carla.page.getByRole('link', { name: 'Panel' })).toBeVisible({ timeout: 15_000 });
+  await expect(carla.page.getByRole('link', { name: 'Registros' })).toBeVisible();
 });

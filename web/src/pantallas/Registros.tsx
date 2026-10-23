@@ -33,7 +33,7 @@ export function Registros() {
       if (filtro === 'pendientes' && l.sincronizado) return false;
       if (filtro === 'sinGps' && l.latitud != null) return false;
       if (!t) return true;
-      return [l.codigo, l.marca, l.modelo, l.fabricante, l.tecnologia, l.direccion, l.tipoLuminaria, l.tecnico, String(l.id)].some((x) => x.toLowerCase().includes(t));
+      return [l.codigo, l.codigoPoste, l.modelo, l.fabricante, l.tecnologia, l.direccion, l.tecnico, String(l.id)].some((x) => x.toLowerCase().includes(t));
     });
   }, [items, q, filtro]);
 
@@ -84,7 +84,7 @@ export function Registros() {
           <Boton texto={enLinea ? 'Analizar ahora' : 'Necesitas conexión'} variante="secundario" icono="chispa" deshabilitado={!enLinea} onClick={analizarAhora} />
         </div>
       )}
-      <div className="buscador"><Icono nombre="buscar" tam={18} /><input aria-label="Buscar" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar marca, código, técnico…" /></div>
+      <div className="buscador"><Icono nombre="buscar" tam={18} /><input aria-label="Buscar" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar fabricante, código, técnico…" /></div>
       <div className="filtros" role="group" aria-label="Filtros">
         {([['todas', 'Todas'], ['pendientes', `Sin sincronizar (${pendientes})`], ['sinGps', 'Sin coordenada']] as [Filtro, string][]).map(([f, t]) => (
           <button key={f} type="button" className={`ficha${filtro === f ? ' activa' : ''}`} aria-pressed={filtro === f} onClick={() => setFiltro(f)}>{t}</button>
@@ -96,15 +96,15 @@ export function Registros() {
           <div className="vacio">
             <Icono nombre="camara" tam={56} />
             <h2>{items.length ? 'Sin resultados' : 'Aún no hay luminarias'}</h2>
-            <p>{items.length ? 'Prueba con otro texto o filtro.' : 'Toma una foto y la app identificará marca, tecnología, potencia, fotocelda y más, junto con la coordenada.'}</p>
+            <p>{items.length ? 'Prueba con otro texto o filtro.' : 'Toma una foto y la app identificará fabricante, tecnología, potencia, fotocelda y más, junto con la coordenada.'}</p>
           </div>
         )}
         {visibles.map((l) => (
-          <button key={l.id} type="button" className="tarjeta item" onClick={() => ir(`/editar/${l.id}`)} aria-label={`Luminaria ${l.id}, ${l.marca} ${l.modelo}`}>
+          <button key={l.id} type="button" className="tarjeta item" onClick={() => ir(`/editar/${l.id}`)} aria-label={`Luminaria ${l.id}, ${l.fabricante} ${l.modelo}`}>
             <Foto id={l.fotos[0]} className="miniatura" />
             <div style={{ minWidth: 0 }}>
-              <div className="t">{l.codigo || `#${l.id}`} · {[l.marca, l.modelo].filter(Boolean).join(' ') || 'Sin identificar'}</div>
-              <div className="s">{[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.pinesFotocelda && `fotocelda ${l.pinesFotocelda}p`].filter(Boolean).join(' · ') || l.tipoLuminaria || '—'}</div>
+              <div className="t">{l.codigo || `#${l.id}`} · {[l.fabricante, l.modelo].filter(Boolean).join(' ') || 'Sin identificar'}</div>
+              <div className="s">{[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.pinesFotocelda && `fotocelda ${l.pinesFotocelda}p`].filter(Boolean).join(' · ') || '—'}</div>
               {!!l.tecnico && <div className="s" style={{ fontSize: 12 }}>Por {l.tecnico}</div>}
               <div className="c">{l.latitud != null ? `📍 ${l.latitud.toFixed(6)}, ${l.longitud?.toFixed(6)}` : '📍 sin coordenada'}</div>
               <div className="etq">

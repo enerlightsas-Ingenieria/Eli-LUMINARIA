@@ -48,7 +48,7 @@ test.describe('uso sin conexión (web)', () => {
     await configurar(page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A'] })); // la configuración también se importa sin internet
     await usarProyecto(page, 'Barrio A');
     await capturarManual(page);
-    await page.getByLabel('Marca', { exact: true }).fill('Schréder');
+    await page.getByLabel('Fabricante', { exact: true }).fill('Schréder');
     await page.getByRole('group', { name: 'Opciones para Tecnología' }).getByRole('button', { name: 'LED', exact: true }).click();
     await guardar(page);
     await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
@@ -63,7 +63,7 @@ test.describe('uso sin conexión (web)', () => {
     await ctx.setOffline(false);                                                                // vuelve la señal
     await expect(page.getByTestId('banda-sin-conexion')).toHaveCount(0);
     await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);
-    expect(filas(b, 'Barrio A')[0]).toMatchObject({ Marca: 'Schréder', Tecnología: 'LED', Técnico: 'Ana' });
+    expect(filas(b, 'Barrio A')[0]).toMatchObject({ Fabricante: 'Schréder', Tecnología: 'LED', Técnico: 'Ana' });
     await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);
   });
 
@@ -75,7 +75,7 @@ test.describe('uso sin conexión (web)', () => {
 
     await ctx.setOffline(true);
     await capturarManual(page); await guardar(page);                                            // luminaria 1: sin datos
-    await capturarManual(page); await page.getByLabel('Marca', { exact: true }).fill('Escrita a mano'); await guardar(page);  // luminaria 2: con datos
+    await capturarManual(page); await page.getByLabel('Fabricante', { exact: true }).fill('Escrita a mano'); await guardar(page);  // luminaria 2: con datos
     await expect(dialogo(page)).toContainText('Posible duplicado');                                // misma coordenada que la anterior: la app avisa
     await boton(page, 'Guardar igual');
     await expect(page.getByText('Escrita a mano')).toBeVisible();
@@ -96,7 +96,7 @@ test.describe('uso sin conexión (web)', () => {
     await expect(page.getByText('#1 · Philips')).toBeVisible();
     await expect(page.getByText('Escrita a mano')).toBeVisible();                               // lo del técnico, intacto
     await expect(page.getByTestId('lote-ia')).toHaveCount(0);
-    await expect.poll(() => filas(b, 'Barrio A').map((f) => f.Marca).sort(), { timeout: 20_000 }).toEqual(['Escrita a mano', 'Philips']);
+    await expect.poll(() => filas(b, 'Barrio A').map((f) => f.Fabricante).sort(), { timeout: 20_000 }).toEqual(['Escrita a mano', 'Philips']);
   });
 
   test('IA apagada (control de costos): no aparece ningún botón de IA y no se hace ninguna llamada', async ({ browser }) => {

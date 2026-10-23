@@ -111,7 +111,7 @@ export function Editar({ id }: { id: string }) {
       if (cerca) {
         const r = await dialogo({
           titulo: 'Posible duplicado',
-          mensaje: `Ya hay una luminaria (#${cerca.item.id}${cerca.item.codigo ? ' · ' + cerca.item.codigo : ''}) a ${Math.round(cerca.metros)} m de esta coordenada.`,
+          mensaje: `Ya hay una luminaria (#${cerca.item.id}${cerca.item.codigo || cerca.item.codigoPoste ? ' · ' + (cerca.item.codigo || cerca.item.codigoPoste) : ''}) a ${Math.round(cerca.metros)} m de esta coordenada.`,
           botones: [{ texto: 'Cancelar', estilo: 'cancelar' }, { texto: 'Ver la otra' }, { texto: 'Guardar igual' }],
         });
         if (r === 1) { ir(`/editar/${cerca.item.id}`); return; }
@@ -159,7 +159,8 @@ export function Editar({ id }: { id: string }) {
       </div>
 
       <Seccion>Identificación y ubicación</Seccion>
-      <Campo etiqueta="Código del activo / n.º de poste" valor={l.codigo} alCambiar={(t) => set('codigo', t)} pista="Opcional, el que use tu empresa" />
+      <Campo etiqueta="Código del poste" valor={l.codigoPoste ?? ''} alCambiar={(t) => set('codigoPoste', t)} pista="Opcional" />
+      <Campo etiqueta="Código de la luminaria" valor={l.codigo} alCambiar={(t) => set('codigo', t)} pista="Opcional" />
       <div className="fila">
         <Campo etiqueta="Latitud" numerico conSigno soloLectura={terceros} valor={coordTxt.lat} alCambiar={(t) => { setCoordTxt((p) => ({ ...p, lat: t })); set('latitud', num(t)); }} />
         <Campo etiqueta="Longitud" numerico conSigno soloLectura={terceros} valor={coordTxt.lng} alCambiar={(t) => { setCoordTxt((p) => ({ ...p, lng: t })); set('longitud', num(t)); }} />

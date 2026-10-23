@@ -26,28 +26,28 @@ describe('segunda revisión', () => {
   describe('envío de luminarias mientras se edita', () => {
     it('una edición hecha durante la subida NO se marca como enviada', async () => {
       const p = await proyectoDe(A, 'Barrio A');
-      await nueva(A, p.id, { marca: 'Original' });
+      await nueva(A, p.id, { fabricante: 'Original' });
       let editado = false;
       (global as any).fetch = async (u: string, init: any) => {
         if (!editado && JSON.parse(init.body).luminarias?.length) {
           editado = true;
           minutos(1);                                              // pasa un instante y el técnico edita mientras sube
           const [l] = await A.db.listarLuminarias(p.id);
-          await A.db.guardarLuminaria({ ...l, marca: 'Editada durante el envío' });
+          await A.db.guardarLuminaria({ ...l, fabricante: 'Editada durante el envío' });
         }
         return srv.llamar(u, init);
       };
       await A.sync.sincronizar(p);
-      expect((await A.db.listarLuminarias(p.id))[0]).toMatchObject({ marca: 'Editada durante el envío', sincronizado: false });
+      expect((await A.db.listarLuminarias(p.id))[0]).toMatchObject({ fabricante: 'Editada durante el envío', sincronizado: false });
       (global as any).fetch = srv.llamar;
       await A.sync.sincronizar(p);                                 // la edición viaja en el siguiente envío
-      expect(srv.hoja('Barrio A')!.filas[1][srv.hoja('Barrio A')!.filas[0].indexOf('Marca')]).toBe('Editada durante el envío');
+      expect(srv.hoja('Barrio A')!.filas[1][srv.hoja('Barrio A')!.filas[0].indexOf('Fabricante')]).toBe('Editada durante el envío');
       expect((await A.db.listarLuminarias(p.id))[0].sincronizado).toBe(true);
     });
 
     it('un proyecto que falla no impide sincronizar los demás (sincronizarTodo)', async () => {
       const malo = await proyectoDe(A, 'Malo'); const bueno = await proyectoDe(A, 'Bueno');
-      await nueva(A, malo.id, { marca: 'M' }); await nueva(A, bueno.id, { marca: 'B' });
+      await nueva(A, malo.id, { fabricante: 'M' }); await nueva(A, bueno.id, { fabricante: 'B' });
       (global as any).fetch = (u: string, init: any) => JSON.parse(init.body).proyecto?.nombre === 'Malo'
         ? Promise.resolve({ ok: true, status: 200, json: async () => ({ ok: false, error: 'pestaña rota' }) })
         : srv.llamar(u, init);
@@ -103,7 +103,7 @@ describe('segunda revisión', () => {
       const j1 = await iniciar(A);
       await A.jornada.enviarLatido('X');
       minutos(10);
-      await nueva(A, p.id, { marca: 'en j1', jornadaId: j1.id, creadoEn: new Date().toISOString() });
+      await nueva(A, p.id, { fabricante: 'en j1', jornadaId: j1.id, creadoEn: new Date().toISOString() });
       minutos(50);
       await A.jornada.cambiarFase('terminada');                    // 09:00
       (global as any).fetch = async () => { throw new Error('sin red'); };
@@ -134,16 +134,16 @@ describe('segunda revisión', () => {
   describe('texto seguro en la hoja', () => {
     it('textos con fórmula se guardan con un espacio delante y vuelven intactos; los números negativos no se tocan', async () => {
       const pA = await proyectoDe(A, 'Barrio A'); const pB = await proyectoDe(B, 'Barrio A');
-      await nueva(A, pA.id, { marca: 'Formulas', observaciones: '=calibrar()', modelo: '+5', fabricante: '@x', tipoLuminaria: '-abc', longitud: -74.0721, potenciaW: '-12' });
+      await nueva(A, pA.id, { tecnologia: '-abc', observaciones: '=calibrar()', modelo: '+5', fabricante: '@x', longitud: -74.0721, potenciaW: '-12' });
       await A.sync.sincronizar(pA); await B.sync.sincronizar(pB);
       const h = srv.hoja('Barrio A')!; const fila = h.filas[1]; const cab = h.filas[0];
       expect(fila[cab.indexOf('Observaciones')]).toBe(' =calibrar()');          // texto, no fórmula (y sin depender de apóstrofos)
       expect(fila[cab.indexOf('Modelo')]).toBe(' +5');
-      expect(fila[cab.indexOf('Tipo de luminaria')]).toBe(' -abc');
+      expect(fila[cab.indexOf('Tecnología')]).toBe(' -abc');
       expect(fila[cab.indexOf('Longitud')]).toBe(-74.0721);                      // número negativo intacto
       expect(fila[cab.indexOf('Potencia (W)')]).toBe(-12);
       const [l] = await B.db.listarLuminarias(pB.id);
-      expect(l).toMatchObject({ observaciones: '=calibrar()', modelo: '+5', fabricante: '@x', tipoLuminaria: '-abc' }); // la app recorta el espacio
+      expect(l).toMatchObject({ observaciones: '=calibrar()', modelo: '+5', fabricante: '@x', tecnologia: '-abc' }); // la app recorta el espacio
     });
   });
 });

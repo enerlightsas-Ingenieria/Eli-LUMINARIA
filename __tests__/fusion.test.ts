@@ -1,13 +1,13 @@
 import { decidir, normalizarRemota } from '../src/lib/fusion';
 
 describe('fusion', () => {
-  const r = (o: any = {}) => normalizarRemota({ uuid: 'u1', marca: 'X', ...o })!;
+  const r = (o: any = {}) => normalizarRemota({ uuid: 'u1', fabricante: 'X', ...o })!;
 
   it('normaliza lo que devuelve Sheets (números, fechas, vacíos)', () => {
     const x = r({ potenciaW: 150, latitud: '4,711', longitud: -74.07, precisionM: '', creadoEn: new Date('2026-01-02T03:04:05Z'), confianza: 'rara', eliminada: 'SÍ', modelo: 12 });
     expect(x.datos).toMatchObject({ potenciaW: '150', latitud: 4.711, longitud: -74.07, precisionM: null, creadoEn: '2026-01-02T03:04:05.000Z', confianza: '', modelo: '12' });
     expect(x.eliminada).toBe(true);
-    expect(normalizarRemota({ marca: 'sin uuid' })).toBeNull();
+    expect(normalizarRemota({ fabricante: 'sin uuid' })).toBeNull();
   });
 
   it.each([

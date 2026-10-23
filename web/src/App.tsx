@@ -7,6 +7,7 @@ import { Cargando } from './componentes/ui';
 import { AppProvider, useApp } from './contexto/App';
 import { JornadaProvider } from './contexto/Jornada';
 import { AjustesPantalla as Ajustes } from './pantallas/Ajustes';
+import { Administracion } from './pantallas/Administracion';
 import { Ayuda } from './pantallas/Ayuda';
 import { Capturar } from './pantallas/Capturar';
 import { Editar } from './pantallas/Editar';
@@ -15,15 +16,17 @@ import { Mapa } from './pantallas/Mapa';
 import { Proyectos } from './pantallas/Proyectos';
 import { Registros } from './pantallas/Registros';
 import { pedirYAplicar } from './componentes/importarConfig';
+import { rolDe, veEquipo } from '@compartido/core/ajustes';
 import { ir, useRuta } from './router';
 import { pedirAlmacenamientoPersistente } from './servicios/pwa';
 
 const PANTALLAS_SIN_PESTANAS = ['capturar', 'editar', 'config', 'ayuda'];
 
 function Pestanas({ activa, supervisor }: { activa: string; supervisor: boolean }) {
-  const tabs = supervisor
-    ? [{ ruta: '', icono: 'usuarios', texto: 'Panel' }, { ruta: 'ajustes', icono: 'ajustes', texto: 'Ajustes' }]
-    : [{ ruta: '', icono: 'lista', texto: 'Registros' }, { ruta: 'mapa', icono: 'mapa', texto: 'Mapa' }, { ruta: 'proyectos', icono: 'carpeta', texto: 'Proyectos' }, { ruta: 'ajustes', icono: 'ajustes', texto: 'Ajustes' }];
+  // El supervisor (y el administrador) tienen además el Panel; todos pueden capturar como técnico.
+  const base = [{ ruta: supervisor ? 'registros' : '', icono: 'lista', texto: 'Registros' }, { ruta: 'mapa', icono: 'mapa', texto: 'Mapa' }, { ruta: 'proyectos', icono: 'carpeta', texto: 'Proyectos' }, { ruta: 'ajustes', icono: 'ajustes', texto: 'Ajustes' }];
+  const tabs = supervisor ? [{ ruta: '', icono: 'usuarios', texto: 'Panel' }, ...base] : base;
+  if (supervisor && activa === 'admin') activa = 'ajustes';
   return (
     <div className="pestanas"><nav aria-label="Secciones">
       {tabs.map((t) => <a key={t.ruta} href={`#/${t.ruta}`} className={activa === t.ruta ? 'activa' : ''} aria-current={activa === t.ruta ? 'page' : undefined}><Icono nombre={t.icono} /><span>{t.texto}</span></a>)}
@@ -58,12 +61,14 @@ function Cuerpo() {
   const [primero = '', segundo] = ruta.camino;
   useEffect(() => { pedirAlmacenamientoPersistente(); }, []);
   if (!listo) return <Cargando texto="Abriendo…" />;
-  const supervisor = !!ajustes.supervisor;
+  const supervisor = veEquipo(rolDe(ajustes));
   const conPestanas = !PANTALLAS_SIN_PESTANAS.includes(primero);
 
   let pantalla;
   switch (primero) {
     case '': pantalla = supervisor ? <Equipo /> : <Registros />; break;
+    case 'registros': pantalla = <Registros />; break;
+    case 'admin': pantalla = <Administracion />; break;
     case 'mapa': pantalla = <Mapa />; break;
     case 'proyectos': pantalla = <Proyectos />; break;
     case 'ajustes': pantalla = <Ajustes />; break;
@@ -78,7 +83,7 @@ function Cuerpo() {
       <EstadoConexion />
       <main className={`pantalla${conPestanas ? '' : ' sin-pestanas'}`}>{pantalla}</main>
       {conPestanas && <Pestanas activa={primero} supervisor={supervisor} />}
-      {!supervisor && <AutoSync />}
+      <AutoSync />
     </div>
   );
 }

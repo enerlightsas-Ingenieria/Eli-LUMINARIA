@@ -11,10 +11,10 @@ export const WEB = 'http://localhost:4173';
 export const WORKER = 'https://worker.test';
 
 /** Backend de prueba: el proxy real delante del script de Google real (sobre una hoja simulada). La IA es un doble fijo. */
-export function crearBackend(respuestaIA: Record<string, string> = { marca: 'Philips', tecnologia: 'LED', potenciaW: '150', pinesFotocelda: '7', confianza: 'alta' }) {
+export function crearBackend(respuestaIA: Record<string, string> = { fabricante: 'Philips', tecnologia: 'LED', potenciaW: '150', pinesFotocelda: '7', confianza: 'alta' }) {
   const gs = crearServidor(fileURLToPath(new URL('../../server/google-apps-script.gs', import.meta.url)));
   const env = {
-    ANTHROPIC_API_KEY: 'sk-secreta', APP_TOKENS: 'ana:tokAna,beto:tokBeto', ADMIN_TOKENS: 'sup:tokSup',
+    ANTHROPIC_API_KEY: 'sk-secreta', APP_TOKENS: 'Ana:tokAna,Beto:tokBeto', ADMIN_TOKENS: 'Sup:tokSup',
     SYNC_URL: 'https://gs.test/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN',
   };
   const estado = { llamadasIA: 0, ultimaPeticionIA: null as any };

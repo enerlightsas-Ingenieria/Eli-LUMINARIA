@@ -13,6 +13,7 @@ export class Hoja {
   formulas: Record<string, string> = {};
   constructor(public nombre: string) {}
   getName() { return this.nombre; }
+  setName(n: string) { this.nombre = n; }
   getLastRow() { return this.filas.length; }
   getMaxRows() { return 1000; }
   getMaxColumns() { return this.maxColumnas; }

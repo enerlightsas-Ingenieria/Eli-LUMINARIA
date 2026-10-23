@@ -103,12 +103,16 @@ export async function borrarProyecto(id: number): Promise<string[]> {
 export async function listarLuminarias(proyectoId: number): Promise<Luminaria[]> {
   const db = await abrir();
   const ls = (await pedir(db.transaction('luminarias').objectStore('luminarias').index('proyectoId').getAll(proyectoId))) as Luminaria[];
-  return ls.sort((a, b) => b.id - a.id);
+  return ls.map(completar).sort((a, b) => b.id - a.id);
 }
+
+/** Registros guardados antes de que existiera el código del poste. */
+const completar = (l: Luminaria): Luminaria => (l.codigoPoste === undefined ? { ...l, codigoPoste: '' } : l);
 
 export async function obtenerLuminaria(id: number): Promise<Luminaria | undefined> {
   const db = await abrir();
-  return (await pedir(db.transaction('luminarias').objectStore('luminarias').get(id))) as Luminaria | undefined;
+  const l = (await pedir(db.transaction('luminarias').objectStore('luminarias').get(id))) as Luminaria | undefined;
+  return l && completar(l);
 }
 
 export async function pendientesDeSync(proyectoId: number): Promise<Luminaria[]> {

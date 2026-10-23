@@ -78,7 +78,7 @@ describe('auditoría de extremo a extremo', () => {
 
   const alertasDe = (marca: string) => {
     const h = srv.hoja('Barrio A')!;
-    const iM = h.filas[0].indexOf('Marca'), iA = h.filas[0].indexOf('Alertas');
+    const iM = h.filas[0].indexOf('Fabricante'), iA = h.filas[0].indexOf('Alertas');
     return h.filas.slice(1).find((f) => f[iM] === marca)![iA];
   };
   const iniciarJornada = async (t: Telefono) => { await t.jornada.registrarConsentimiento(); const j = await t.jornada.iniciarJornada(); await t.jornada.enviarLatido('Barrio A'); return j.id; };
@@ -86,7 +86,7 @@ describe('auditoría de extremo a extremo', () => {
   it('una captura correcta dentro de la jornada llega sin alertas', async () => {
     const jid = await iniciarJornada(A);
     minutos(5);
-    await nueva(A, pA.id, { marca: 'Limpia', jornadaId: jid, creadoEn: new Date().toISOString(), precisionM: 6 });
+    await nueva(A, pA.id, { fabricante: 'Limpia', jornadaId: jid, creadoEn: new Date().toISOString(), precisionM: 6 });
     await A.sync.sincronizar(pA);
     expect(alertasDe('Limpia')).toBe('');
   });
@@ -95,10 +95,10 @@ describe('auditoría de extremo a extremo', () => {
     const jid = await iniciarJornada(A);
     minutos(5);
     const ahora = () => new Date().toISOString();
-    await nueva(A, pA.id, { marca: 'Galeria', jornadaId: jid, creadoEn: ahora(), origen: 'galeria', latitud: 4.1 });
-    await nueva(A, pA.id, { marca: 'SinJornada', jornadaId: '', creadoEn: ahora(), latitud: 4.2 });
-    await nueva(A, pA.id, { marca: 'Falso', jornadaId: jid, creadoEn: ahora(), ubicacionSimulada: true, latitud: 4.3 });
-    await nueva(A, pA.id, { marca: 'Impreciso', jornadaId: jid, creadoEn: ahora(), precisionM: 80, latitud: 4.4 });
+    await nueva(A, pA.id, { fabricante: 'Galeria', jornadaId: jid, creadoEn: ahora(), origen: 'galeria', latitud: 4.1 });
+    await nueva(A, pA.id, { fabricante: 'SinJornada', jornadaId: '', creadoEn: ahora(), latitud: 4.2 });
+    await nueva(A, pA.id, { fabricante: 'Falso', jornadaId: jid, creadoEn: ahora(), ubicacionSimulada: true, latitud: 4.3 });
+    await nueva(A, pA.id, { fabricante: 'Impreciso', jornadaId: jid, creadoEn: ahora(), precisionM: 80, latitud: 4.4 });
     await A.sync.sincronizar(pA);
     expect(alertasDe('Galeria')).toContain('GALERIA');
     expect(alertasDe('SinJornada')).toContain('SIN_JORNADA');
@@ -111,7 +111,7 @@ describe('auditoría de extremo a extremo', () => {
     minutos(60);
     await A.jornada.cambiarFase('terminada'); await A.jornada.enviarLatido('Barrio A');
     minutos(120);
-    await nueva(A, pA.id, { marca: 'Trampa', jornadaId: jid, creadoEn: new Date().toISOString() });
+    await nueva(A, pA.id, { fabricante: 'Trampa', jornadaId: jid, creadoEn: new Date().toISOString() });
     await A.sync.sincronizar(pA);
     expect(alertasDe('Trampa')).toContain('FUERA_DE_JORNADA');
   });
@@ -120,7 +120,7 @@ describe('auditoría de extremo a extremo', () => {
     await A.jornada.registrarConsentimiento();
     const j = await A.jornada.iniciarJornada();                     // sin conexión: el latido de inicio aún no llegó
     minutos(5);
-    await nueva(A, pA.id, { marca: 'Tardia', jornadaId: j.id, creadoEn: new Date().toISOString() });
+    await nueva(A, pA.id, { fabricante: 'Tardia', jornadaId: j.id, creadoEn: new Date().toISOString() });
     await A.sync.sincronizar(pA);
     expect(alertasDe('Tardia')).toBe('JORNADA_NO_CONFIRMADA');
     await A.jornada.enviarLatido('Barrio A');                       // vuelve la señal y llega la jornada
@@ -131,9 +131,9 @@ describe('auditoría de extremo a extremo', () => {
   it('el supervisor ve la calidad por técnico en el mapa en vivo', async () => {
     const jidA = await iniciarJornada(A);
     minutos(5);
-    for (let i = 0; i < 3; i++) { minutos(10); await nueva(A, pA.id, { marca: 'ok' + i, jornadaId: jidA, creadoEn: new Date().toISOString(), latitud: 4.7 + i * 0.01 }); } // ~1 km cada 10 min
+    for (let i = 0; i < 3; i++) { minutos(10); await nueva(A, pA.id, { fabricante: 'ok' + i, jornadaId: jidA, creadoEn: new Date().toISOString(), latitud: 4.7 + i * 0.01 }); } // ~1 km cada 10 min
     minutos(10);
-    await nueva(A, pA.id, { marca: 'mala', jornadaId: jidA, creadoEn: new Date().toISOString(), origen: 'galeria', latitud: 4.9 });
+    await nueva(A, pA.id, { fabricante: 'mala', jornadaId: jidA, creadoEn: new Date().toISOString(), origen: 'galeria', latitud: 4.9 });
     await A.sync.sincronizar(pA);
     const d = srv.gs.datosEquipo('CAMBIA-ESTE-TOKEN-ADMIN');
     expect(d.calidad.Ana.total).toBe(4);
@@ -144,9 +144,9 @@ describe('auditoría de extremo a extremo', () => {
   it('la evidencia viaja a los demás técnicos y sobrevive al ida y vuelta (booleano incluido)', async () => {
     const pB = await proyectoDe(B, 'Barrio A');
     const jid = await iniciarJornada(A);
-    await nueva(A, pA.id, { marca: 'Evidencia', jornadaId: jid, origen: 'galeria', ubicacionSimulada: true, creadoEn: new Date().toISOString() });
+    await nueva(A, pA.id, { fabricante: 'Evidencia', jornadaId: jid, origen: 'galeria', ubicacionSimulada: true, creadoEn: new Date().toISOString() });
     await A.sync.sincronizar(pA); await B.sync.sincronizar(pB);
     const [l] = await B.db.listarLuminarias(pB.id);
-    expect(l).toMatchObject({ marca: 'Evidencia', origen: 'galeria', ubicacionSimulada: true, jornadaId: jid });
+    expect(l).toMatchObject({ fabricante: 'Evidencia', origen: 'galeria', ubicacionSimulada: true, jornadaId: jid });
   });
 });

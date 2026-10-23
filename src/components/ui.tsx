@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Colores, radius, useTema } from '../theme';
+import { esOpcionAbierta, PREFIJO_OTRA } from '../types';
 
 export const toque = () => Haptics.selectionAsync().catch(() => {});
 export const exito = () => Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -64,9 +65,10 @@ export function Field({ label, value, onChangeText, hint, multiline, numeric, si
       {!!opciones?.length && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 8, paddingTop: 8 }}>
           {opciones.map((o) => {
-            const activa = value.trim().toLowerCase() === o.toLowerCase();
+            const abierta = esOpcionAbierta(o);
+            const activa = abierta ? /^otra\b/i.test(value.trim()) : value.trim().toLowerCase() === o.toLowerCase();
             return (
-              <Pressable key={o} onPress={() => { toque(); onChangeText(activa ? '' : o); }} accessibilityRole="button"
+              <Pressable key={o} onPress={() => { toque(); onChangeText(activa ? '' : abierta ? PREFIJO_OTRA : o); }} accessibilityRole="button"
                 accessibilityLabel={`${label}: ${o}`} accessibilityState={{ selected: activa }}
                 style={{ minHeight: 36, paddingHorizontal: 14, borderRadius: 18, borderWidth: 1, justifyContent: 'center',
                   borderColor: activa ? c.primary : c.border, backgroundColor: activa ? c.primary : c.surface }}>

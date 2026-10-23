@@ -19,7 +19,7 @@ import { hayConexion } from '../servicios/red';
 
 const RANURAS = [
   { titulo: 'General', ayuda: 'La luminaria completa, con el poste y el brazo', icono: 'camara' },
-  { titulo: 'Placa / etiqueta', ayuda: 'Acércate a la placa con marca, modelo y potencia', icono: 'lista' },
+  { titulo: 'Placa / etiqueta', ayuda: 'Acércate a la placa con fabricante, modelo y potencia', icono: 'lista' },
   { titulo: 'Fotocelda', ayuda: 'El receptáculo de la fotocelda, para contar sus pines', icono: 'chispa' },
 ];
 
@@ -101,7 +101,7 @@ export function Capturar() {
       const borrador: LuminariaBorrador = {
         ...car, uuid: nuevoUuid(), proyectoId: proyecto.id, creadoEn: ahora, actualizadoEn: ahora, fotos: ids, confianza,
         latitud: posFinal?.latitud ?? null, longitud: posFinal?.longitud ?? null, precisionM: posFinal?.precisionM ?? null,
-        direccion: '', codigo: '', tecnico: ajustes.tecnico,
+        direccion: '', codigoPoste: '', codigo: '', tecnico: ajustes.tecnico,
         // las fotos elegidas con el selector del sistema no se pueden verificar: se marcan como "galería" y el servidor las audita
         origen: tomadas.some((f) => f.origen === 'galeria') ? 'galeria' : 'camara',
         ubicacionSimulada: !!posFinal?.simulada,
@@ -133,7 +133,7 @@ export function Capturar() {
     <>
       <Cabecera titulo="Nueva luminaria" atras={volver} />
       <p className="muted" style={{ marginBottom: 14 }}>
-        Con una foto general basta. Si añades la <b style={{ color: 'var(--texto)' }}>placa</b> y la <b style={{ color: 'var(--texto)' }}>fotocelda</b>, la IA identifica mucho mejor marca, potencia y pines.
+        Con una foto general basta. Si añades la <b style={{ color: 'var(--texto)' }}>placa</b> y la <b style={{ color: 'var(--texto)' }}>fotocelda</b>, la IA identifica mucho mejor fabricante, potencia y pines.
       </p>
 
       {terceros && !evaluacion.ok && <p className="aviso" role="status">{evaluacion.mensaje}</p>}

@@ -1,5 +1,5 @@
 import { aEnlace, codificar, decodificar, describir } from '../src/lib/config';
-import { identificar, manejar, validarCuerpo, vaciarCacheUsuarios } from '../server/worker';
+import { identificar, manejar, validarCuerpo, vaciarCacheUsuarios, aGemini, deGemini, proveedores } from '../server/worker';
 import { TOOL } from '../src/services/analyzer';
 
 jest.mock('../src/services/settings', () => ({ cargarAjustes: async () => ({}) }));
@@ -106,7 +106,7 @@ describe('proxy de IA (worker)', () => {
     ['max_tokens excesivo', { max_tokens: 100000 }],
     ['otra herramienta', { tools: [{ name: 'otra' }] }],
     ['esquema de herramienta arbitrario', conTool((t) => { t.input_schema.properties.respuesta_libre = { type: 'string', description: 'x' }; })],
-    ['propiedad de la herramienta que no es texto', conTool((t) => { t.input_schema.properties.marca = { type: 'object' }; })],
+    ['propiedad de la herramienta que no es texto', conTool((t) => { t.input_schema.properties.fabricante = { type: 'object' }; })],
     ['descripción de herramienta enorme', conTool((t) => { t.description = 'x'.repeat(5000); })],
     ['herramienta con claves extra', conTool((t) => { t.cache_control = {}; })],
     ['tool_choice automático', { tool_choice: { type: 'auto' } }],
@@ -141,7 +141,7 @@ describe('proxy de IA (worker)', () => {
   it('la lista de propiedades del proxy coincide con la herramienta real de la app', () => {
     // si alguien cambia analyzer.ts y no el proxy, la app dejaría de funcionar en producción: esta prueba lo impide
     expect(validarCuerpo(JSON.stringify(cuerpo()), ['claude-sonnet-5-5'])).toMatchObject({ ok: true });
-    const conUna = JSON.parse(JSON.stringify(TOOL)); delete conUna.input_schema.properties.marca; conUna.input_schema.required = conUna.input_schema.required.filter((r: string) => r !== 'marca');
+    const conUna = JSON.parse(JSON.stringify(TOOL)); delete conUna.input_schema.properties.fabricante; conUna.input_schema.required = conUna.input_schema.required.filter((r: string) => r !== 'marca');
     expect(validarCuerpo(JSON.stringify(cuerpo({ tools: [conUna] })), ['claude-sonnet-5-5'])).toMatchObject({ ok: false });
   });
 
@@ -324,8 +324,176 @@ describe('usuarios por rol desde la pestaña _Usuarios', () => {
     const m = montar(); const h = m.usuarios();
     h.appendRow(['Ana', 'tecnico', '', 'si']); h.appendRow(['Beto', 'tecnico', 'fija', 'si']);
     expect(m.gs.gs.generarClavesFaltantes()).toBe(1);
-    expect(h.filas[2][2]).toMatch(/^[0-9a-f]{12}$/); expect(h.filas[3][2]).toBe('fija');
+    expect(h.filas[2][2]).toMatch(/^[0-9a-f]{20}$/); expect(h.filas[3][2]).toBe('fija');
     const r = await m.gs.llamar('', { body: JSON.stringify({ token: 'malo', accion: 'usuario', clave: 'fija' }) });
     expect((await r.json()).ok).toBe(false);
+  });
+});
+
+describe('IA con dos proveedores: Claude y Gemini (respaldo)', () => {
+  const imagen = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' } };
+  const cuerpo = JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 1024, tools: [TOOL], tool_choice: { type: 'tool', name: 'registrar_luminaria' }, messages: [{ role: 'user', content: [imagen, { type: 'text', text: 'Foto general:' }] }] });
+  const pet = () => new Request('https://p.example/analizar', { method: 'POST', headers: { 'x-api-key': 'tokJ' }, body: cuerpo });
+  const gem = (args: any = { fabricante: 'Philips', tecnologia: 'LED', potenciaW: '150', confianza: 'alta' }) =>
+    new Response(JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { name: 'registrar_luminaria', args } }] } }] }), { status: 200 });
+  const claude = (status = 200) => new Response(status === 200 ? JSON.stringify({ content: [{ type: 'tool_use', input: { fabricante: 'Schréder' } }] }) : '{"error":{"message":"Your credit balance is too low"}}', { status });
+  const envBase = { APP_TOKENS: 'juan:tokJ', ANTHROPIC_API_KEY: 'sk-a', GEMINI_API_KEY: 'AIza-g' };
+  const ruta = (f: jest.Mock) => f.mock.calls.map((c: any) => String(c[0]).includes('anthropic') ? 'claude' : 'gemini');
+
+  it('el orden por defecto es Claude y luego Gemini; solo cuentan los que tienen clave', () => {
+    expect(proveedores(envBase)).toEqual(['claude', 'gemini']);
+    expect(proveedores({ ...envBase, ORDEN_IA: 'gemini,claude' })).toEqual(['gemini', 'claude']);
+    expect(proveedores({ ANTHROPIC_API_KEY: 'x' })).toEqual(['claude']);
+    expect(proveedores({ GEMINI_API_KEY: 'x' })).toEqual(['gemini']);
+    expect(proveedores({ ...envBase, ORDEN_IA: 'gemini' })).toEqual(['gemini']);
+    expect(proveedores({})).toEqual([]);
+  });
+
+  it('si Claude responde, no se llama a Gemini', async () => {
+    const f = jest.fn().mockResolvedValue(claude());
+    const r = await manejar(pet(), envBase, f);
+    expect(r.status).toBe(200); expect(r.headers.get('x-ia-proveedor')).toBe('claude');
+    expect(ruta(f)).toEqual(['claude']);
+  });
+
+  it.each([[400], [401], [402], [429], [500], [529]])('si Claude falla con %i (p. ej. sin créditos) responde Gemini con la misma forma de respuesta', async (estado) => {
+    const f = jest.fn().mockImplementation(async (u: any) => (String(u).includes('anthropic') ? claude(estado) : gem()));
+    const r = await manejar(pet(), envBase, f);
+    expect(r.status).toBe(200); expect(r.headers.get('x-ia-proveedor')).toBe('gemini');
+    const j = await r.json();
+    expect(j.content[0]).toEqual({ type: 'tool_use', name: 'registrar_luminaria', input: { fabricante: 'Philips', tecnologia: 'LED', potenciaW: '150', confianza: 'alta' } });
+    expect(ruta(f)).toEqual(['claude', 'gemini']);
+  });
+
+  it('también si Claude no responde en absoluto (red caída)', async () => {
+    const f = jest.fn().mockImplementation(async (u: any) => { if (String(u).includes('anthropic')) throw new Error('red'); return gem(); });
+    expect((await manejar(pet(), envBase, f)).headers.get('x-ia-proveedor')).toBe('gemini');
+  });
+
+  it('con solo la clave de Gemini funciona sin Claude; con ORDEN_IA=gemini,claude, Claude queda de respaldo', async () => {
+    const f1 = jest.fn().mockResolvedValue(gem());
+    expect((await manejar(pet(), { APP_TOKENS: 'juan:tokJ', GEMINI_API_KEY: 'g' }, f1)).status).toBe(200);
+    expect(ruta(f1)).toEqual(['gemini']);
+    const f2 = jest.fn().mockImplementation(async (u: any) => (String(u).includes('anthropic') ? claude() : new Response('{}', { status: 429 })));
+    const r = await manejar(pet(), { ...envBase, ORDEN_IA: 'gemini,claude' }, f2);
+    expect(r.headers.get('x-ia-proveedor')).toBe('claude'); expect(ruta(f2)).toEqual(['gemini', 'claude']);
+  });
+
+  it('si fallan los dos devuelve un error sin filtrar claves; sin ninguna clave → 503', async () => {
+    const f = jest.fn().mockResolvedValue(new Response('{"error":"sk-a AIza-g"}', { status: 500 }));
+    const r = await manejar(pet(), envBase, f);
+    expect(r.status).toBe(500); expect(await r.text()).not.toMatch(/sk-a|AIza/);
+    expect((await manejar(pet(), { APP_TOKENS: 'juan:tokJ' }, f)).status).toBe(503);
+  });
+
+  it('Gemini bloqueando la imagen (sin llamada a la herramienta) cuenta como fallo', async () => {
+    const f = jest.fn().mockResolvedValue(new Response(JSON.stringify({ candidates: [{ finishReason: 'SAFETY', content: { parts: [] } }] }), { status: 200 }));
+    expect((await manejar(pet(), { APP_TOKENS: 'juan:tokJ', GEMINI_API_KEY: 'g' }, f)).status).toBe(502);
+  });
+
+  it('la petición a Gemini lleva la clave en cabecera (no en la URL), las fotos, la herramienta y la llamada forzada', async () => {
+    const f = jest.fn().mockResolvedValue(gem());
+    await manejar(pet(), { APP_TOKENS: 'juan:tokJ', GEMINI_API_KEY: 'AIza-g', GEMINI_MODEL: 'gemini-x' }, f);
+    const [url, init] = f.mock.calls[0] as any;
+    expect(url).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-x:generateContent');
+    expect(init.headers['x-goog-api-key']).toBe('AIza-g');
+    const b = JSON.parse(init.body);
+    expect(b.contents[0].parts[0]).toEqual({ inlineData: { mimeType: 'image/jpeg', data: 'AAAA' } });
+    expect(b.toolConfig.functionCallingConfig).toEqual({ mode: 'ANY', allowedFunctionNames: ['registrar_luminaria'] });
+    const decl = b.tools[0].functionDeclarations[0];
+    expect(decl.parameters.type).toBe('OBJECT');
+    expect(Object.keys(decl.parameters.properties)).toEqual(Object.keys(TOOL.input_schema.properties));
+    expect(decl.parameters.properties.confianza.enum).toEqual(['alta', 'media', 'baja']);
+    expect(JSON.stringify(b)).not.toContain('AIza-g');
+  });
+
+  it('deGemini ignora respuestas sin llamada y aGemini conserva todas las propiedades', () => {
+    expect(deGemini({ candidates: [{ content: { parts: [{ text: 'hola' }] } }] })).toBeNull();
+    expect(deGemini(null)).toBeNull();
+    expect(Object.keys(aGemini(JSON.parse(cuerpo)).tools[0].functionDeclarations[0].parameters.required)).toHaveLength(TOOL.input_schema.required.length);
+  });
+});
+
+describe('administración de usuarios desde la app (rol admin)', () => {
+  const { crearServidor } = require('./helpers/hoja');
+  const montar = () => {
+    const gs = crearServidor();
+    const env: any = { SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, ADMIN_TOKENS: 'jefe:claveJefe' };
+    const f = jest.fn((u: any, i: any) => gs.llamar(u, i));
+    const req = (ruta: string, clave: string, cuerpo: any = {}) => new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave }, body: JSON.stringify(cuerpo) });
+    const llamar = async (ruta: string, clave: string, cuerpo?: any) => { const r = await manejar(req(ruta, clave, cuerpo), env, f as any); return { status: r.status, j: await r.json() }; };
+    return { gs, env, f, llamar };
+  };
+  beforeEach(() => vaciarCacheUsuarios());
+
+  it('el administrador crea técnico y supervisor; cada uno entra con SU clave y con SU rol', async () => {
+    const m = montar();
+    const t = (await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'Ana Pérez', rol: 'tecnico' })).j.usuario;
+    const s = (await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'Sofía Ruiz', rol: 'supervisor' })).j.usuario;
+    expect(t.clave).toMatch(/^[0-9a-f]{20}$/); expect(t.activo).toBe(true);
+    expect((await m.llamar('/yo', t.clave)).j).toEqual({ ok: true, nombre: 'Ana Pérez', rol: 'tecnico' });
+    expect((await m.llamar('/yo', s.clave)).j).toEqual({ ok: true, nombre: 'Sofía Ruiz', rol: 'supervisor' });
+    expect((await m.llamar('/yo', 'claveJefe')).j.rol).toBe('admin');
+    // permisos: técnico no ve el panel ni administra; supervisor ve el panel pero no administra; ambos capturan/sincronizan
+    expect((await m.llamar('/equipo', t.clave)).status).toBe(401);
+    expect((await m.llamar('/equipo', s.clave)).status).toBe(200);
+    expect((await m.llamar('/usuarios', t.clave, { accion: 'listar' })).status).toBe(401);
+    expect((await m.llamar('/usuarios', s.clave, { accion: 'listar' })).status).toBe(401);
+    expect((await m.llamar('/sync', s.clave, { accion: 'listar', proyecto: { nombre: 'P' }, desde: '' })).status).toBe(200);
+    expect((await m.llamar('/sync', t.clave, { accion: 'listar', proyecto: { nombre: 'P' }, desde: '' })).status).toBe(200);
+  });
+
+  it('el listado trae a todos con su clave y estado; editar conserva la clave; claveNueva la cambia y la anterior deja de servir', async () => {
+    const m = montar();
+    const a = (await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'Ana', rol: 'tecnico' })).j.usuario;
+    const b = (await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'ana', rol: 'supervisor' })).j.usuario;   // mismo nombre (sin distinguir mayúsculas) → edita
+    expect(b.clave).toBe(a.clave);
+    const lista = (await m.llamar('/usuarios', 'claveJefe', { accion: 'listar' })).j.usuarios;
+    expect(lista).toHaveLength(1); expect(lista[0]).toMatchObject({ nombre: 'ana', rol: 'supervisor', activo: true });
+    const c = (await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'Ana', rol: 'supervisor', claveNueva: true })).j.usuario;
+    expect(c.clave).not.toBe(a.clave);
+    expect((await m.llamar('/yo', a.clave)).status).toBe(401);
+    expect((await m.llamar('/yo', c.clave)).status).toBe(200);
+  });
+
+  it('dar de baja corta el acceso de inmediato y se puede reactivar con la misma clave', async () => {
+    const m = montar();
+    const a = (await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'Ana', rol: 'tecnico' })).j.usuario;
+    await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'Ana', rol: 'tecnico', activo: false });
+    expect((await m.llamar('/yo', a.clave)).status).toBe(401);
+    await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'Ana', rol: 'tecnico', activo: true });
+    expect((await m.llamar('/yo', a.clave)).status).toBe(200);
+  });
+
+  it('un administrador de la hoja administra; no puede quitarse el rol ni darse de baja; el listado no se salta el rol', async () => {
+    const m = montar();
+    const x = (await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'Luz', rol: 'admin' })).j.usuario;
+    expect((await m.llamar('/yo', x.clave)).j.rol).toBe('admin');
+    expect((await m.llamar('/usuarios', x.clave, { accion: 'listar' })).status).toBe(200);
+    const mal = await m.llamar('/usuarios', x.clave, { accion: 'guardar', nombre: 'Luz', rol: 'tecnico' });
+    expect(mal.j.ok).toBe(false);
+    expect((await m.llamar('/usuarios', x.clave, { accion: 'guardar', nombre: 'Luz', rol: 'admin', activo: false })).j.ok).toBe(false);
+    expect((await m.llamar('/yo', x.clave)).j.rol).toBe('admin');
+  });
+
+  it('validaciones: nombre vacío o peligroso, rol inválido, acción desconocida; el cliente no puede imponer "por" ni tokens', async () => {
+    const m = montar();
+    for (const cuerpo of [
+      { accion: 'guardar', nombre: '', rol: 'tecnico' }, { accion: 'guardar', nombre: 'x'.repeat(61), rol: 'tecnico' },
+      { accion: 'guardar', nombre: 'Ana', rol: 'dios' }, { accion: 'borrar', nombre: 'Ana' }, { accion: 'guardar', rol: 'tecnico' },
+    ]) expect((await m.llamar('/usuarios', 'claveJefe', cuerpo)).status).toBe(400);
+    expect((await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: '=cmd()', rol: 'tecnico' })).j.ok).toBe(false);
+    m.f.mockClear();
+    await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'Beto', rol: 'tecnico', por: 'Beto', token: 'x' });
+    const enviado = JSON.parse((m.f.mock.calls[0] as any)[1].body);
+    expect(enviado).toMatchObject({ accion: 'usuarios_guardar', por: 'jefe', token: 'CAMBIA-ESTE-TOKEN-ADMIN' });
+  });
+
+  it('el script solo atiende la administración con el token de administrador (no con el del equipo)', async () => {
+    const m = montar();
+    const r = await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'usuarios_listar' }) });
+    expect((await r.json()).ok).toBe(false);
+    const r2 = await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'usuarios_guardar', nombre: 'Hacker', rol: 'admin' }) });
+    expect((await r2.json()).ok).toBe(false);
   });
 });

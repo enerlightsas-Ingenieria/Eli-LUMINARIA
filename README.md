@@ -5,9 +5,9 @@ Identifica con IA (Claude visión) las características básicas y las guarda en
 
 ## Funciones
 - **Captura guiada con 1–3 fotos** (general, placa/etiqueta, fotocelda) → la IA combina las tres para acertar más.
-- **Identifica:** marca · fabricante · modelo · tipo · tecnología (LED, sodio, mercurio, metal halide…) · potencia ·
-  tensión · fotocelda y **nº de pines (3/5/7)** · temperatura de color · flujo · IP · montaje · altura estimada · estado ·
-  observaciones · confianza. Lo que no se ve queda vacío (no inventa); lo deducido por aspecto se marca “(est.)”.
+- **Identifica:** fabricante · modelo · tecnología (LED, sodio, metal halide, mercurio, fluorescente, incandescente, halógena,
+  inducción, luz mixta u otra) · potencia · tensión · fotocelda y **nº de pines (3/5/7)** · temperatura de color · IP · montaje ·
+  estado · observaciones · confianza. Lo que no se ve queda vacío (no inventa); lo deducido por aspecto se marca “(est.)”.
 - **GPS** con precisión visible; usa el EXIF si la foto viene de galería; dirección aproximada.
 - **Proyectos**: agrupa levantamientos por zona/cliente, con resumen (kW instalados, por tecnología, por pines de fotocelda).
 - **Mapa** (OpenStreetMap + satélite, sin claves de API) con marcadores por tecnología y botón “centrar en mí”.

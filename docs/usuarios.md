@@ -1,35 +1,36 @@
-# Usuarios y roles (pestaña `_Usuarios`)
+# Usuarios y roles
 
-El administrador crea a las personas en la hoja de Google. No hace falta editar secretos de Cloudflare ni volver a publicar nada.
+Hay tres roles. El **administrador** los crea desde la propia app (Ajustes → Administración de usuarios); no hace falta tocar Cloudflare ni la hoja.
 
-## Una sola vez
-1. Pega el script nuevo (`server/google-apps-script.gs`) en Apps Script, guarda y **vuelve a implementar** (Implementar → Administrar implementaciones → editar → Nueva versión), manteniendo la misma URL.
-2. Recarga la hoja de Google: aparece el menú **ELI-LUMINARIA**. Elige **Preparar pestaña Usuarios**.
-3. Autoriza los permisos si Google los pide.
+| Rol | Qué puede hacer |
+|---|---|
+| **Técnico** | Captura, edita y sincroniza sus registros; ve el mapa y sus proyectos. |
+| **Supervisor** | Todo lo del técnico **y además** ve el panel del equipo (quién trabaja, dónde, calidad de lo capturado). |
+| **Administrador** | Todo lo del supervisor **y además** crea personas, cambia su rol, las da de baja y les entrega su enlace. |
 
-## Crear, cambiar y dar de baja personas
-La pestaña `_Usuarios` tiene cuatro columnas:
+## Primer administrador (una sola vez)
+El primer administrador sale de `ADMIN_TOKENS` en Cloudflare (por ejemplo `admin:UNA-CLAVE-LARGA`). Con esa clave abres tu propio enlace, y desde ahí creas a todos los demás desde la app. Después puedes dejar ese secreto como llave de emergencia.
 
-| Nombre | Rol | Clave | Activo |
-|---|---|---|---|
-| Ana Pérez | tecnico | (se genera) | si |
-| Sofía Ruiz | supervisor | (se genera) | si |
+Para activar la administración:
+1. Pega el script nuevo (`server/google-apps-script.gs`) en Apps Script conservando tus `TOKEN` y `TOKEN_ADMIN`, y vuelve a implementar (Implementar → Administrar implementaciones → editar → **Nueva versión**; la URL no cambia).
+2. Publica el proxy: `npx wrangler deploy server/worker.ts --name eli-luminaria-proxy --compatibility-date 2026-01-01`.
+3. Publica la web: `cd web; npm run build; npx wrangler pages deploy dist --project-name eli-luminaria --branch main`.
 
-- **Nuevo técnico o supervisor:** añade una fila con nombre y rol, y usa el menú **ELI-LUMINARIA → Generar claves faltantes**.
-- **Baja:** pon `no` en *Activo*. Deja de entrar en un minuto como máximo.
-- **Rol:** `supervisor` ve el panel del equipo y también puede capturar. Cualquier otro valor se trata como técnico.
-- **Clave perdida o filtrada:** borra la celda de *Clave* y vuelve a generar. La anterior deja de servir.
+## Día a día
+- **Nueva persona:** Ajustes → *Administración de usuarios* → **+** → nombre y rol → *Crear y ver enlace*. Pulsa **Compartir** (WhatsApp, correo) o *Copiar enlace*. La persona lo abre en su teléfono y queda lista; su nombre y su rol vienen del servidor.
+- **Contratista:** marca *Contratista (modo terceros)* al crearlo; su enlace exige jornada, cámara y GPS preciso.
+- **Cambiar de rol:** toca la persona, elige el rol y *Guardar*. Se aplica la próxima vez que abra la app con conexión.
+- **Baja:** desmarca *Con acceso*. Deja de poder sincronizar y usar la IA de inmediato (en un minuto como máximo).
+- **Clave filtrada o teléfono perdido:** toca la persona → *Generar clave nueva*. La anterior deja de servir.
+- No puedes quitarte a ti mismo el rol de administrador ni darte de baja.
 
-## Darle acceso a la persona
-Genera su enlace con su clave y envíaselo en privado:
+## Dónde se guarda
+En la pestaña `_Usuarios` de tu hoja de Google (nombre, rol, clave, activo). También puedes editarla a mano (menú **ELI-LUMINARIA → Generar claves faltantes**).
 
-```
-node server/make-config.js --worker https://TU-PROXY.workers.dev --web https://TU-APP.pages.dev --tecnico "Ana Pérez" --token LA-CLAVE-DE-ANA --proyecto "General"
-```
-Para un supervisor añade `--supervisor`.
-
-## Notas de seguridad
-- La hoja contiene las claves: compártela solo con quien administre. Quien edite la hoja puede crear usuarios.
-- El nombre que figura en el panel y en los latidos sale de esta pestaña, no de lo que diga el teléfono.
-- `APP_TOKENS` y `ADMIN_TOKENS` siguen funcionando si los tienes cargados; puedes dejarlos vacíos.
-- El proxy recuerda cada clave `USUARIOS_CACHE_SEG` segundos (60 por defecto) para no consultar la hoja en cada petición.
+## Seguridad
+- El enlace de cada persona contiene su clave: envíalo en privado, nunca en un grupo.
+- Solo los administradores pueden ver la lista con las claves. La hoja debe compartirse solo con quien administre.
+- Los técnicos y supervisores nunca ven el token del script de Google ni la clave de la IA: viven en el servidor.
+- El proxy recuerda cada clave `USUARIOS_CACHE_SEG` segundos (60 por defecto).
+- `APP_TOKENS` (técnicos en secretos) sigue funcionando si ya lo usabas.
+- La administración de usuarios es solo de la web; la app móvil nativa no la incluye.

@@ -165,14 +165,14 @@ describe('monitoreo de jornadas', () => {
 
     it('incluye las luminarias del equipo (sin las eliminadas ni las pestañas del sistema)', async () => {
       const pA = await proyectoDe(A, 'Barrio A');
-      await nueva(A, pA.id, { marca: 'Visible', latitud: 4.71, longitud: -74.1 });
-      await nueva(A, pA.id, { marca: 'Borrada', latitud: 4.72, longitud: -74.1 });
+      await nueva(A, pA.id, { fabricante: 'Visible', latitud: 4.71, longitud: -74.1 });
+      await nueva(A, pA.id, { fabricante: 'Borrada', latitud: 4.72, longitud: -74.1 });
       await A.sync.sincronizar(pA);
-      await A.db.borrarLuminaria((await A.db.listarLuminarias(pA.id)).find((l) => l.marca === 'Borrada')!);
+      await A.db.borrarLuminaria((await A.db.listarLuminarias(pA.id)).find((l) => l.fabricante === 'Borrada')!);
       await A.sync.sincronizar(pA);
       await A.jornada.registrarConsentimiento(); await A.jornada.iniciarJornada(); await A.jornada.enviarLatido('Barrio A');
       const d = srv.gs.datosEquipo(TOKEN_ADMIN);
-      expect(d.luminarias.map((l: any) => l.marca)).toEqual(['Visible']);
+      expect(d.luminarias.map((l: any) => l.fab)).toEqual(['Visible']);
     });
 
     it('exige el token de administrador (el del equipo no sirve)', async () => {
@@ -211,7 +211,7 @@ describe('monitoreo de jornadas', () => {
     it('un proyecto llamado "_Equipo" no puede pisar las pestañas del sistema', async () => {
       await latido({});
       const p = await proyectoDe(A, '_Equipo');
-      await nueva(A, p.id, { marca: 'Intruso' });
+      await nueva(A, p.id, { fabricante: 'Intruso' });
       await A.sync.sincronizar(p);
       expect(srv.hojas.map((h) => h.nombre).sort()).toEqual(['Equipo', '_Equipo', '_Jornadas']);
       expect(equipo().filas.flat().includes('Intruso')).toBe(false);

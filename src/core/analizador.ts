@@ -1,4 +1,4 @@
-import { Caracteristicas, caracteristicasVacias, Confianza } from '../types';
+import { Caracteristicas, caracteristicasVacias, Confianza, normalizarTecnologia } from '../types';
 import { Ajustes } from './ajustes';
 
 export interface ResultadoAnalisis {
@@ -10,13 +10,13 @@ const PROMPT = `Eres un técnico experto en alumbrado público e iluminación ex
 Recibes de 1 a 3 fotos de UNA misma luminaria (general, placa/etiqueta, fotocelda). Extrae sus características básicas.
 
 Reglas:
-- Lee cualquier etiqueta, placa, grabado o texto visible (marca, modelo, potencia, tensión, IP, lm, K, fabricante, país).
+- Lee cualquier etiqueta, placa, grabado o texto visible (fabricante, modelo, potencia, tensión, IP, K, país).
 - Si un dato NO se puede ver ni deducir con razonable certeza, devuelve cadena vacía "". No inventes cifras.
 - Si deduces un dato sólo por la forma/aspecto, añade " (est.)" al final.
 - Fotocelda: indica si hay (NEMA/twist-lock ANSI C136.10, integrada, externa) o no. Cuenta los pines/contactos visibles del receptáculo: 3 pines = on/off estándar; 5 pines = con dimming 0-10V/DALI; 7 pines = dimming + datos/telegestión (ANSI C136.41). Ponlo en "pinesFotocelda" (solo el número).
-- Tecnología por aspecto: lámpara tubular/elipsoidal visible tras vidrio = sodio/mercurio/halogenuro; módulo de LEDs/óptica con lentes = LED.
-- Responde en español, valores cortos. Campos numéricos sin unidad (W, V, K, lm, m).
-- altura: estimación aproximada en metros sólo si hay referencias claras (poste, personas, vehículos).
+- Tecnología: responde SOLO con una de estas: LED, Sodio, Metal Halide, Mercurio, Fluorescente, Incandescente, Halógena, Inducción, Luz mixta. Si ninguna encaja, responde "Otra: <cuál>". Por aspecto: módulo de LEDs con lentes = LED; lámpara tubular/elipsoidal tras vidrio = sodio, mercurio o metal halide (solo si lo puedes distinguir).
+- Responde en español, valores cortos. Campos numéricos sin unidad (W, V, K).
+- Son luminarias de alumbrado público.
 - Usa la herramienta registrar_luminaria para responder.`;
 
 const campo = (description: string) => ({ type: 'string', description });
@@ -27,21 +27,17 @@ export const TOOL = {
   input_schema: {
     type: 'object',
     properties: {
-      marca: campo('Marca comercial'),
-      fabricante: campo('Fabricante (puede coincidir con la marca)'),
+      fabricante: campo('Fabricante'),
       modelo: campo('Modelo o referencia'),
-      tipoLuminaria: campo('Alumbrado público, proyector, farol, panel, bala, hermética, etc.'),
-      tecnologia: campo('LED, sodio alta presión, sodio baja presión, mercurio, metal halide, fluorescente, inducción, incandescente'),
+      tecnologia: campo('Una de: LED, Sodio, Metal Halide, Mercurio, Fluorescente, Incandescente, Halógena, Inducción, Luz mixta; si ninguna, "Otra: <cuál>"'),
       potenciaW: campo('Potencia en vatios'),
       tensionV: campo('Tensión nominal en voltios'),
       fotocelda: campo('Presencia y tipo de fotocelda'),
       pinesFotocelda: campo('Número de pines de la fotocelda/receptáculo: 3, 5 o 7'),
       temperaturaColorK: campo('Temperatura de color en kelvin'),
-      flujoLuminosoLm: campo('Flujo luminoso en lúmenes'),
       ip: campo('Grado de protección IP'),
-      montaje: campo('Poste, brazo, pared, techo, suspendida, etc.'),
-      alturaM: campo('Altura de montaje estimada en metros'),
-      estado: campo('Estado visual: bueno, deteriorado, apagada, vandalizada...'),
+      montaje: campo('Poste, brazo o suspendida'),
+      estado: campo('Estado visual: bueno, deteriorado, apagada o vandalizada'),
       observaciones: campo('Notas útiles: brazo, color, daños, texto leído'),
       confianza: { type: 'string', enum: ['alta', 'media', 'baja'], description: 'Confianza global en la identificación' },
     },
@@ -106,6 +102,7 @@ export async function analizarFotosCon(cargarAjustes: () => Promise<Ajustes>, ba
   if (!res.ok) {
     const detalle = await res.text().catch(() => '');
     if (res.status === 401) throw new ErrorAnalisis('API key inválida (401). Revisa Ajustes.');
+    if (res.status === 503) throw new ErrorAnalisis('La IA no está configurada en el servidor. Llena los datos a mano.');
     if (res.status === 429) throw new ErrorAnalisis('Límite de uso alcanzado (429). Intenta de nuevo en un momento.');
     throw new ErrorAnalisis(`Error del servicio (${res.status}). ${detalle.slice(0, 160)}`);
   }
@@ -119,6 +116,7 @@ export async function analizarFotosCon(cargarAjustes: () => Promise<Ajustes>, ba
     const v = bloque.input?.[k];
     out[k] = typeof v === 'string' ? v.trim() : v != null ? String(v) : '';
   }
+  out.tecnologia = normalizarTecnologia(out.tecnologia);
   const c = bloque.input?.confianza;
   return { caracteristicas: out, confianza: c === 'alta' || c === 'media' || c === 'baja' ? c : 'baja' };
 }

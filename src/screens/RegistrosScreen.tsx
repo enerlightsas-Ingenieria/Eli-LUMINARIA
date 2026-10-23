@@ -37,7 +37,7 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
       if (filtro === 'pendientes' && l.sincronizado) return false;
       if (filtro === 'sinGps' && l.latitud != null) return false;
       if (!t) return true;
-      return [l.codigo, l.marca, l.modelo, l.fabricante, l.tecnologia, l.direccion, l.tipoLuminaria, String(l.id)]
+      return [l.codigo, l.codigoPoste, l.modelo, l.fabricante, l.tecnologia, l.direccion, String(l.id)]
         .some((x) => x.toLowerCase().includes(t));
     });
   }, [items, q, filtro]);
@@ -96,7 +96,7 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
       <TarjetaJornada />
       <View style={s.search}>
         <Ionicons name="search" size={18} color={c.muted} />
-        <TextInput value={q} onChangeText={setQ} placeholder="Buscar marca, código, dirección…" placeholderTextColor={c.muted} style={s.input} accessibilityLabel="Buscar" />
+        <TextInput value={q} onChangeText={setQ} placeholder="Buscar fabricante, código, dirección…" placeholderTextColor={c.muted} style={s.input} accessibilityLabel="Buscar" />
       </View>
       <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 10 }}>
         {([['todas', 'Todas'], ['pendientes', `Sin sincronizar (${pendientes})`], ['sinGps', 'Sin coordenada']] as [Filtro, string][]).map(([f, t]) => (
@@ -121,18 +121,18 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
             <Ionicons name="bulb-outline" size={64} color={c.primary} />
             <Text style={{ color: c.text, fontSize: 18, fontWeight: '700', marginTop: 12 }}>{items.length ? 'Sin resultados' : 'Aún no hay luminarias'}</Text>
             <Text style={{ color: c.muted, textAlign: 'center', marginTop: 6, paddingHorizontal: 30, lineHeight: 20 }}>
-              {items.length ? 'Prueba con otro texto o filtro.' : 'Toma una foto y la app identificará marca, tecnología, potencia, fotocelda y más, junto con la coordenada.'}
+              {items.length ? 'Prueba con otro texto o filtro.' : 'Toma una foto y la app identificará fabricante, tecnología, potencia, fotocelda y más, junto con la coordenada.'}
             </Text>
           </View>
         }
         renderItem={({ item: l }) => (
           <Pressable onPress={() => nav.navigate('Editar', { id: l.id })} onLongPress={() => confirmarBorrado(l)} style={s.card}
-            accessibilityRole="button" accessibilityLabel={`Luminaria ${l.id}, ${l.marca} ${l.modelo}`}>
+            accessibilityRole="button" accessibilityLabel={`Luminaria ${l.id}, ${l.fabricante} ${l.modelo}`}>
             {l.fotos[0] ? <Image source={{ uri: l.fotos[0] }} style={s.thumb} /> : <View style={s.thumb} />}
             <View style={{ flex: 1 }}>
-              <Text style={s.t} numberOfLines={1}>{l.codigo || `#${l.id}`} · {[l.marca, l.modelo].filter(Boolean).join(' ') || 'Sin identificar'}</Text>
+              <Text style={s.t} numberOfLines={1}>{l.codigo || `#${l.id}`} · {[l.fabricante, l.modelo].filter(Boolean).join(' ') || 'Sin identificar'}</Text>
               <Text style={s.sub} numberOfLines={1}>
-                {[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.pinesFotocelda && `fotocelda ${l.pinesFotocelda}p`].filter(Boolean).join(' · ') || l.tipoLuminaria || '—'}
+                {[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.pinesFotocelda && `fotocelda ${l.pinesFotocelda}p`].filter(Boolean).join(' · ') || '—'}
               </Text>
               {!!l.tecnico && <Text style={[s.sub, { fontSize: 12 }]} numberOfLines={1}>Por {l.tecnico}</Text>}
               <Text style={s.coord} numberOfLines={1}>

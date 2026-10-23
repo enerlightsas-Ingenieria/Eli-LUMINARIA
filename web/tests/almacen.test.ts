@@ -6,7 +6,7 @@ import * as db from '../src/servicios/almacen';
 const borrador = (proyectoId: number, o: any = {}) => ({
   ...caracteristicasVacias(), uuid: crypto.randomUUID(), proyectoId, creadoEn: '2026-01-01T00:00:00Z', actualizadoEn: '', fotos: ['f1'],
   latitud: 4.7, longitud: -74.07, precisionM: 6, direccion: 'Cra 7', codigo: 'P-1', tecnico: 'Ana', confianza: 'alta' as const,
-  origen: 'camara' as const, ubicacionSimulada: false, jornadaId: '', marca: 'Philips', tecnologia: 'LED', ...o,
+  origen: 'camara' as const, ubicacionSimulada: false, jornadaId: '', fabricante: 'Philips', tecnologia: 'LED', ...o,
 });
 
 beforeEach(async () => {
@@ -22,15 +22,15 @@ describe('almacén web (IndexedDB)', () => {
     const id = await db.guardarLuminaria(borrador(ps[0].id));
     let ls = await db.listarLuminarias(ps[0].id);
     expect(ls).toHaveLength(1);
-    expect(ls[0]).toMatchObject({ marca: 'Philips', fotos: ['f1'], sincronizado: false, latitud: 4.7, id });
+    expect(ls[0]).toMatchObject({ fabricante: 'Philips', fotos: ['f1'], sincronizado: false, latitud: 4.7, id });
 
     await db.marcarSincronizadas([{ uuid: ls[0].uuid, actualizadoEn: ls[0].actualizadoEn }]);
     expect(await db.pendientesDeSync(ps[0].id)).toHaveLength(0);
 
     await new Promise((r) => setTimeout(r, 2));                                   // distinto actualizadoEn
-    await db.guardarLuminaria({ ...ls[0], id, marca: 'Schréder' });               // editar reabre pendiente
+    await db.guardarLuminaria({ ...ls[0], id, fabricante: 'Schréder' });               // editar reabre pendiente
     ls = await db.listarLuminarias(ps[0].id);
-    expect(ls[0].marca).toBe('Schréder'); expect(ls[0].sincronizado).toBe(false);
+    expect(ls[0].fabricante).toBe('Schréder'); expect(ls[0].sincronizado).toBe(false);
     expect(ls).toHaveLength(1);                                                   // actualiza, no duplica
 
     await db.borrarLuminaria(ls[0]);
@@ -45,7 +45,7 @@ describe('almacén web (IndexedDB)', () => {
     const id = await db.guardarLuminaria(borrador(p.id));
     const [antes] = await db.listarLuminarias(p.id);
     await new Promise((r) => setTimeout(r, 2));
-    await db.guardarLuminaria({ ...antes, id, marca: 'Editada durante el envío' });
+    await db.guardarLuminaria({ ...antes, id, fabricante: 'Editada durante el envío' });
     await db.marcarSincronizadas([{ uuid: antes.uuid, actualizadoEn: antes.actualizadoEn }]);   // llega la confirmación del envío viejo
     expect((await db.pendientesDeSync(p.id))).toHaveLength(1);
   });
@@ -93,27 +93,27 @@ describe('almacén web (IndexedDB)', () => {
   });
 
   describe('fusión con lo que traen los demás técnicos', () => {
-    const remota = (o: any = {}) => normalizarRemota({ uuid: 'r1', marca: 'Remota', tecnico: 'Beto', latitud: 4.8, longitud: -74.1, creadoEn: '2026-03-01T10:00:00Z', ...o })!;
+    const remota = (o: any = {}) => normalizarRemota({ uuid: 'r1', fabricante: 'Remota', tecnico: 'Beto', latitud: 4.8, longitud: -74.1, creadoEn: '2026-03-01T10:00:00Z', ...o })!;
 
     it('inserta lo nuevo (ya sincronizado) y actualiza lo existente conservando sus fotos', async () => {
       const [p] = await db.listarProyectos();
       expect(await db.fusionarRemotas(p.id, [remota()])).toEqual({ nuevas: 1, actualizadas: 0, borradas: 0 });
       let [l] = await db.listarLuminarias(p.id);
-      expect(l).toMatchObject({ marca: 'Remota', sincronizado: true, fotos: [], tecnico: 'Beto' });
+      expect(l).toMatchObject({ fabricante: 'Remota', sincronizado: true, fotos: [], tecnico: 'Beto' });
       await db.guardarLuminaria({ ...l, fotos: ['mi-foto'] });                                  // el técnico agrega una foto
       await db.marcarSincronizadas([{ uuid: 'r1', actualizadoEn: (await db.listarLuminarias(p.id))[0].actualizadoEn }]);
-      expect(await db.fusionarRemotas(p.id, [remota({ marca: 'Editada por Beto' })])).toMatchObject({ actualizadas: 1 });
+      expect(await db.fusionarRemotas(p.id, [remota({ fabricante: 'Editada por Beto' })])).toMatchObject({ actualizadas: 1 });
       [l] = await db.listarLuminarias(p.id);
-      expect(l).toMatchObject({ marca: 'Editada por Beto', fotos: ['mi-foto'], sincronizado: true });
+      expect(l).toMatchObject({ fabricante: 'Editada por Beto', fotos: ['mi-foto'], sincronizado: true });
     });
 
     it('no pisa mis cambios pendientes; lo eliminado gana; lo que borré yo no resucita', async () => {
       const [p] = await db.listarProyectos();
       await db.fusionarRemotas(p.id, [remota()]);
       let [l] = await db.listarLuminarias(p.id);
-      await db.guardarLuminaria({ ...l, marca: 'Mi edición' });                                 // pendiente
-      expect(await db.fusionarRemotas(p.id, [remota({ marca: 'Otra' })])).toMatchObject({ actualizadas: 0 });
-      expect((await db.listarLuminarias(p.id))[0].marca).toBe('Mi edición');
+      await db.guardarLuminaria({ ...l, fabricante: 'Mi edición' });                                 // pendiente
+      expect(await db.fusionarRemotas(p.id, [remota({ fabricante: 'Otra' })])).toMatchObject({ actualizadas: 0 });
+      expect((await db.listarLuminarias(p.id))[0].fabricante).toBe('Mi edición');
       expect(await db.fusionarRemotas(p.id, [remota({ eliminada: 'SÍ' })])).toMatchObject({ borradas: 1 });
       expect(await db.listarLuminarias(p.id)).toHaveLength(0);
 

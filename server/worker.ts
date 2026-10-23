@@ -11,7 +11,9 @@
  *   /  o /analizar  → análisis de fotos con IA (la API key vive aquí)
  *   /sync           → puerta hacia el script de Google (la web nunca ve el token del script; en los latidos el nombre del
  *                      técnico lo pone el proxy según SU token, no lo declara el cliente)
- *   /equipo         → datos del mapa/panel de supervisión (solo tokens de ADMIN_TOKENS)
+ *   /equipo         → datos del mapa/panel de supervisión (supervisores y administradores)
+ *   /yo             → quién soy (nombre y rol según la clave)
+ *   /usuarios       → menú de administración: listar/crear/editar personas (solo administradores)
  *
  * Usuarios:  lo normal es la pestaña "_Usuarios" de la hoja de Google (nombre, rol, clave, activo): el administrador crea
  *            técnicos y supervisores ahí, sin tocar secretos. APP_TOKENS / ADMIN_TOKENS siguen funcionando como alternativa.
@@ -20,8 +22,11 @@
  *            wrangler secret put APP_TOKENS        # (opcional) "juan:tok1,ana:tok2"
  *            wrangler secret put SYNC_URL          # URL /exec de la Web App de Google Apps Script
  *            wrangler secret put SYNC_TOKEN        # = TOKEN del script
- *            wrangler secret put ADMIN_TOKENS      # (opcional) "supervisora:tokA"   (quienes pueden abrir el panel)
+ *            wrangler secret put ADMIN_TOKENS      # "admin:claveAdmin"  (los administradores iniciales; después se crean personas desde la app)
  *            wrangler secret put SYNC_TOKEN_ADMIN  # = TOKEN_ADMIN del script
+ * IA:        ANTHROPIC_API_KEY (Claude) y/o GEMINI_API_KEY (Gemini, tiene capa gratuita). ORDEN_IA="claude,gemini" (por defecto): si el
+ *            primero falla —sin créditos, límite, caída— se usa el siguiente. Para usar primero la gratuita: ORDEN_IA="gemini,claude".
+ *            GEMINI_MODEL (por defecto gemini-2.5-flash). Con la capa gratuita Google puede usar las fotos para mejorar sus productos.
  * Opcional:  USUARIOS_CACHE_SEG = 60  (segundos que el proxy recuerda una clave antes de volver a preguntar a la hoja)
  *            MODELOS_PERMITIDOS = "claude-sonnet-5-5,claude-haiku-5-5"
  *            ORIGENES_PERMITIDOS = "https://app.tuempresa.com"  (si no se define, cualquier origen; los tokens siguen protegiendo)
@@ -37,8 +42,8 @@ const MAX_TEXTO_BLOQUE = 3000;
 const MAX_TEXTO_TOTAL = 5000;
 const HERRAMIENTA = 'registrar_luminaria';
 const PROPIEDADES = [
-  'marca', 'fabricante', 'modelo', 'tipoLuminaria', 'tecnologia', 'potenciaW', 'tensionV', 'fotocelda', 'pinesFotocelda',
-  'temperaturaColorK', 'flujoLuminosoLm', 'ip', 'montaje', 'alturaM', 'estado', 'observaciones', 'confianza',
+  'fabricante', 'modelo', 'tecnologia', 'potenciaW', 'tensionV', 'fotocelda', 'pinesFotocelda',
+  'temperaturaColorK', 'ip', 'montaje', 'estado', 'observaciones', 'confianza',
 ];
 
 const json = (status: number, cuerpo: unknown) =>
@@ -63,7 +68,9 @@ export function identificar(token: string, tokens: string | undefined): string |
   return null;
 }
 
-export type Identidad = { nombre: string; rol: 'tecnico' | 'supervisor' };
+export type Rol = 'tecnico' | 'supervisor' | 'admin';
+export type Identidad = { nombre: string; rol: Rol };
+const ROLES: Rol[] = ['tecnico', 'supervisor', 'admin'];
 
 const cacheUsuarios = new Map<string, { v: Identidad | null; hasta: number }>();
 export const vaciarCacheUsuarios = () => cacheUsuarios.clear();
@@ -76,7 +83,7 @@ export const vaciarCacheUsuarios = () => cacheUsuarios.clear();
 export async function autenticar(clave: string, env: any, llamar: typeof fetch): Promise<Identidad | null> {
   if (!clave) return null;
   const sup = identificar(clave, env.ADMIN_TOKENS);
-  if (sup) return { nombre: sup, rol: 'supervisor' };
+  if (sup) return { nombre: sup, rol: 'admin' };   // los de ADMIN_TOKENS son los administradores iniciales
   const tec = identificar(clave, env.APP_TOKENS);
   if (tec) return { nombre: tec, rol: 'tecnico' };
   if (!env.SYNC_URL || !env.SYNC_TOKEN) return null;
@@ -90,7 +97,7 @@ export async function autenticar(clave: string, env: any, llamar: typeof fetch):
   const c: any = await r.json().catch(() => null);
   if (!c?.ok) throw new Error('hoja');
   const u = c.usuario;
-  const v: Identidad | null = u && typeof u.nombre === 'string' && u.nombre ? { nombre: u.nombre, rol: u.rol === 'supervisor' ? 'supervisor' : 'tecnico' } : null;
+  const v: Identidad | null = u && typeof u.nombre === 'string' && u.nombre ? { nombre: u.nombre, rol: ROLES.includes(u.rol) ? u.rol : 'tecnico' } : null;
   if (ttl > 0) {
     if (cacheUsuarios.size > 500) cacheUsuarios.clear();
     cacheUsuarios.set(llave, { v, hasta: Date.now() + ttl });
@@ -160,6 +167,63 @@ function cabecerasCors(request: Request, env: any): Record<string, string> {
   return h;
 }
 
+/** Pasa la petición (formato Anthropic, ya validada) al formato de Gemini: mismas fotos, misma herramienta, respuesta forzada. */
+export function aGemini(cuerpo: any): any {
+  const t = cuerpo.tools[0];
+  const props: Record<string, any> = {};
+  for (const [k, p] of Object.entries<any>(t.input_schema.properties)) {
+    props[k] = { type: 'STRING', description: p.description, ...(p.enum ? { enum: p.enum } : {}) };
+  }
+  const parts = cuerpo.messages[0].content.map((c: any) =>
+    c.type === 'image' ? { inlineData: { mimeType: c.source.media_type, data: c.source.data } } : { text: c.text });
+  return {
+    contents: [{ role: 'user', parts }],
+    tools: [{ functionDeclarations: [{ name: t.name, description: t.description, parameters: { type: 'OBJECT', properties: props, required: t.input_schema.required } }] }],
+    toolConfig: { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: [t.name] } },
+    generationConfig: { temperature: 0.1, maxOutputTokens: cuerpo.max_tokens },
+  };
+}
+
+/** Respuesta de Gemini → misma forma que la de Anthropic, para que la app no distinga el proveedor. */
+export function deGemini(r: any): any | null {
+  const partes: any[] = r?.candidates?.[0]?.content?.parts ?? [];
+  const llamada = partes.find((p) => p?.functionCall?.args && typeof p.functionCall.args === 'object')?.functionCall;
+  return llamada ? { content: [{ type: 'tool_use', name: llamada.name, input: llamada.args }] } : null;
+}
+
+type Intento = { ok: true; respuesta: Response } | { ok: false; estado: number };
+
+async function conClaude(cuerpo: any, env: any, llamar: typeof fetch): Promise<Intento> {
+  const r = await llamar('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', 'x-api-key': env.ANTHROPIC_API_KEY },
+    body: JSON.stringify(cuerpo),
+  });
+  if (!r.ok) { await r.body?.cancel().catch(() => {}); return { ok: false, estado: r.status }; }
+  return { ok: true, respuesta: new Response(r.body, { status: 200, headers: { 'content-type': 'application/json' } }) };
+}
+
+async function conGemini(cuerpo: any, env: any, llamar: typeof fetch): Promise<Intento> {
+  const modelo = encodeURIComponent(env.GEMINI_MODEL || 'gemini-2.5-flash');
+  const r = await llamar(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
+    body: JSON.stringify(aGemini(cuerpo)),
+  });
+  if (!r.ok) { await r.body?.cancel().catch(() => {}); return { ok: false, estado: r.status }; }
+  const convertida = deGemini(await r.json().catch(() => null));
+  if (!convertida) return { ok: false, estado: 502 };   // bloqueada por seguridad o sin llamada a la herramienta
+  return { ok: true, respuesta: new Response(JSON.stringify(convertida), { status: 200, headers: { 'content-type': 'application/json' } }) };
+}
+
+/** Proveedores de IA con clave configurada, en el orden de ORDEN_IA (por defecto Claude primero y Gemini de respaldo). */
+export function proveedores(env: any): ('claude' | 'gemini')[] {
+  const orden = String(env.ORDEN_IA ?? 'claude,gemini').split(',').map((x) => x.trim().toLowerCase());
+  return (['claude', 'gemini'] as const)
+    .filter((p) => orden.includes(p) && !!(p === 'claude' ? env.ANTHROPIC_API_KEY : env.GEMINI_API_KEY))
+    .sort((a, b) => orden.indexOf(a) - orden.indexOf(b));
+}
+
 async function analizar(request: Request, env: any, llamar: typeof fetch, tecnico: string): Promise<Response> {
   const texto = await request.text();
   if (texto.length > MAX_BYTES) return json(413, { error: 'Payload too large' });
@@ -167,13 +231,22 @@ async function analizar(request: Request, env: any, llamar: typeof fetch, tecnic
   const v = validarCuerpo(texto, modelos);
   if (!v.ok) return json(400, { error: v.error });
 
-  const r = await llamar('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', 'x-api-key': env.ANTHROPIC_API_KEY },
-    body: JSON.stringify(v.cuerpo),
-  });
-  console.log(JSON.stringify({ tecnico, estado: r.status, modelo: v.cuerpo.model }));
-  return new Response(r.body, { status: r.status, headers: { 'content-type': 'application/json' } });
+  const lista = proveedores(env);
+  if (!lista.length) return json(503, { error: 'La IA no está configurada en el servidor (falta ANTHROPIC_API_KEY o GEMINI_API_KEY).' });
+
+  let ultimo = 502;
+  for (const p of lista) {
+    let intento: Intento;
+    try { intento = p === 'claude' ? await conClaude(v.cuerpo, env, llamar) : await conGemini(v.cuerpo, env, llamar); }
+    catch { intento = { ok: false, estado: 502 }; }
+    console.log(JSON.stringify({ tecnico, proveedor: p, estado: intento.ok ? 200 : intento.estado }));
+    if (intento.ok) {
+      const h = new Headers(intento.respuesta.headers); h.set('x-ia-proveedor', p);
+      return new Response(intento.respuesta.body, { status: 200, headers: h });
+    }
+    ultimo = intento.estado;   // sin créditos, límite, caída o error: se prueba el siguiente
+  }
+  return json(ultimo === 429 ? 429 : ultimo === 401 || ultimo === 403 ? 502 : ultimo, { error: `El servicio de IA no respondió (${ultimo}).` });
 }
 
 const ACCIONES_SYNC = [undefined, 'listar', 'latido'];
@@ -202,21 +275,44 @@ async function sincronizar(request: Request, env: any, llamar: typeof fetch, tec
   return haciaHojas(c, env.SYNC_TOKEN, env, llamar);
 }
 
+/** Menú de administración: listar y crear/editar personas. El token del administrador del script se pone AQUÍ. */
+async function administrarUsuarios(request: Request, env: any, llamar: typeof fetch, quien: Identidad): Promise<Response> {
+  const texto = await request.text();
+  if (texto.length > 2000) return json(413, { ok: false, error: 'Payload too large' });
+  let c: any;
+  try { c = JSON.parse(texto); } catch { return json(400, { ok: false, error: 'JSON inválido' }); }
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return json(400, { ok: false, error: 'Cuerpo inválido' });
+  if (c.accion === 'listar') return haciaHojas({ accion: 'usuarios_listar' }, env.SYNC_TOKEN_ADMIN, env, llamar);
+  if (c.accion === 'guardar') {
+    if (typeof c.nombre !== 'string' || !c.nombre.trim() || c.nombre.length > 60) return json(400, { ok: false, error: 'Nombre inválido' });
+    if (!ROLES.includes(c.rol)) return json(400, { ok: false, error: 'Rol inválido' });
+    const r = await haciaHojas({ accion: 'usuarios_guardar', nombre: c.nombre, rol: c.rol, activo: c.activo !== false, claveNueva: c.claveNueva === true, por: quien.nombre }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    vaciarCacheUsuarios();   // los cambios se notan al instante en este servidor (en otros, tras USUARIOS_CACHE_SEG)
+    return r;
+  }
+  return json(400, { ok: false, error: 'Acción no permitida' });
+}
+
 async function enrutar(request: Request, env: any, llamar: typeof fetch): Promise<Response> {
   if (request.method !== 'POST') return json(405, { error: 'Method not allowed' });
   const ruta = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
   const clave = request.headers.get('x-api-key') ?? '';
 
-  if (ruta !== '/' && ruta !== '/analizar' && ruta !== '/sync' && ruta !== '/equipo') return json(404, { error: 'Not found' });
+  if (!['/', '/analizar', '/sync', '/equipo', '/yo', '/usuarios'].includes(ruta)) return json(404, { error: 'Not found' });
 
   let quien: Identidad | null;
   try { quien = await autenticar(clave, env, llamar); }
   catch { return json(502, { error: 'No se pudo verificar el usuario (la hoja de Google no respondió).' }); }
   if (!quien) return json(401, { error: 'Unauthorized' });
 
+  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, rol: quien.rol });
   if (ruta === '/equipo') {
-    if (quien.rol !== 'supervisor') return json(401, { error: 'Unauthorized' });
+    if (quien.rol === 'tecnico') return json(401, { error: 'Unauthorized' });
     return haciaHojas({ accion: 'equipo' }, env.SYNC_TOKEN_ADMIN, env, llamar);
+  }
+  if (ruta === '/usuarios') {
+    if (quien.rol !== 'admin') return json(401, { error: 'Unauthorized' });
+    return administrarUsuarios(request, env, llamar, quien);
   }
   if (env.LIMITADOR && !(await env.LIMITADOR.limit({ key: quien.nombre })).success) return json(429, { error: 'Demasiadas solicitudes' });
 

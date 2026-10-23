@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Cabecera, Cargando } from '../componentes/ui';
 import { Marca, MapaLeaflet } from '../componentes/MapaLeaflet';
+import { rolDe } from '@compartido/core/ajustes';
+import { useApp } from '../contexto/App';
+import { ir } from '../router';
 import { datosEquipo } from '../servicios/nucleo';
 
 const COLORES: Record<string, string> = { 'En jornada': '#16a34a', 'Sin señal': '#ea580c', Pausada: '#2563eb', Terminada: '#6b7280' };
@@ -17,6 +20,7 @@ const hace = (iso: string, ahora: string) => {
 
 /** Panel de supervisión: quién trabaja, quién está sin señal y dónde, con la calidad de lo capturado. Requiere cuenta de supervisor. */
 export function Equipo() {
+  const { ajustes } = useApp();
   const [d, setD] = useState<any>(null);
   const [error, setError] = useState('');
   const [verLuminarias, setVerLuminarias] = useState(false);
@@ -45,7 +49,7 @@ export function Equipo() {
       lat: Number(t.latitud), lng: Number(t.longitud), color: COLORES[t.estado] ?? '#6b7280', radio: 11, tooltip: t.tecnico || 'Sin nombre', permanente: true,
       lineas: [`${t.tecnico || 'Sin nombre'}`, `${t.estado} · ${hace(t.senal, d.ahora)}`, `${t.luminarias || 0} luminarias`],
     }));
-    if (verLuminarias) for (const l of d?.luminarias ?? []) m.push({ lat: l.lat, lng: l.lng, color: '#94a3b8', radio: 3, tooltip: `${l.marca || 'Luminaria'}${l.tec ? ' · ' + l.tec : ''}` });
+    if (verLuminarias) for (const l of d?.luminarias ?? []) m.push({ lat: l.lat, lng: l.lng, color: '#94a3b8', radio: 3, tooltip: `${l.fabricante || 'Luminaria'}${l.tec ? ' · ' + l.tec : ''}` });
     return m;
   }, [tecnicos, verLuminarias, d]);
 
@@ -54,7 +58,7 @@ export function Equipo() {
   return (
     <>
       <Cabecera titulo="Equipo" subtitulo={d ? `${cuenta('En jornada')} en jornada · ${cuenta('Sin señal')} sin señal · ${cuenta('Pausada')} en pausa` : 'Cargando…'}
-        acciones={[{ icono: 'actualizar', etiqueta: 'Actualizar', onClick: cargar }, { icono: 'mapa', etiqueta: 'Ajustar a todos', onClick: () => setAjustar((n) => n + 1) }]} />
+        acciones={[...(rolDe(ajustes) === 'admin' ? [{ icono: 'usuarios', etiqueta: 'Administración', onClick: () => ir('/admin') }] : []), { icono: 'actualizar', etiqueta: 'Actualizar', onClick: cargar }, { icono: 'mapa', etiqueta: 'Ajustar a todos', onClick: () => setAjustar((n) => n + 1) }]} />
       {error && <p className="aviso" role="alert">{error}</p>}
       {!d && !error && <Cargando />}
       {d && (

@@ -4,26 +4,32 @@
  */
 import { crearServidor, Hoja, nueva, proyectoDe, telefono } from './helpers/equipo';
 
-const ENCABEZADO_ANTIGUO = ['UUID', 'ID (local del teléfono)', 'Código activo', 'Fecha', 'Técnico', 'Latitud', 'Longitud', 'Precisión (m)', 'Dirección',
+// Diseño de columnas anterior a la evidencia de captura (27 columnas): lo que dejó una versión previa del script.
+const ENCABEZADO_ANTIGUO = ['UUID', 'ID (local del teléfono)', 'Código del poste', 'Código de la luminaria', 'Fecha', 'Técnico', 'Latitud', 'Longitud', 'Precisión (m)', 'Dirección',
+  'Fabricante', 'Modelo', 'Tecnología', 'Potencia (W)', 'Tensión (V)', 'Fotocelda', 'Pines fotocelda',
+  'Temp. color (K)', 'IP', 'Montaje', 'Estado', 'Confianza IA', 'Observaciones', 'Enlace mapa', 'Foto', 'Eliminada', 'Recibido'];
+
+// Diseño anterior al cambio de campos (con Marca, Tipo de luminaria, Flujo y Altura): se archiva, no se mezcla.
+const ENCABEZADO_RETIRADO = ['UUID', 'ID (local del teléfono)', 'Código activo', 'Fecha', 'Técnico', 'Latitud', 'Longitud', 'Precisión (m)', 'Dirección',
   'Marca', 'Fabricante', 'Modelo', 'Tipo de luminaria', 'Tecnología', 'Potencia (W)', 'Tensión (V)', 'Fotocelda', 'Pines fotocelda',
   'Temp. color (K)', 'Flujo (lm)', 'IP', 'Montaje', 'Altura (m)', 'Estado', 'Confianza IA', 'Observaciones', 'Enlace mapa', 'Foto', 'Eliminada', 'Recibido'];
 
-const filaAntigua = (uuid: string, marca: string, eliminada = '', recibido = '2026-03-01T10:00:00.000Z') => {
-  const f: any[] = Array(30).fill('');
-  f[0] = uuid; f[3] = '2026-03-01T09:00:00.000Z'; f[4] = 'Ana'; f[5] = 4.7; f[6] = -74.07; f[9] = marca; f[28] = eliminada; f[29] = recibido;
+const filaAntigua = (uuid: string, fabricante: string, eliminada = '', recibido = '2026-03-01T10:00:00.000Z') => {
+  const f: any[] = Array(27).fill('');
+  f[0] = uuid; f[4] = '2026-03-01T09:00:00.000Z'; f[5] = 'Ana'; f[6] = 4.7; f[7] = -74.07; f[10] = fabricante; f[25] = eliminada; f[26] = recibido;
   return f;
 };
 
 const post = (srv: ReturnType<typeof crearServidor>, cuerpo: any) =>
   srv.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', ...cuerpo }) }).then((r: any) => r.json());
 
-describe('pestañas creadas con una versión anterior del script (30 columnas)', () => {
+describe('pestañas creadas con una versión anterior del script (27 columnas)', () => {
   let srv: ReturnType<typeof crearServidor>, vieja: Hoja;
 
   beforeEach(() => {
     srv = crearServidor();
     vieja = new Hoja('Barrio A');
-    vieja.maxColumnas = 30;
+    vieja.maxColumnas = 27;
     vieja.filas = [[...ENCABEZADO_ANTIGUO], filaAntigua('u1', 'Vieja'), filaAntigua('u2', 'Borrada', 'SÍ')];
     srv.hojas.push(vieja);
   });
@@ -32,23 +38,23 @@ describe('pestañas creadas con una versión anterior del script (30 columnas)',
     const r = await post(srv, { accion: 'listar', proyecto: { nombre: 'Barrio A' }, desde: '' });
     expect(r.ok).toBe(true);
     const por = Object.fromEntries(r.luminarias.map((l: any) => [l.uuid, l]));
-    expect(por.u1).toMatchObject({ marca: 'Vieja', recibidoEn: '2026-03-01T10:00:00.000Z' });
+    expect(por.u1).toMatchObject({ fabricante: 'Vieja', recibidoEn: '2026-03-01T10:00:00.000Z' });
     expect(por.u2.eliminada).toBe('SÍ');
   });
 
   it('al enviar, completa los encabezados nuevos al final y no mueve ni pisa los datos existentes', async () => {
-    const r = await post(srv, { proyecto: { nombre: 'Barrio A' }, luminarias: [{ uuid: 'u3', marca: 'Nueva', tecnico: 'Beto', creadoEn: '2026-03-10T08:00:00.000Z', origen: 'camara', jornadaId: 'j', latitud: 4.8, longitud: -74.1, ubicacionSimulada: false }] });
+    const r = await post(srv, { proyecto: { nombre: 'Barrio A' }, luminarias: [{ uuid: 'u3', fabricante: 'Nueva', tecnico: 'Beto', creadoEn: '2026-03-10T08:00:00.000Z', origen: 'camara', jornadaId: 'j', latitud: 4.8, longitud: -74.1, ubicacionSimulada: false }] });
     expect(r.ok).toBe(true);
-    expect(vieja.maxColumnas).toBeGreaterThanOrEqual(34);
-    expect(vieja.filas[0].slice(30, 34)).toEqual(['Origen de la foto', 'Ubicación simulada', 'ID jornada', 'Alertas']);
-    expect(vieja.filas[0].slice(0, 30)).toEqual(ENCABEZADO_ANTIGUO);
-    expect(vieja.filas[1].slice(0, 30)).toEqual(filaAntigua('u1', 'Vieja'));          // fila vieja intacta (salvo columnas nuevas)
-    expect(vieja.filas[2][28]).toBe('SÍ');                                              // la eliminada sigue marcada
+    expect(vieja.maxColumnas).toBeGreaterThanOrEqual(31);
+    expect(vieja.filas[0].slice(27, 31)).toEqual(['Origen de la foto', 'Ubicación simulada', 'ID jornada', 'Alertas']);
+    expect(vieja.filas[0].slice(0, 27)).toEqual(ENCABEZADO_ANTIGUO);
+    expect(vieja.filas[1].slice(0, 27)).toEqual(filaAntigua('u1', 'Vieja'));          // fila vieja intacta (salvo columnas nuevas)
+    expect(vieja.filas[2][25]).toBe('SÍ');                                              // la eliminada sigue marcada
     expect(vieja.filas[3][0]).toBe('u3');
-    expect(vieja.filas[3][30]).toBe('camara');                                          // origen en la columna 31
-    const otra = await post(srv, { proyecto: { nombre: 'Barrio A' }, luminarias: [{ uuid: 'u2', marca: 'Intento de revivir' }] });
+    expect(vieja.filas[3][27]).toBe('camara');                                          // origen en la columna 28
+    const otra = await post(srv, { proyecto: { nombre: 'Barrio A' }, luminarias: [{ uuid: 'u2', fabricante: 'Intento de revivir' }] });
     expect(otra.ok).toBe(true);
-    expect(vieja.filas[2][9]).toBe('Borrada');                                          // lo eliminado sigue ganando
+    expect(vieja.filas[2][10]).toBe('Borrada');                                          // lo eliminado sigue ganando
   });
 
   it('el mapa en vivo no falla con una pestaña antigua sin tocar', () => {
@@ -59,23 +65,44 @@ describe('pestañas creadas con una versión anterior del script (30 columnas)',
 
   it('auditarTodo también funciona sobre pestañas antiguas', () => {
     expect(() => srv.gs.auditarTodo()).not.toThrow();
-    expect(vieja.filas[0][33]).toBe('Alertas');                                         // columna Alertas creada
-    expect(vieja.filas[1][33] ?? '').toBe('');
+    expect(vieja.filas[0][30]).toBe('Alertas');                                         // columna Alertas creada
+    expect(vieja.filas[1][30] ?? '').toBe('');
+  });
+});
+
+describe('pestañas con el diseño retirado (Marca, Tipo, Flujo, Altura)', () => {
+  it('se archivan sin tocar un dato y la pestaña nueva nace con el diseño actual', async () => {
+    const srv = crearServidor();
+    const vieja = new Hoja('Barrio A'); vieja.maxColumnas = 30;
+    const fila: any[] = Array(30).fill(''); fila[0] = 'u1'; fila[9] = 'Philips'; fila[29] = '2026-03-01T10:00:00.000Z';
+    vieja.filas = [[...ENCABEZADO_RETIRADO], fila];
+    srv.hojas.push(vieja);
+    const r = await post(srv, { proyecto: { nombre: 'Barrio A' }, luminarias: [{ uuid: 'n1', fabricante: 'Schréder', tecnico: 'Ana' }] });
+    expect(r.ok).toBe(true);
+    expect(vieja.getName()).toBe('Barrio A (anterior)');
+    expect(vieja.filas[1][9]).toBe('Philips');                                          // intacta
+    const nueva = srv.hoja('Barrio A')!;
+    expect(nueva).not.toBe(vieja);
+    expect(nueva.filas[0].slice(0, 4)).toEqual(['UUID', 'ID (local del teléfono)', 'Código del poste', 'Código de la luminaria']);
+    expect(nueva.filas[0]).not.toContain('Marca');
+    expect(nueva.filas[1][0]).toBe('n1');
+    await post(srv, { proyecto: { nombre: 'Barrio A' }, luminarias: [{ uuid: 'n2', fabricante: 'X' }] });
+    expect(srv.hojas.filter((h: any) => h.getName().startsWith('Barrio A'))).toHaveLength(2);   // no se vuelve a archivar
   });
 });
 
 describe('auditoría en hojas grandes', () => {
   it('no se recalcula en cada envío si la pestaña pasa de 3000 filas; sí con auditarTodo', async () => {
     const srv = crearServidor();
-    const h = new Hoja('Grande'); h.maxColumnas = 34;
+    const h = new Hoja('Grande'); h.maxColumnas = 31;
     const cab = [...ENCABEZADO_ANTIGUO, 'Origen de la foto', 'Ubicación simulada', 'ID jornada', 'Alertas'];
     h.filas = [cab];
-    for (let i = 0; i < 3001; i++) { const f = filaAntigua('g' + i, 'M' + i); f.push('galeria', '', 'j', ''); f[4] = 'T' + (i % 50); f[5] = 4 + i * 0.001; h.filas.push(f); }
+    for (let i = 0; i < 3001; i++) { const f = filaAntigua('g' + i, 'M' + i); f.push('galeria', '', 'j', ''); f[5] = 'T' + (i % 50); f[6] = 4 + i * 0.001; h.filas.push(f); }
     srv.hojas.push(h);
-    await post(srv, { proyecto: { nombre: 'Grande' }, luminarias: [{ uuid: 'nueva', marca: 'X', tecnico: 'Z', origen: 'galeria', creadoEn: '2026-03-10T08:00:00.000Z' }] });
-    expect(h.filas[1][33]).toBe('');                                                    // no se auditó en línea
+    await post(srv, { proyecto: { nombre: 'Grande' }, luminarias: [{ uuid: 'nueva', fabricante: 'X', tecnico: 'Z', origen: 'galeria', creadoEn: '2026-03-10T08:00:00.000Z' }] });
+    expect(h.filas[1][30]).toBe('');                                                    // no se auditó en línea
     srv.gs.auditarTodo();
-    expect(h.filas[1][33]).toContain('GALERIA');                                        // el activador por tiempo sí
+    expect(h.filas[1][30]).toContain('GALERIA');                                        // el activador por tiempo sí
   });
 });
 

@@ -1,4 +1,5 @@
 /** Ajustes de la app (tipos y valores por defecto). Sin dependencias de plataforma: los comparten móvil y web. */
+export type Rol = 'tecnico' | 'supervisor' | 'admin';
 export type PreferenciaTema = 'auto' | 'claro' | 'oscuro';
 
 export interface Ajustes {
@@ -19,11 +20,17 @@ export interface Ajustes {
   modoTerceros: boolean;
   /** Precisión GPS máxima (m) exigida en modo terceros. */
   precisionMaxM: number;
-  /** Solo web: la cuenta es de supervisor (ve el panel del equipo). */
+  /** Solo web: rol de la cuenta según el servidor (se refresca al abrir con conexión). */
+  rol?: Rol;
+  /** @deprecated Enlaces antiguos de supervisor; usa `rol`. */
   supervisor?: boolean;
   /** Solo web: permite apagar el análisis con IA (cada análisis consume crédito de la API). Por defecto activado. */
   iaActiva?: boolean;
 }
+
+/** Rol efectivo (los ajustes antiguos solo traían `supervisor`). */
+export const rolDe = (a: Pick<Ajustes, 'rol' | 'supervisor'>): Rol => a.rol ?? (a.supervisor ? 'supervisor' : 'tecnico');
+export const veEquipo = (r: Rol) => r === 'supervisor' || r === 'admin';
 
 export const MODELO_POR_DEFECTO = 'claude-sonnet-5-5';
 export const ENDPOINT_POR_DEFECTO = 'https://api.anthropic.com/v1/messages';

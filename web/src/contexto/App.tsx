@@ -2,6 +2,7 @@ import { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, 
 import type { Ajustes } from '@compartido/core/ajustes';
 import type { Luminaria } from '@compartido/types';
 import { ajustesPorDefecto, cargarAjustes } from '../servicios/ajustes';
+import { verificarIdentidad } from '../servicios/identidad';
 import { guardarKv, leerKv, listarLuminarias, listarProyectos, ProyectoConCuenta } from '../servicios/almacen';
 
 export interface ContextoApp {
@@ -43,6 +44,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => { document.documentElement.dataset.tema = ajustes.tema; }, [ajustes.tema]);
+
+  // El servidor es quien dice el rol y el nombre de la cuenta: se consulta al abrir y al importar una configuración (si hay conexión).
+  useEffect(() => {
+    if (!listo) return;
+    let vivo = true;
+    verificarIdentidad().then((cambio) => { if (cambio && vivo) cargarAjustes().then(setAjustes); });
+    return () => { vivo = false; };
+  }, [listo, versionConfig]);
 
   const refrescar = useCallback(() => cargar(activoId), [cargar, activoId]);
   const activar = useCallback(async (id: number) => { await guardarKv('proyectoActivo', String(id)); await cargar(id); }, [cargar]);

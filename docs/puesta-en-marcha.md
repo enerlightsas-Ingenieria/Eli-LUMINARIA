@@ -49,7 +49,7 @@ Marca cada punto. Lo que **no** está probado todavía en dispositivos reales es
 - [ ] El nombre del técnico aparece en **Ajustes**.
 
 **Captura (con señal)**
-- [ ] Foto general + placa + fotocelda → "Analizar con IA" rellena marca, potencia, pines… (anota los aciertos/errores).
+- [ ] Foto general + placa + fotocelda → "Analizar con IA" rellena fabricante, potencia, pines… (anota los aciertos/errores).
 - [ ] La coordenada y su precisión son razonables; la dirección aparece.
 - [ ] Guardar → aparece en la hoja (pestaña del proyecto) con técnico, coordenada y enlace al mapa.
 
