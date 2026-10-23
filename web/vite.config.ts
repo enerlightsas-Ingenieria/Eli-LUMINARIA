@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
-import { precachePlugin } from './plugins/precache';
+import { precachePlugin } from './plugins/precache.ts';
 
 const BUILD = Date.now().toString(36); // identifica la compilación: el service worker descarta cachés de versiones anteriores
 const version = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version as string;

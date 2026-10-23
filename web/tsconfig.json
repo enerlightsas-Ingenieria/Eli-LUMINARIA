@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
@@ -10,9 +14,29 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
-    "types": ["vite/client", "node"],
+    "types": [
+      "vite/client",
+      "node"
+    ],
     "baseUrl": ".",
-    "paths": { "@compartido/*": ["../src/*"] }
+    "paths": {
+      "@compartido/*": [
+        "../src/*"
+      ]
+    },
+    "allowImportingTsExtensions": true
   },
-  "include": ["src", "tests", "e2e", "plugins", "vite.config.ts", "playwright.config.ts", "../src/core", "../src/lib", "../src/types.ts", "../server/worker.ts", "../__tests__/helpers/hoja.ts"]
+  "include": [
+    "src",
+    "tests",
+    "e2e",
+    "plugins",
+    "vite.config.ts",
+    "playwright.config.ts",
+    "../src/core",
+    "../src/lib",
+    "../src/types.ts",
+    "../server/worker.ts",
+    "../__tests__/helpers/hoja.ts"
+  ]
 }
