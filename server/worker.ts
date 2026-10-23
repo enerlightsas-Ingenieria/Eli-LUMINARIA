@@ -194,7 +194,14 @@ export function deGemini(r: any): any | null {
   return llamada ? { content: [{ type: 'tool_use', name: llamada.name, input: llamada.args }] } : null;
 }
 
-type Intento = { ok: true; respuesta: Response } | { ok: false; estado: number };
+type Intento = { ok: true; respuesta: Response } | { ok: false; estado: number; mensaje?: string };
+
+/** Motivo que da el proveedor (p. ej. "API key not valid"), sin claves y recortado, para que el aviso diga qué pasó. */
+async function falla(r: Response, env: any): Promise<{ ok: false; estado: number; mensaje?: string }> {
+  const j: any = await r.json().catch(() => null);
+  const msg = String(j?.error?.message ?? (typeof j?.error === 'string' ? j.error : '') ?? '').replace(/\s+/g, ' ').trim().slice(0, 180);
+  return { ok: false, estado: r.status, mensaje: msg ? SIN_CLAVES(msg, env) : undefined };
+}
 
 async function conClaude(cuerpo: any, env: any, llamar: typeof fetch): Promise<Intento> {
   const r = await llamar('https://api.anthropic.com/v1/messages', {
@@ -202,7 +209,7 @@ async function conClaude(cuerpo: any, env: any, llamar: typeof fetch): Promise<I
     headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', 'x-api-key': env.ANTHROPIC_API_KEY },
     body: JSON.stringify(cuerpo),
   });
-  if (!r.ok) { await r.body?.cancel().catch(() => {}); return { ok: false, estado: r.status }; }
+  if (!r.ok) return falla(r, env);
   return { ok: true, respuesta: new Response(r.body, { status: 200, headers: { 'content-type': 'application/json' } }) };
 }
 
@@ -278,7 +285,7 @@ async function generarConGemini(cuerpoGemini: any, env: any, llamar: typeof fetc
 
 async function conGemini(cuerpo: any, env: any, llamar: typeof fetch): Promise<Intento> {
   const { r } = await generarConGemini(aGemini(cuerpo), env, llamar);
-  if (!r.ok) { await r.body?.cancel().catch(() => {}); return { ok: false, estado: r.status }; }
+  if (!r.ok) return falla(r, env);
   const convertida = deGemini(await r.json().catch(() => null));
   if (!convertida) return { ok: false, estado: 502 };   // bloqueada por seguridad o sin llamada a la herramienta
   return { ok: true, respuesta: new Response(JSON.stringify(convertida), { status: 200, headers: { 'content-type': 'application/json' } }) };
@@ -322,7 +329,7 @@ async function analizar(request: Request, env: any, llamar: typeof fetch, tecnic
       return new Response(intento.respuesta.body, { status: 200, headers: h });
     }
     ultimo = intento.estado;   // sin créditos, límite, caída o error: se prueba el siguiente
-    detalle.push(`${p} ${intento.estado}`);
+    detalle.push(`${p} ${intento.estado}${intento.mensaje ? ': ' + intento.mensaje : ''}`);
   }
   return json(ultimo === 429 ? 429 : ultimo === 401 || ultimo === 403 ? 502 : ultimo, { error: `El servicio de IA no respondió (${detalle.join('; ')}).` });
 }

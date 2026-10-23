@@ -389,6 +389,13 @@ describe('IA con dos proveedores: Claude y Gemini (respaldo)', () => {
     expect((await manejar(pet(), { APP_TOKENS: 'juan:tokJ' }, f)).status).toBe(503);
   });
 
+  it('el aviso incluye el motivo que da el proveedor (sin claves) para saber qué corregir', async () => {
+    const f = jest.fn().mockResolvedValue(new Response(JSON.stringify({ error: { message: 'API key not valid. Please pass a valid API key. (AIza-g)' } }), { status: 400 }));
+    const r = await manejar(pet(), { APP_TOKENS: 'juan:tokJ', GEMINI_API_KEY: 'AIza-g' }, f);
+    const t = await r.text();
+    expect(r.status).toBe(400); expect(t).toContain('gemini 400: API key not valid'); expect(t).not.toContain('AIza-g');
+  });
+
   it('Gemini bloqueando la imagen (sin llamada a la herramienta) cuenta como fallo', async () => {
     const f = jest.fn().mockResolvedValue(new Response(JSON.stringify({ candidates: [{ finishReason: 'SAFETY', content: { parts: [] } }] }), { status: 200 }));
     expect((await manejar(pet(), { APP_TOKENS: 'juan:tokJ', GEMINI_API_KEY: 'g' }, f)).status).toBe(502);
