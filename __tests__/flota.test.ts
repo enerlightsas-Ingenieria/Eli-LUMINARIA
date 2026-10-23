@@ -379,7 +379,7 @@ describe('IA con dos proveedores: Claude y Gemini (respaldo)', () => {
     expect(ruta(f1)).toEqual(['gemini']);
     const f2 = jest.fn().mockImplementation(async (u: any) => (String(u).includes('anthropic') ? claude() : new Response('{}', { status: 429 })));
     const r = await manejar(pet(), { ...envBase, ORDEN_IA: 'gemini,claude' }, f2);
-    expect(r.headers.get('x-ia-proveedor')).toBe('claude'); expect(ruta(f2)).toEqual(['gemini', 'claude']);
+    expect(r.headers.get('x-ia-proveedor')).toBe('claude'); expect(ruta(f2)).toEqual(['gemini', 'gemini', 'claude']);   // el 2.º es la consulta de modelos alternativos
   });
 
   it('si fallan los dos devuelve un error sin filtrar claves; sin ninguna clave → 503', async () => {
@@ -591,7 +591,7 @@ describe('Gemini: modelo no disponible en la cuenta (404)', () => {
   ] };
   const montar = (viven: string[], extra: any = {}) => {
     const gs = crearServidor();
-    const env: any = { GEMINI_API_KEY: 'AIza-g', APP_TOKENS: 'juan:tokJ', ADMIN_TOKENS: 'jefe:claveJefe', SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, ...extra };
+    const env: any = { GEMINI_API_KEY: 'AIza-g', APP_TOKENS: 'juan:tokJ', ADMIN_TOKENS: 'jefe:claveJefe', SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, REINTENTO_MS: 0, ...extra };
     const usados: string[] = [];
     const f = jest.fn(async (u: any, i: any) => {
       const url = String(u);
@@ -624,6 +624,28 @@ describe('Gemini: modelo no disponible en la cuenta (404)', () => {
     expect(m.usados).toEqual(['gemini-2.5-flash', 'gemini-3.5-flash']);
     await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
     expect(m.usados.slice(2)).toEqual(['gemini-3.5-flash']);               // la segunda vez va directo
+  });
+
+  it('503 (saturado): reintenta el mismo modelo una vez y, si sigue, prueba otros modelos disponibles', async () => {
+    let n = 0;
+    const m = montar(['gemini-3.5-flash-lite']);
+    const base = m.f.getMockImplementation()!;
+    m.f.mockImplementation(async (u: any, i: any) => {
+      const url = String(u);
+      if (url.includes('generativelanguage') && url.includes(':generateContent') && url.includes('gemini-2.5-flash')) { n++; return new Response(JSON.stringify({ error: { message: 'high demand' } }), { status: 503 }); }
+      return base(u, i);
+    });
+    const r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
+    expect(r.status).toBe(200); expect(n).toBe(2);                                           // intento + reintento
+    expect(m.usados.at(-1)).toBe('gemini-3.5-flash-lite');                                    // y siguió con otro modelo
+  });
+
+  it('con el modelo fijado por el administrador, 503 solo reintenta el mismo; 429 no cambia de modelo', async () => {
+    const m = montar([]);
+    await m.ia({ accion: 'modelo', modelo: 'gemini-3.5-flash' });
+    m.f.mockImplementation(async (u: any) => (String(u).includes('gs.example') ? new Response('{"ok":true,"config":{"gemini_modelo":"gemini-3.5-flash"}}') : (m.usados.push('x'), new Response('{}', { status: 503 }))));
+    const r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
+    expect(r.status).toBe(503); expect(m.usados).toHaveLength(2);
   });
 
   it('si el administrador fijó el modelo y no existe, NO se cambia a escondidas: falla y lo dice', async () => {

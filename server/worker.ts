@@ -29,7 +29,8 @@
  *            primero falla —sin créditos, límite, caída— se usa el siguiente. El administrador cambia cuál va primero desde la app
  *            (Administración → Inteligencia artificial), y eso manda sobre ORDEN_IA.
  *            GEMINI_MODEL (opcional; por defecto el sistema busca solo un modelo disponible en tu cuenta). Con la capa gratuita Google puede usar las fotos para mejorar sus productos.
- * Opcional:  USUARIOS_CACHE_SEG = 60  (segundos que el proxy recuerda una clave antes de volver a preguntar a la hoja)
+ * Opcional:  REINTENTO_MS = 1000  (pausa antes de reintentar Gemini si está saturado)
+ *            USUARIOS_CACHE_SEG = 60  (segundos que el proxy recuerda una clave antes de volver a preguntar a la hoja)
  *            MODELOS_PERMITIDOS = "claude-sonnet-5-5,claude-haiku-5-5"
  *            ORIGENES_PERMITIDOS = "https://app.tuempresa.com"  (si no se define, cualquier origen; los tokens siguen protegiendo)
  * Despliegue: npx wrangler deploy server/worker.ts --name eli-luminaria-proxy --compatibility-date 2026-01-01
@@ -210,6 +211,12 @@ const MODELO_GEMINI_RE = /^gemini-[a-z0-9.\-]{1,60}$/;
 const MODELO_GEMINI_DEFECTO = 'gemini-2.5-flash';
 
 /** De los modelos que ofrece la cuenta, el más nuevo y estable de la familia "flash" (con visión). */
+export function modelosFlash(nombres: string[]): string[] {
+  const clave = (n: string) => { const m = n.match(/^gemini-(\d+(?:\.\d+)?)-flash(-lite)?(-preview(?:-[\d-]+)?)?$/); return m ? { v: parseFloat(m[1]), lite: !!m[2], prev: !!m[3] } : null; };
+  return nombres.filter((n) => clave(n))
+    .sort((a, b) => Number(clave(a)!.prev) - Number(clave(b)!.prev) || clave(b)!.v - clave(a)!.v || Number(clave(a)!.lite) - Number(clave(b)!.lite));
+}
+
 export function mejorModelo(nombres: string[]): string | undefined {
   const puntuar = (re: RegExp) => nombres
     .map((n) => ({ n, m: n.match(re) }))
@@ -250,14 +257,21 @@ async function generarConGemini(cuerpoGemini: any, env: any, llamar: typeof fetc
   const enviar = (m: string) => llamar(`${URL_GEMINI}/models/${encodeURIComponent(m)}:generateContent`, {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY }, body: JSON.stringify(cuerpoGemini),
   });
+  const descartar = (x: Response) => x.body?.cancel().catch(() => {});
+  const pausa = () => new Promise((ok) => setTimeout(ok, Math.max(0, Number(env.REINTENTO_MS ?? 1000))));
+  const sobrecarga = (x: Response) => x.status === 503 || x.status === 429;
+
   let r = await enviar(modelo);
-  if (r.status === 404 && origen !== 'admin') {
-    const elegido = mejorModelo(await listarModelosGemini(env, llamar));
-    if (elegido && elegido !== modelo) {
-      await r.body?.cancel().catch(() => {});
-      r = await enviar(elegido);
-      if (r.ok) { modeloDetectado = { modelo: elegido, hasta: Date.now() + 3_600_000 }; return { r, modelo: elegido, autoElegido: true }; }
-    }
+  if (r.status === 503) { await descartar(r); await pausa(); r = await enviar(modelo); }   // saturación momentánea: un reintento
+  if (r.ok || origen === 'admin' || (r.status !== 404 && !sobrecarga(r))) return { r, modelo, autoElegido: false };
+
+  // El modelo no existe en la cuenta (404) o está saturado / sin cupo (503, 429): se prueba con otros modelos disponibles.
+  const otros = modelosFlash(await listarModelosGemini(env, llamar)).filter((m) => m !== modelo).slice(0, 3);
+  for (const m of otros) {
+    await descartar(r);
+    r = await enviar(m);
+    if (r.ok) { modeloDetectado = { modelo: m, hasta: Date.now() + (r.status === 200 ? 3_600_000 : 0) }; return { r, modelo: m, autoElegido: true }; }
+    if (!sobrecarga(r) && r.status !== 404) break;
   }
   return { r, modelo, autoElegido: false };
 }
