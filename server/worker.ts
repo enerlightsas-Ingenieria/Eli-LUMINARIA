@@ -240,8 +240,20 @@ async function listarModelosGemini(env: any, llamar: typeof fetch): Promise<stri
   return ((j?.models ?? []) as any[])
     .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
     .map((m) => String(m.name ?? '').replace(/^models\//, ''))
-    .filter((n) => MODELO_GEMINI_RE.test(n));
+    .filter((n) => MODELO_GEMINI_RE.test(n) && esModeloUtil(n));
 }
+
+/** Fuera los modelos de voz, imagen, audio en vivo, embeddings, etc.: no analizan fotos ni usan herramientas. */
+/** Petición mínima pero REAL: una imagen y una herramienta de respuesta forzada, como hace el análisis. */
+const PRUEBA_JPEG = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAAQABADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwAooooA/9k=';
+const cuerpoPrueba = () => aGemini({
+  max_tokens: 64,
+  tools: [{ name: 'registrar_luminaria', description: 'Registra lo que se ve.', input_schema: { type: 'object', properties: { fabricante: { type: 'string', description: 'Fabricante' }, confianza: { type: 'string', enum: ['alta', 'media', 'baja'], description: 'Confianza' } }, required: ['confianza'] } }],
+  messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: PRUEBA_JPEG } }, { type: 'text', text: 'Registra lo que ves; si no ves nada, deja el fabricante vacío.' }] }],
+});
+
+const NO_SIRVEN = /(tts|image|imagen|live|audio|embed|aqa|veo|robotics|computer|learnlm|gemma|native|speech|transcri|translate)/;
+export const esModeloUtil = (n: string) => !NO_SIRVEN.test(n);
 
 let modeloDetectado: { modelo: string; hasta: number } | null = null;
 export const olvidarModeloDetectado = () => { modeloDetectado = null; };
@@ -259,8 +271,8 @@ async function modeloGemini(env: any, llamar: typeof fetch): Promise<{ modelo: s
  * Llama a Gemini. Si el modelo no existe para esta cuenta (404) y no lo fijó el administrador, busca entre los modelos
  * disponibles el mejor y reintenta una vez (queda recordado una hora).
  */
-async function generarConGemini(cuerpoGemini: any, env: any, llamar: typeof fetch): Promise<{ r: Response; modelo: string; autoElegido: boolean }> {
-  const { modelo, origen } = await modeloGemini(env, llamar);
+async function generarConGemini(cuerpoGemini: any, env: any, llamar: typeof fetch, forzar?: string): Promise<{ r: Response; modelo: string; autoElegido: boolean }> {
+  const { modelo, origen } = forzar ? { modelo: forzar, origen: 'admin' as const } : await modeloGemini(env, llamar);
   const enviar = (m: string) => llamar(`${URL_GEMINI}/models/${encodeURIComponent(m)}:generateContent`, {
     method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY }, body: JSON.stringify(cuerpoGemini),
   });
@@ -349,7 +361,7 @@ async function configIA(env: any, llamar: typeof fetch): Promise<{ ia?: Proveedo
     const k = c?.ok ? c.config ?? {} : {};
     const v = {
       ia: k.ia === 'claude' || k.ia === 'gemini' ? (k.ia as Proveedor) : undefined,
-      modelo: typeof k.gemini_modelo === 'string' && MODELO_GEMINI_RE.test(k.gemini_modelo) ? (k.gemini_modelo as string) : undefined,
+      modelo: typeof k.gemini_modelo === 'string' && MODELO_GEMINI_RE.test(k.gemini_modelo) && esModeloUtil(k.gemini_modelo) ? (k.gemini_modelo as string) : undefined,   // un modelo de voz/imagen ya guardado se ignora
     };
     if (ttl > 0) cacheIA.set(env.SYNC_URL, { v, hasta: Date.now() + ttl });
     return v;
@@ -369,10 +381,13 @@ async function probarProveedor(p: Proveedor, env: any, llamar: typeof fetch): Pr
         body: JSON.stringify({ model: String(env.MODELOS_PERMITIDOS ?? 'claude-haiku-5-5').split(',')[0].trim(), max_tokens: 8, messages: [{ role: 'user', content: 'Responde solo: ok' }] }),
       })
       : await (async () => {
-        const g = await generarConGemini({ contents: [{ role: 'user', parts: [{ text: 'Responde solo: ok' }] }], generationConfig: { maxOutputTokens: 8 } }, env, llamar);
+        const g = await generarConGemini(cuerpoPrueba(), env, llamar);
         usado = g.modelo; auto = g.autoElegido;
         return g.r;
       })();
+    if (r.ok && p === 'gemini' && !deGemini(await r.clone().json().catch(() => null))) {
+      return { ok: false, estado: 200, mensaje: `El modelo ${usado} respondió, pero no sabe analizar imágenes con herramientas (no sirve para esto). Elige otro modelo o "Automático".` };
+    }
     if (r.ok) { await r.body?.cancel().catch(() => {}); return { ok: true, estado: r.status, mensaje: usado ? `Funciona con el modelo ${usado}${auto ? ' (elegido automáticamente porque el anterior no existe para tu cuenta)' : ''}.` : 'Funciona.' }; }
     const j: any = await r.json().catch(() => null);
     const msg = String(j?.error?.message ?? j?.error ?? '').slice(0, 220);
@@ -405,6 +420,12 @@ async function administrarIA(request: Request, env: any, llamar: typeof fetch): 
   if (c?.accion === 'modelo') {
     const m = c.modelo === 'auto' ? 'auto' : c.modelo;
     if (typeof m !== 'string' || (m !== 'auto' && !MODELO_GEMINI_RE.test(m))) return json(400, { ok: false, error: 'Modelo inválido' });
+    if (m !== 'auto' && disponibles.gemini) {   // no se guarda un modelo que no sirve (voz, solo texto, inexistente…); 429/503 son momentáneos y sí se guarda
+      const g = await generarConGemini(cuerpoPrueba(), env, llamar, m);
+      const malo = g.r.status === 400 || g.r.status === 404 || (g.r.ok && !deGemini(await g.r.clone().json().catch(() => null)));
+      if (malo) return json(400, { ok: false, error: `El modelo ${m} no sirve para analizar fotos (${g.r.ok ? 'no usa herramientas' : 'error ' + g.r.status}). Elige otro de la lista.` });
+      await g.r.body?.cancel().catch(() => {});
+    }
     const r = await haciaHojas({ accion: 'config_guardar', clave: 'gemini_modelo', valor: m }, env.SYNC_TOKEN_ADMIN, env, llamar);
     cacheIA.clear(); olvidarModeloDetectado();
     const j: any = await r.clone().json().catch(() => null);

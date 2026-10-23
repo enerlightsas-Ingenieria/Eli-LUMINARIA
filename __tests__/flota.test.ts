@@ -612,7 +612,8 @@ describe('Gemini: modelo no disponible en la cuenta (404)', () => {
     });
     const pet = (ruta: string, clave: string, cuerpo: string) => new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave }, body: cuerpo });
     const ia = async (cuerpo: any) => (await manejar(pet('/ia', 'claveJefe', JSON.stringify(cuerpo)), env, f as any)).json();
-    return { gs, env, f, usados, pet, ia };
+    const fijar = async (modelo: string) => { await gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN-ADMIN', accion: 'config_guardar', clave: 'gemini_modelo', valor: modelo }) }); vaciarCacheIA(); };
+    return { gs, env, f, usados, pet, ia, fijar };
   };
   beforeEach(() => { vaciarCacheUsuarios(); vaciarCacheIA(); olvidarModeloDetectado(); });
 
@@ -649,7 +650,7 @@ describe('Gemini: modelo no disponible en la cuenta (404)', () => {
 
   it('con el modelo fijado por el administrador, 503 solo reintenta el mismo; 429 no cambia de modelo', async () => {
     const m = montar([]);
-    await m.ia({ accion: 'modelo', modelo: 'gemini-3.5-flash' });
+    await m.fijar('gemini-3.5-flash');
     m.f.mockImplementation(async (u: any) => (String(u).includes('gs.example') ? new Response('{"ok":true,"config":{"gemini_modelo":"gemini-3.5-flash"}}') : (m.usados.push('x'), new Response('{}', { status: 503 }))));
     const r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
     expect(r.status).toBe(503); expect(m.usados).toHaveLength(2);
@@ -657,7 +658,7 @@ describe('Gemini: modelo no disponible en la cuenta (404)', () => {
 
   it('si el administrador fijó el modelo y no existe, NO se cambia a escondidas: falla y lo dice', async () => {
     const m = montar(['gemini-3.5-flash']);
-    expect((await m.ia({ accion: 'modelo', modelo: 'gemini-9-flash' })).ok).toBe(true);
+    await m.fijar('gemini-9-flash');
     const r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
     expect(r.status).toBe(404); expect((await r.json()).error).toContain('gemini 404');
     expect(m.usados).toEqual(['gemini-9-flash']);
@@ -671,8 +672,51 @@ describe('Gemini: modelo no disponible en la cuenta (404)', () => {
     expect(e.modeloGemini).toBe('gemini-3.5-flash');
     expect(m.gs.hoja('_Config')!.filas.some((f: any[]) => f[0] === 'gemini_modelo' && f[1] === 'gemini-3.5-flash')).toBe(true);
     expect((await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any)).status).toBe(200);
-    expect(m.usados).toEqual(['gemini-3.5-flash']);
+    expect(m.usados).toEqual(['gemini-3.5-flash', 'gemini-3.5-flash']);        // la 1.ª es la prueba al guardarlo, la 2.ª el análisis
     expect((await m.ia({ accion: 'modelo', modelo: 'auto' })).modeloGemini).toBe('gemini-2.5-flash');
+  });
+
+  it('los modelos de voz, imagen, audio o embeddings no se ofrecen ni se eligen solos', async () => {
+    const m = montar(['gemini-3.8-flash']);
+    const lista = { models: ['gemini-3.8-flash', 'gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-image', 'gemini-3.8-flash-live', 'gemini-3.8-flash-native-audio', 'gemini-embedding-001', 'gemma-3-27b'].map((n) => ({ name: 'models/' + n, supportedGenerationMethods: ['generateContent'] })) };
+    const base = m.f.getMockImplementation()!;
+    m.f.mockImplementation(async (u: any, i: any) => (String(u).includes('/models?') ? new Response(JSON.stringify(lista), { status: 200 }) : base(u, i)));
+    expect((await m.ia({ accion: 'modelos' })).modelos).toEqual(['gemini-3.8-flash']);
+  });
+
+  it('no deja guardar un modelo que no sirve para fotos (voz, solo texto o inexistente) y dice por qué', async () => {
+    const m = montar(['gemini-3.5-flash']);
+    const base = m.f.getMockImplementation()!;
+    m.f.mockImplementation(async (u: any, i: any) => {
+      const url = String(u);
+      if (url.includes('gemini-3.8-flash-lite-tts:generateContent')) return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'hola' }] } }] }), { status: 200 });   // responde, pero sin herramienta
+      return base(u, i);
+    });
+    const tts = await manejar(m.pet('/ia', 'claveJefe', JSON.stringify({ accion: 'modelo', modelo: 'gemini-3.8-flash-lite-tts' })), m.env, m.f as any);
+    expect(tts.status).toBe(400); expect((await tts.json()).error).toContain('no sirve para analizar fotos');
+    const nada = await manejar(m.pet('/ia', 'claveJefe', JSON.stringify({ accion: 'modelo', modelo: 'gemini-9-flash' })), m.env, m.f as any);
+    expect(nada.status).toBe(400);
+    expect(m.gs.hoja('_Config')?.filas.some((f: any[]) => f[0] === 'gemini_modelo') ?? false).toBe(false);   // nada se guardó
+    expect((await m.ia({ accion: 'modelo', modelo: 'gemini-3.5-flash' })).ok).toBe(true);
+  });
+
+  it('"Probar la IA" usa una imagen y una herramienta de verdad: un modelo que solo responde texto NO pasa', async () => {
+    const m = montar([]);
+    await m.fijar('gemini-3.8-flash-lite-tts');
+    m.f.mockImplementation(async (u: any, i: any) => (String(u).includes('gs.example') ? m.gs.llamar(u, i) : new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] }), { status: 200 })));
+    const j = await (await manejar(m.pet('/ia', 'claveJefe', JSON.stringify({ accion: 'probar' })), m.env, m.f as any)).json();
+    expect(j.resultados.gemini.ok).toBe(false); expect(j.resultados.gemini.mensaje).toContain('no sabe analizar imágenes');
+    const enviado = JSON.parse((m.f.mock.calls.find((c: any) => String(c[0]).includes('generateContent')) as any)[1].body);
+    expect(enviado.contents[0].parts[0].inlineData.mimeType).toBe('image/jpeg');
+    expect(enviado.toolConfig.functionCallingConfig.mode).toBe('ANY');
+  });
+
+  it('un modelo de voz que ya estaba guardado se ignora y se usa uno que sí sirva', async () => {
+    const m = montar(['gemini-3.5-flash']);
+    await m.fijar('gemini-3.8-flash-lite-tts');
+    const r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
+    expect(r.status).toBe(200);
+    expect(m.usados.every((x) => !x.includes('tts'))).toBe(true);
   });
 
   it('valida el nombre del modelo y solo el administrador puede cambiarlo', async () => {
