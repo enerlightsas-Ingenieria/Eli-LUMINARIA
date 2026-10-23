@@ -48,7 +48,7 @@ export function AdminIA() {
         <div role="group" aria-label="Modelos de Gemini" style={{ margin: '8px 0' }}>
           {modelos.mensaje && <p className="muted">{modelos.mensaje}</p>}
           {!modelos.mensaje && !modelos.modelos.length && <p className="muted">Google no devolvió modelos para esta clave. Revisa que la clave sea válida.</p>}
-          <div className="fichas">
+          <div className="fichas lista">
             <button type="button" className="ficha" onClick={() => usarModelo('auto')}>Automático{modelos.sugerido ? ` (${modelos.sugerido})` : ''}</button>
             {modelos.modelos.map((m) => <button key={m} type="button" className={`ficha${m === modelos.actual ? ' activa' : ''}`} aria-pressed={m === modelos.actual} onClick={() => usarModelo(m)}>{m}</button>)}
           </div>

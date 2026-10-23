@@ -11,10 +11,13 @@ export const WEB = 'http://localhost:4173';
 export const WORKER = 'https://worker.test';
 
 /** Backend de prueba: el proxy real delante del script de Google real (sobre una hoja simulada). La IA es un doble fijo. */
-export function crearBackend(respuestaIA: Record<string, string> = { fabricante: 'Philips', tecnologia: 'LED', potenciaW: '150', pinesFotocelda: '7', confianza: 'alta' }) {
+export const MODELOS_GEMINI = ['gemini-3.8-flash', 'gemini-3.8-flash-lite', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash-preview-05-20', 'gemini-3.5-flash-lite-preview-06-17', 'gemini-3.1-flash-lite-preview', 'gemini-3.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
+
+export function crearBackend(respuestaIA: Record<string, string> = { fabricante: 'Philips', tecnologia: 'LED', potenciaW: '150', pinesFotocelda: '7', confianza: 'alta' }, opciones: { gemini?: boolean } = {}) {
   const gs = crearServidor(fileURLToPath(new URL('../../server/google-apps-script.gs', import.meta.url)));
   const env = {
     ANTHROPIC_API_KEY: 'sk-secreta', APP_TOKENS: 'Ana:tokAna,Beto:tokBeto', ADMIN_TOKENS: 'Sup:tokSup',
+    ...(opciones.gemini ? { GEMINI_API_KEY: 'AIza-prueba' } : {}),
     SYNC_URL: 'https://gs.test/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN',
   };
   const estado = { llamadasIA: 0, ultimaPeticionIA: null as any };
@@ -24,6 +27,10 @@ export function crearBackend(respuestaIA: Record<string, string> = { fabricante:
     if (u.startsWith('https://api.anthropic.com')) {
       estado.llamadasIA++; estado.ultimaPeticionIA = JSON.parse(init.body);
       return new Response(JSON.stringify({ content: [{ type: 'tool_use', input: respuestaIA }] }), { status: 200 });
+    }
+    if (u.startsWith('https://generativelanguage.googleapis.com')) {
+      if (u.includes('/models?')) return new Response(JSON.stringify({ models: MODELOS_GEMINI.map((n) => ({ name: 'models/' + n, supportedGenerationMethods: ['generateContent'] })) }), { status: 200 });
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { name: 'registrar_luminaria', args: respuestaIA } }] } }] }), { status: 200 });
     }
     if (u.startsWith('https://gs.test')) return gs.llamar(u, init);
     throw new Error('URL inesperada: ' + u);

@@ -1,5 +1,5 @@
 import { expect, Page, test } from '@playwright/test';
-import { Backend, crearBackend, enlace, telefono, WEB, WORKER } from './backend';
+import { Backend, crearBackend, enlace, MODELOS_GEMINI, telefono, WEB, WORKER } from './backend';
 
 const dialogo = (page: Page) => page.getByRole('alertdialog');
 const boton = async (page: Page, nombre: string) => dialogo(page).getByRole('button', { name: nombre, exact: true }).click();
@@ -289,4 +289,43 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await carla.page.reload();
   await expect(carla.page.getByRole('link', { name: 'Panel' })).toBeVisible({ timeout: 15_000 });
   await expect(carla.page.getByRole('link', { name: 'Registros' })).toBeVisible();
+});
+
+test('administración de la IA: se ven TODOS los modelos (se pueden alcanzar y elegir cualquiera) y el mapa no tapa la barra inferior', async ({ browser }) => {
+  const b = crearBackend(undefined, { gemini: true });
+  const admin = await telefono(browser, b);
+  await configurar(admin.page, enlace({ token: 'tokSup' }));
+  await admin.page.getByRole('link', { name: 'Ajustes' }).click();
+  await admin.page.getByRole('button', { name: 'Administración (usuarios e IA)' }).click();
+  await admin.page.getByRole('button', { name: 'Administrar la inteligencia artificial' }).click();
+  await admin.page.getByRole('button', { name: 'Elegir el modelo de Gemini' }).click();
+
+  const grupo = admin.page.getByRole('group', { name: 'Modelos de Gemini' });
+  for (const m of MODELOS_GEMINI) {
+    const ficha = grupo.getByRole('button', { name: m, exact: true });
+    await ficha.scrollIntoViewIfNeeded();                                  // la lista se desplaza hacia abajo: ninguna queda oculta
+    await expect(ficha).toBeVisible();
+  }
+  const ultimo = MODELOS_GEMINI[MODELOS_GEMINI.length - 1];
+  await grupo.getByRole('button', { name: ultimo, exact: true }).click();
+  await admin.page.getByRole('alertdialog').getByRole('button', { name: 'Entendido' }).click();
+  await expect.poll(() => b.gs.hoja('_Config')?.filas.map((f: any[]) => f.join('=')).join('|')).toContain(`gemini_modelo=${ultimo}`);
+
+  // El mapa del Panel nunca debe quedar por encima de la barra de secciones
+  await admin.page.goto(WEB + '/#/');
+  await expect(admin.page.getByTestId('mapa')).toBeVisible();
+  const resultado = await admin.page.evaluate(() => {
+    const mapa = document.querySelector('.mapa') as HTMLElement;
+    mapa.style.marginTop = '300px';                                       // baja el mapa para que quede justo detrás de la barra, como en el teléfono
+    const teselas = document.querySelector('.leaflet-tile-pane') as HTMLElement;   // sin internet no hay mosaicos del mapa: se simula uno grande, como los reales
+    teselas.insertAdjacentHTML('beforeend', '<div style="position:absolute;left:-500px;top:-500px;width:3000px;height:3000px"></div>');
+    window.scrollTo(0, 0);
+    const barra = document.querySelector('.pestanas')!.getBoundingClientRect();
+    const x = barra.left + barra.width / 2, y = barra.top + barra.height / 2;
+    const m = mapa.getBoundingClientRect();
+    return { solapa: m.top < y && m.bottom > y, tapada: !document.elementFromPoint(x, y)?.closest('.pestanas') };
+  });
+  expect(resultado.solapa).toBe(true);                                    // el mapa sí pasa por detrás de la barra (la prueba no es vacía)
+  expect(resultado.tapada).toBe(false);                                   // y la barra queda por encima
+  await expect(admin.page.getByRole('link', { name: 'Ajustes' })).toBeVisible();
 });

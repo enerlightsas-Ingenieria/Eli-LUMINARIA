@@ -46,8 +46,10 @@ h1, h2, p { margin: 0; }
 .campo input, .campo textarea, .buscador input { width: 100%; background: var(--superficie); color: var(--texto); border: 1px solid var(--borde); border-radius: 10px; padding: 11px 12px; font: inherit; font-size: 16px; min-height: 46px; }
 .campo input[readonly], .campo textarea[readonly] { opacity: .6; }
 .campo input:focus, .campo textarea:focus, .buscador input:focus { outline: 2px solid var(--primario); outline-offset: 0; }
-.fichas { display: flex; gap: 8px; overflow-x: auto; padding: 8px 0 2px; scrollbar-width: none; }
-.fichas::-webkit-scrollbar { display: none; }
+/* Todas las opciones visibles: se acomodan en varias líneas (antes eran una fila con desplazamiento oculto y las de la derecha no se alcanzaban). */
+.fichas { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0 2px; }
+.fichas.lista { max-height: 46vh; overflow-y: auto; align-content: flex-start; overscroll-behavior: contain; }
+.fichas.lista .ficha { max-width: 100%; overflow-wrap: anywhere; text-align: left; height: auto; padding: 8px 14px; }
 .ficha { flex: none; min-height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid var(--borde); background: var(--superficie); color: var(--texto); font: inherit; font-weight: 600; cursor: pointer; }
 .ficha.activa { background: var(--primario); border-color: var(--primario); color: var(--sobre-primario); }
 .ficha-estado { display: inline-block; border: 1px solid var(--borde); color: var(--muted); border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 600; }
@@ -103,7 +105,7 @@ h1, h2, p { margin: 0; }
 .aviso { color: var(--aviso); line-height: 1.4; margin-bottom: 10px; white-space: pre-line; }
 .barras { display: grid; gap: 8px; } .barra-fila { display: flex; justify-content: space-between; } .barra { height: 8px; background: var(--superficie2); border-radius: 4px; margin-top: 3px; } .barra > i { display: block; height: 8px; background: var(--primario); border-radius: 4px; }
 .cifras { display: flex; text-align: center; margin-bottom: 12px; } .cifras > div { flex: 1; } .cifras b { display: block; color: var(--primario); font-size: 20px; } .cifras span { color: var(--muted); font-size: 11px; }
-.mapa { height: calc(100dvh - 150px - var(--pestanas)); min-height: 320px; border-radius: var(--radio); overflow: hidden; border: 1px solid var(--borde); position: relative; }
+.mapa { height: calc(100dvh - 150px - var(--pestanas)); min-height: 320px; border-radius: var(--radio); overflow: hidden; border: 1px solid var(--borde); position: relative; isolation: isolate; z-index: 0; } /* aislado: las capas de Leaflet (z-index 400–1000) no pueden tapar la barra inferior */
 .mapa .boton-mapa { position: absolute; right: 12px; bottom: 12px; z-index: 500; width: 52px; height: 52px; border-radius: 26px; background: var(--primario); color: var(--sobre-primario); border: 0; display: grid; place-items: center; cursor: pointer; box-shadow: 0 3px 10px rgba(0,0,0,.35); }
 .equipo-grid { display: grid; grid-template-columns: 300px 1fr; gap: 12px; }
 @media (max-width: 720px) { .equipo-grid { grid-template-columns: 1fr; } }
