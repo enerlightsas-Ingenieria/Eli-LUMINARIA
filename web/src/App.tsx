@@ -68,7 +68,7 @@ function Cuerpo() {
   switch (primero) {
     case '': pantalla = supervisor ? <Equipo /> : <Registros />; break;
     case 'registros': pantalla = <Registros />; break;
-    case 'admin': pantalla = <Administracion />; break;
+    case 'admin': pantalla = <Administracion seccion={segundo} />; break;
     case 'mapa': pantalla = <Mapa />; break;
     case 'proyectos': pantalla = <Proyectos />; break;
     case 'ajustes': pantalla = <Ajustes />; break;

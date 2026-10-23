@@ -47,7 +47,7 @@ export function AjustesPantalla() {
       <p className="muted" style={{ marginBottom: 12 }}>Tu nombre se registra en cada luminaria. Si tu empresa te dio un enlace o código de configuración, ábrelo o pégalo aquí: deja la app lista sin escribir claves.</p>
       {a.rol && <p data-testid="cuenta" style={{ marginBottom: 8 }}>Cuenta: <b>{a.tecnico}</b> · {{ tecnico: 'Técnico', supervisor: 'Supervisor', admin: 'Administrador' }[rolDe(a)]}</p>}
       <Campo etiqueta="Nombre del técnico" valor={a.tecnico} alCambiar={(t) => cambiar({ tecnico: t })} pista="Ej. Juan Pérez" soloLectura={!!a.rol} />
-      {rolDe(a) === 'admin' && <Boton texto="Administración de usuarios" icono="usuarios" onClick={() => ir('/admin')} />}
+      {rolDe(a) === 'admin' && <Boton texto="Administración (usuarios e IA)" icono="usuarios" onClick={() => ir('/admin')} />}
       <Campo etiqueta="Código de configuración" valor={codigo} alCambiar={setCodigo} pista="ELI1.…  o el enlace completo" tipo="url" />
       <Boton texto="Importar configuración" variante="secundario" deshabilitado={!codigo.trim()} onClick={() => pedirYAplicar(codigo, () => { setCodigo(''); configCambiada(); refrescar(); })} />
 

@@ -235,7 +235,12 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await configurar(admin.page, enlace({ token: 'tokSup' }));          // la clave inicial del administrador (ADMIN_TOKENS)
   await admin.page.getByRole('link', { name: 'Ajustes' }).click();
   await expect(admin.page.getByTestId('cuenta')).toContainText('Administrador');
-  await admin.page.getByRole('button', { name: 'Administración de usuarios' }).click();
+  await admin.page.getByRole('button', { name: 'Administración (usuarios e IA)' }).click();
+
+  // dos pantallas independientes: Inteligencia artificial y Usuarios
+  await expect(admin.page.getByRole('button', { name: 'Administrar usuarios' })).toBeVisible();
+  await admin.page.getByRole('button', { name: 'Administrar la inteligencia artificial' }).click();
+  await expect(admin.page.getByRole('button', { name: 'Nuevo usuario' })).toHaveCount(0);     // aquí no hay usuarios
 
   // IA: el administrador ve qué claves hay, prueba cada proveedor y elige cuál va primero
   await expect(admin.page.getByText('Gemini ❌ falta')).toBeVisible();                       // en esta prueba solo hay clave de Claude
@@ -245,6 +250,9 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await admin.page.getByRole('tab', { name: 'Claude' }).click();
   await expect.poll(() => b.gs.hoja('_Config')?.filas[1]?.join('=')).toBe('ia=claude');
 
+  await admin.page.getByRole('button', { name: 'Volver' }).click();
+  await admin.page.getByRole('button', { name: 'Administrar usuarios' }).click();
+  await expect(admin.page.getByText('Elegir el modelo de Gemini')).toHaveCount(0);            // aquí no hay IA
   await admin.page.getByRole('button', { name: 'Nuevo usuario' }).click();
   await admin.page.getByLabel('Nombre', { exact: true }).fill('Carla Gómez');
   await admin.page.getByRole('button', { name: 'Crear y ver enlace' }).click();
@@ -258,7 +266,7 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await configurar(carla.page, url.replace(WEB, WEB));
   await carla.page.getByRole('link', { name: 'Ajustes' }).click();
   await expect(carla.page.getByTestId('cuenta')).toContainText('Carla Gómez · Técnico');
-  await expect(carla.page.getByRole('button', { name: 'Administración de usuarios' })).toHaveCount(0);
+  await expect(carla.page.getByRole('button', { name: 'Administración (usuarios e IA)' })).toHaveCount(0);
   await expect(carla.page.getByRole('link', { name: 'Panel' })).toHaveCount(0);
   await carla.page.getByRole('link', { name: 'Registros' }).click();
   await capturar(carla.page, 'manual');

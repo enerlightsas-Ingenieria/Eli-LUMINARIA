@@ -1,6 +1,6 @@
 # Usuarios y roles
 
-Hay tres roles. El **administrador** los crea desde la propia app (Ajustes → Administración de usuarios); no hace falta tocar Cloudflare ni la hoja.
+Hay tres roles. El **administrador** los crea desde la propia app (Ajustes → Administración → Usuarios); no hace falta tocar Cloudflare ni la hoja.
 
 | Rol | Qué puede hacer |
 |---|---|
@@ -17,7 +17,7 @@ Para activar la administración:
 3. Publica la web: `cd web; npm run build; npx wrangler pages deploy dist --project-name eli-luminaria --branch main`.
 
 ## Día a día
-- **Nueva persona:** Ajustes → *Administración de usuarios* → **+** → nombre y rol → *Crear y ver enlace*. Pulsa **Compartir** (WhatsApp, correo) o *Copiar enlace*. La persona lo abre en su teléfono y queda lista; su nombre y su rol vienen del servidor.
+- **Nueva persona:** Ajustes → *Administración (usuarios e IA)* → *Usuarios* → **+** → nombre y rol → *Crear y ver enlace*. Pulsa **Compartir** (WhatsApp, correo) o *Copiar enlace*. La persona lo abre en su teléfono y queda lista; su nombre y su rol vienen del servidor.
 - **Contratista:** marca *Contratista (modo terceros)* al crearlo; su enlace exige jornada, cámara y GPS preciso.
 - **Cambiar de rol:** toca la persona, elige el rol y *Guardar*. Se aplica la próxima vez que abra la app con conexión.
 - **Baja:** desmarca *Con acceso*. Deja de poder sincronizar y usar la IA de inmediato (en un minuto como máximo).
@@ -25,7 +25,7 @@ Para activar la administración:
 - No puedes quitarte a ti mismo el rol de administrador ni darte de baja.
 
 ## Inteligencia artificial
-En la misma pantalla de administración se elige qué IA va primero (Gemini o Claude) y se prueba que funcione. Ver `docs/ia.md`.
+En Administración → *Inteligencia artificial* (pantalla aparte) se elige qué IA va primero (Gemini o Claude) y se prueba que funcione. Ver `docs/ia.md`.
 
 ## Dónde se guarda
 En la pestaña `_Usuarios` de tu hoja de Google (nombre, rol, clave, activo). La IA elegida está en `_Config`. También puedes editarla a mano (menú **ELI-LUMINARIA → Generar claves faltantes**).

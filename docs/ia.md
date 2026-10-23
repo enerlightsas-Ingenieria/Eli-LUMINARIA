@@ -8,7 +8,7 @@ El servidor (proxy de Cloudflare) acepta dos proveedores. La app no distingue cu
 | **Claude** (Anthropic) | De pago, por foto | `ANTHROPIC_API_KEY` (console.anthropic.com) |
 
 ## Cómo se elige (desde la app)
-Por defecto analiza **Gemini**. El administrador cambia la IA principal en **Ajustes → Administración de usuarios → Inteligencia artificial** (Gemini o Claude). El cambio vale para todos y se aplica en un minuto como máximo.
+Por defecto analiza **Gemini**. El administrador cambia la IA principal en **Ajustes → Administración (usuarios e IA) → Inteligencia artificial** (Gemini o Claude). El cambio vale para todos y se aplica en un minuto como máximo.
 - La otra IA queda de **respaldo automático**: si la principal falla (sin créditos, límite de uso, caída), responde la otra, siempre que tenga clave en el servidor.
 - Si solo cargaste una clave, se usa esa.
 - **Probar la IA:** el botón llama a cada proveedor y dice si funciona o por qué falla (por ejemplo, "modelo no encontrado" o "clave inválida"), sin mostrar claves. Es lo primero que hay que usar cuando "no analiza".
@@ -25,7 +25,7 @@ Pega la clave cuando la pida (no la escribas en chats ni documentos). Sin `ANTHR
 ## Modelo de Gemini
 Google cambia y retira modelos con frecuencia (una cuenta nueva puede no tener acceso a los viejos y recibir "404"). Por eso:
 - **Por defecto es automático:** si el modelo de siempre no existe para tu cuenta, el servidor consulta la lista de modelos que tu clave puede usar, elige el flash estable más nuevo, reintenta y lo recuerda una hora.
-- **Elegirlo a mano:** Administración → Inteligencia artificial → **Elegir el modelo de Gemini**. Verás la lista real de tu cuenta; toca uno (o *Automático*). Si fijas uno y deja de existir, la IA falla y el aviso lo dice, en vez de cambiarlo a escondidas.
+- **Elegirlo a mano:** Ajustes → Administración → Inteligencia artificial → **Elegir el modelo de Gemini**. Verás la lista real de tu cuenta; toca uno (o *Automático*). Si fijas uno y deja de existir, la IA falla y el aviso lo dice, en vez de cambiarlo a escondidas.
 - `GEMINI_MODEL` (secreto opcional) fija un modelo para todos si no hay uno elegido en la app.
 - **Probar la IA** muestra qué modelo funcionó.
 
