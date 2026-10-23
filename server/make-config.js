@@ -12,6 +12,11 @@
  * la app muestra a qué servidores apuntará y pide confirmación.
  */
 function generar(o) {
+  if (o.precision !== undefined) {
+    if (!o.terceros) throw new Error('--precision solo tiene efecto con --terceros.');
+    const p = Number(o.precision);
+    if (!Number.isFinite(p) || p < 5 || p > 100) throw new Error('--precision debe ser un número entre 5 y 100 (metros).');
+  }
   const cfg = {};
   if (o.org) cfg.organizacion = o.org;
   if (o.tecnico) cfg.tecnico = o.tecnico;
@@ -42,7 +47,11 @@ function cli(argv) {
     else if (mapa[a]) o[mapa[a]] = argv[++i];
     else { console.error('Opción desconocida: ' + a); process.exit(1); }
   }
-  const r = generar(o);
+  let r;
+  try { r = generar(o); } catch (e) { console.error('Error: ' + e.message); process.exit(1); }
+  if (o.precision !== undefined && Number(o.precision) > 25) {
+    console.error('Aviso: el servidor (LIMITE_PRECISION_M en google-apps-script.gs, 25 m por defecto) marcará GPS_IMPRECISO sobre 25 m; ajústalo a ' + o.precision + ' para no ver falsas alertas.');
+  }
   console.log('Código:\n' + r.codigo + '\n\nEnlace:\n' + r.enlace);
 }
 

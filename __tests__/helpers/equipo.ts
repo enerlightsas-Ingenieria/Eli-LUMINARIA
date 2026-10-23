@@ -9,20 +9,24 @@ import * as path from 'path';
 /** Hoja simulada (imita la conversión de Sheets: "150" → 150 salvo en columnas con formato texto). */
 export class Hoja {
   filas: any[][] = [];
+  maxColumnas = 26; // como una pestaña nueva de Google Sheets; appendRow la amplía
   formatos: Record<number, string> = {};
   formulas: Record<string, string> = {};
   constructor(public nombre: string) {}
   getName() { return this.nombre; }
   getLastRow() { return this.filas.length; }
   getMaxRows() { return 1000; }
+  getMaxColumns() { return this.maxColumnas; }
+  insertColumnsAfter(_pos: number, n: number) { this.maxColumnas += n; }
   setFrozenRows() {}
   coac(x: any, col: number, cabecera = false) {
     if (typeof x === 'string' && /^'[=+@]/.test(x)) return x.slice(1); // el apóstrofo fuerza texto y no se guarda
     return typeof x === 'string' && !cabecera && this.formatos[col] !== '@' && /^-?\d+(\.\d+)?$/.test(x) ? Number(x) : x;
   }
-  appendRow(v: any[]) { const cab = this.filas.length === 0; this.filas.push(v.map((x, i) => this.coac(x, i + 1, cab))); }
+  appendRow(v: any[]) { this.maxColumnas = Math.max(this.maxColumnas, v.length); const cab = this.filas.length === 0; this.filas.push(v.map((x, i) => this.coac(x, i + 1, cab))); }
   getRange(r: number, c: number, nr = 1, nc = 1) {
     const h = this;
+    if (c - 1 + nc > h.maxColumnas) throw new Error('The coordinates of the range are outside the dimensions of the sheet.'); // fiel a Sheets
     const api: any = {
       getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => h.filas[r - 1 + i]?.[c - 1 + j] ?? '')),
       setValues: (vals: any[][]) => vals.forEach((fila, i) => { h.filas[r - 1 + i] ??= []; fila.forEach((x, j) => { h.filas[r - 1 + i][c - 1 + j] = h.coac(x, c + j); }); }),

@@ -14,14 +14,17 @@
 var TOKEN = 'CAMBIA-ESTE-TOKEN';           // el mismo que pondrás en la app (Ajustes → Token secreto)
 var CARPETA_FOTOS = 'ELI-LUMINARIA Fotos';  // carpeta de Drive para las fotos (se crea sola)
 var TOKEN_ADMIN = 'CAMBIA-ESTE-TOKEN-ADMIN'; // SOLO para ti: abre el mapa en vivo del equipo (distinto del token del equipo)
-var MINUTOS_SIN_SENAL = 15;
+var MINUTOS_SIN_SENAL = 15;                  // una jornada activa sin latidos por más de esto se muestra "Sin señal"
 // Auditoría de capturas (modo terceros): umbrales de las alertas de la columna "Alertas"
+// OJO: LIMITE_PRECISION_M es la política del SERVIDOR para todos. Si configuras la app con --precision mayor (p. ej. 40),
+// sube también este valor o verás alertas GPS_IMPRECISO en capturas que la app sí aceptó.
 var LIMITE_PRECISION_M = 25;      // GPS_IMPRECISO si la precisión del GPS es peor que esto
 var VELOCIDAD_MAX_KMH = 120;      // SALTO_IMPOSIBLE: dos capturas del mismo técnico a mayor velocidad que esta
 var AGRUPADAS_RADIO_M = 3;        // AGRUPADAS: 4 o más capturas del mismo técnico en este radio...
 var AGRUPADAS_MIN = 4;
 var AGRUPADAS_VENTANA_MIN = 10;   // ...dentro de esta ventana de tiempo
-var TOLERANCIA_JORNADA_MIN = 2;   // margen al comprobar que la captura cae dentro de su jornada                  // una jornada activa sin latidos por más de esto se muestra "Sin señal"
+var TOLERANCIA_JORNADA_MIN = 2;   // margen al comprobar que la captura cae dentro de su jornada
+var AUDITORIA_EN_LINEA_MAX_FILAS = 3000; // en pestañas más grandes la auditoría la hace solo el activador por tiempo (auditarTodo), no cada envío
 var HOJA_EQUIPO = '_Equipo', HOJA_JORNADAS = '_Jornadas'; // pestañas del sistema (los proyectos no pueden empezar por "_")
 
 var COLUMNAS = [
@@ -32,8 +35,9 @@ var COLUMNAS = [
   ['tensionV', 'Tensión (V)'], ['fotocelda', 'Fotocelda'], ['pinesFotocelda', 'Pines fotocelda'],
   ['temperaturaColorK', 'Temp. color (K)'], ['flujoLuminosoLm', 'Flujo (lm)'], ['ip', 'IP'], ['montaje', 'Montaje'],
   ['alturaM', 'Altura (m)'], ['estado', 'Estado'], ['confianza', 'Confianza IA'], ['observaciones', 'Observaciones'],
-  ['origen', 'Origen de la foto'], ['ubicacionSimulada', 'Ubicación simulada'], ['jornadaId', 'ID jornada'], ['alertas', 'Alertas'],
-  ['mapa', 'Enlace mapa'], ['foto', 'Foto'], ['eliminada', 'Eliminada'], ['recibidoEn', 'Recibido']
+  ['mapa', 'Enlace mapa'], ['foto', 'Foto'], ['eliminada', 'Eliminada'], ['recibidoEn', 'Recibido'],
+  // Las columnas nuevas se AÑADEN SIEMPRE AL FINAL: todo el script lee por posición y así las pestañas ya creadas siguen siendo válidas.
+  ['origen', 'Origen de la foto'], ['ubicacionSimulada', 'Ubicación simulada'], ['jornadaId', 'ID jornada'], ['alertas', 'Alertas']
 ];
 // Columnas que se dejan como número (para sumar/graficar); el resto se fuerza a texto para que Sheets no
 // convierta modelos como "1-2" en fechas ni recorte ceros.
@@ -53,7 +57,7 @@ function doPost(e) {
 
     if (d.accion === 'listar') return salida({ ok: true, ahora: ahora, luminarias: listar(hoja, d.desde || '') });
 
-    var datos = hoja.getLastRow() > 1 ? hoja.getRange(2, 1, hoja.getLastRow() - 1, COLUMNAS.length).getValues() : [];
+    var datos = leerFilas(hoja);
     var iU = col('uuid'), iE = col('eliminada');
     var fila = {}; // uuid → número de fila
     datos.forEach(function (r, i) { fila[r[iU]] = i + 2; });
@@ -86,7 +90,7 @@ function doPost(e) {
       hoja.getRange(n, iE + 1).setValue('SÍ');
       hoja.getRange(n, col('recibidoEn') + 1).setValue(ahora);
     });
-    if ((d.luminarias || []).length || (d.borradas || []).length) auditarHoja(hoja);
+    if ((d.luminarias || []).length || (d.borradas || []).length) auditarHoja(hoja, true);
     return salida({ ok: true, recibidas: (d.luminarias || []).length, borradas: (d.borradas || []).length });
   } catch (err) {
     return salida({ ok: false, error: 'Servidor ocupado o error: ' + String(err) });
@@ -111,6 +115,7 @@ function obtenerHoja(nombreProyecto) {
   var limpio = String(nombreProyecto || 'General').replace(/[\\\/\?\*\[\]:]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 90) || 'General';
   limpio = limpio.replace(/^_+/, '').trim() || 'General'; // "_" está reservado para las pestañas del sistema
   var hoja = buscarHoja(libro, limpio) || libro.insertSheet(limpio);
+  if (hoja.getLastRow() > 0) asegurarEncabezados(hoja);
   if (hoja.getLastRow() === 0) {
     hoja.appendRow(COLUMNAS.map(function (c) { return c[1]; }));
     hoja.setFrozenRows(1);
@@ -122,9 +127,31 @@ function obtenerHoja(nombreProyecto) {
   return hoja;
 }
 
+/** Completa encabezados y columnas de pestañas creadas con una versión anterior del script (nunca toca los datos existentes). */
+function asegurarEncabezados(hoja) {
+  var maxCol = hoja.getMaxColumns();
+  if (maxCol < COLUMNAS.length) hoja.insertColumnsAfter(maxCol, COLUMNAS.length - maxCol);
+  var cab = hoja.getRange(1, 1, 1, COLUMNAS.length).getValues()[0];
+  COLUMNAS.forEach(function (c, i) {
+    if (cab[i] !== '') return;
+    hoja.getRange(1, i + 1).setValue(c[1]);
+    hoja.getRange(1, i + 1, 1, 1).setFontWeight('bold').setBackground('#FFC53D');
+    if (NUMERICAS.indexOf(c[0]) < 0) hoja.getRange(2, i + 1, hoja.getMaxRows() - 1, 1).setNumberFormat('@');
+  });
+}
+
+/** Lee todas las filas de datos con exactamente COLUMNAS.length columnas (rellena si la pestaña es antigua y más angosta). */
+function leerFilas(hoja) {
+  var n = hoja.getLastRow();
+  if (n < 2) return [];
+  var anchas = Math.min(COLUMNAS.length, hoja.getMaxColumns());
+  var datos = hoja.getRange(2, 1, n - 1, anchas).getValues();
+  if (anchas < COLUMNAS.length) datos.forEach(function (r) { while (r.length < COLUMNAS.length) r.push(''); });
+  return datos;
+}
+
 function listar(hoja, desde) {
-  if (hoja.getLastRow() < 2) return [];
-  var datos = hoja.getRange(2, 1, hoja.getLastRow() - 1, COLUMNAS.length).getValues();
+  var datos = leerFilas(hoja);
   var iR = col('recibidoEn');
   var salidaFilas = [];
   datos.forEach(function (r) {
@@ -140,10 +167,12 @@ function listar(hoja, desde) {
   return salidaFilas;
 }
 
-// Evita que un texto que empiece por = + @ - se interprete como fórmula.
+// Evita que un texto que empiece por = + @ (o - si no es un número) se interprete como fórmula: se antepone un espacio.
+// (Un apóstrofo no sirve: en celdas de texto puede quedar guardado literalmente y no sobrevive a "Descargar como CSV".)
+// La app recorta los espacios al descargar, así que el dato original no se altera.
 function textoSeguro(v) {
   if (v === null || v === undefined) return '';
-  if (typeof v === 'string' && /^[=+@]/.test(v)) return "'" + v;
+  if (typeof v === 'string' && (/^[=+@]/.test(v) || (/^-/.test(v) && !/^-?\d+([.,]\d+)?$/.test(v)))) return ' ' + v;
   return v;
 }
 
@@ -241,23 +270,31 @@ function leerJornadas() {
 }
 
 /** Recalcula la columna "Alertas" de toda la pestaña de un proyecto. */
-function auditarHoja(hoja) {
+function auditarHoja(hoja, enLinea) {
   var n = hoja.getLastRow();
   if (n < 2) return;
-  var datos = hoja.getRange(2, 1, n - 1, COLUMNAS.length).getValues();
+  if (enLinea && n - 1 > AUDITORIA_EN_LINEA_MAX_FILAS) return; // pestaña grande: la audita el activador por tiempo
+  asegurarEncabezados(hoja);
+  var datos = leerFilas(hoja);
   var filas = datos.map(function (r) {
     var o = {};
     COLUMNAS.forEach(function (c, i) { o[c[0]] = r[i]; });
     return o;
   });
   var alertas = calcularAlertas(filas, leerJornadas());
-  hoja.getRange(2, col('alertas') + 1, n - 1, 1).setValues(alertas.map(function (a) { return [a.join(', ')]; }));
+  var iA = col('alertas'), cambio = false;
+  var nuevas = alertas.map(function (a, i) {
+    var v = a.join(', ');
+    if (String(datos[i][iA]) !== v) cambio = true;
+    return [v];
+  });
+  if (cambio) hoja.getRange(2, iA + 1, n - 1, 1).setValues(nuevas); // solo escribe si algo cambió
 }
 
 /** Para un activador por tiempo (cada 10-15 min): re-audita todos los proyectos (p. ej. cuando llega una jornada tardía). */
 function auditarTodo() {
   SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(function (h) {
-    if (h.getName().charAt(0) !== '_') auditarHoja(h);
+    if (h.getName().charAt(0) !== '_') auditarHoja(h, false);
   });
 }
 
@@ -291,11 +328,16 @@ function hojaSistema(nombre, columnas, textoClaves) {
 }
 
 /** Inserta o actualiza la fila cuya columna iClave vale "clave". 'conservar' = campos que no se pisan una vez escritos. */
-function upsert(hoja, columnas, iClave, clave, obj, conservar) {
+function buscarFila(hoja, columnas, iClave, clave) {
   var n = hoja.getLastRow();
   var datos = n > 1 ? hoja.getRange(2, 1, n - 1, columnas.length).getValues() : [];
-  var fila = 0;
-  for (var i = 0; i < datos.length; i++) if (String(datos[i][iClave]) === String(clave)) { fila = i + 2; break; }
+  for (var i = 0; i < datos.length; i++) if (String(datos[i][iClave]) === String(clave)) return { fila: i + 2, datos: datos };
+  return { fila: 0, datos: datos };
+}
+
+function upsert(hoja, columnas, iClave, clave, obj, conservar) {
+  var enc = buscarFila(hoja, columnas, iClave, clave);
+  var fila = enc.fila, datos = enc.datos;
   var valores = columnas.map(function (c, j) {
     var v = obj[c[0]] === undefined ? '' : obj[c[0]];
     if (fila && conservar && conservar.indexOf(c[0]) >= 0 && datos[fila - 2][j] !== '') v = datos[fila - 2][j];
@@ -324,6 +366,12 @@ function registrarLatido(d, ahora) {
   var senal = new Date(ahora);
   var luminarias = Number(d.luminarias) || 0;
 
+  var idJornada = texto(d.jornadaId, 64) || dispositivo + '-' + inicio.getTime();
+  var hJ = hojaSistema(HOJA_JORNADAS, COL_JORNADAS, TEXTO_JORNADAS);
+  var previa = buscarFila(hJ, COL_JORNADAS, 0, idJornada);
+  // Un latido atrasado (p. ej. una "pausa" que tardó en llegar) no puede reabrir una jornada que ya se cerró.
+  if (previa.fila && previa.datos[previa.fila - 2][4] !== '' && d.estado !== 'terminada') return { ok: true, ignorado: true };
+
   var hE = hojaSistema(HOJA_EQUIPO, COL_EQUIPO, TEXTO_EQUIPO);
   var fe = upsert(hE, COL_EQUIPO, 0, dispositivo, {
     dispositivo: dispositivo, tecnico: texto(d.tecnico, 80), estado: estado, senal: senal,
@@ -336,9 +384,14 @@ function registrarLatido(d, ahora) {
   hE.getRange(fe, COL_EQUIPO.length).setFormulaR1C1(
     '=IF(RC3="Terminada","Terminada",IF(RC3="Pausada","Pausada",IF(NOW()-RC4>TIME(0,' + MINUTOS_SIN_SENAL + ',0),"Sin señal","En jornada")))');
 
-  var fin = d.estado === 'terminada' ? senal : '';
-  upsert(hojaSistema(HOJA_JORNADAS, COL_JORNADAS, TEXTO_JORNADAS), COL_JORNADAS, 0, texto(d.jornadaId, 64) || dispositivo + '-' + inicio.getTime(), {
-    jornadaId: texto(d.jornadaId, 64) || dispositivo + '-' + inicio.getTime(), dispositivo: dispositivo, tecnico: texto(d.tecnico, 80),
+  // La hora de fin la declara el teléfono (puede haber cerrado sin señal y enviar horas después), acotada: no antes del inicio ni en el futuro.
+  var fin = '';
+  if (d.estado === 'terminada') {
+    var finCliente = d.fin ? new Date(d.fin) : null;
+    fin = finCliente && !isNaN(finCliente.getTime()) && finCliente >= inicio ? new Date(Math.min(finCliente.getTime(), senal.getTime())) : senal;
+  }
+  upsert(hJ, COL_JORNADAS, 0, idJornada, {
+    jornadaId: idJornada, dispositivo: dispositivo, tecnico: texto(d.tecnico, 80),
     inicio: inicio, fin: fin, horas: fin ? Math.round((fin - inicio) / 36000) / 100 : '', luminarias: luminarias, proyecto: texto(d.proyecto, 90)
   }, ['fin', 'horas']); // reintentos de "terminar" no mueven la hora de fin
   return { ok: true };
@@ -370,7 +423,7 @@ function datosEquipo(token) {
   var iLat = col('latitud'), iLng = col('longitud'), iTec = col('tecnico'), iMarca = col('marca'), iTecn = col('tecnologia'), iEli = col('eliminada');
   libro.getSheets().forEach(function (h) {
     if (h.getName().charAt(0) === '_' || h.getLastRow() < 2 || luminarias.length >= 5000) return;
-    h.getRange(2, 1, h.getLastRow() - 1, COLUMNAS.length).getValues().forEach(function (r) {
+    leerFilas(h).forEach(function (r) {
       if (luminarias.length >= 5000 || !r[0] || String(r[iEli]).toUpperCase().indexOf('S') === 0) return;
       var q = calidad[r[iTec]] = calidad[r[iTec]] || { total: 0, conAlertas: 0, codigos: {} };
       q.total++;
@@ -438,7 +491,7 @@ function pintar(d){
     lista.appendChild(fila);
     if (t.latitud !== '' && t.latitud != null && t.longitud !== '' && t.longitud != null) {
       var m = L.circleMarker([t.latitud, t.longitud], {radius:11, color:'#fff', weight:3, fillColor: COLORES[t.estado] || '#6b7280', fillOpacity:1}).addTo(capaT);
-      m.bindTooltip(t.tecnico || 'Sin nombre', {permanent:true, direction:'top', offset:[0,-10]});
+      m.bindTooltip(esc(t.tecnico || 'Sin nombre'), {permanent:true, direction:'top', offset:[0,-10]});
       m.bindPopup('<b>' + esc(t.tecnico) + '</b><br>' + esc(t.estado) + ' · ' + hace(t.senal, d.ahora) + '<br>' + (t.luminarias||0) + ' luminarias');
       marcas[t.dispositivo] = m; puntos.push([t.latitud, t.longitud]);
       fila.onclick = (function(mm, la, lo){ return function(){ map.setView([la, lo], 17); mm.openPopup(); }; })(m, t.latitud, t.longitud);
@@ -446,7 +499,7 @@ function pintar(d){
   });
   if (!d.tecnicos.length) lista.appendChild(el('div', null, 'Aún no hay técnicos con jornada.')).id = 'vacio';
   d.luminarias.forEach(function(l){
-    L.circleMarker([l.lat, l.lng], {radius:3, color:'#475569', weight:1, fillColor:'#94a3b8', fillOpacity:.8}).bindTooltip((l.marca || 'Luminaria') + (l.tec ? ' · ' + l.tec : '')).addTo(capaL);
+    L.circleMarker([l.lat, l.lng], {radius:3, color:'#475569', weight:1, fillColor:'#94a3b8', fillOpacity:.8}).bindTooltip(esc((l.marca || 'Luminaria') + (l.tec ? ' · ' + l.tec : ''))).addTo(capaL);
   });
   document.getElementById('res').textContent = cuenta['En jornada'] + ' en jornada · ' + cuenta['Sin señal'] + ' sin señal · ' + cuenta['Pausada'] + ' en pausa';
   document.getElementById('act').textContent = 'actualizado ' + new Date(d.ahora).toLocaleTimeString();

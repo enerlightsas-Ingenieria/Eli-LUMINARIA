@@ -11,11 +11,12 @@ import { useTema } from '../theme';
 
 export function AjustesScreen() {
   const { c, setPref } = useTema();
-  const { proyecto, refrescar } = useApp();
+  const { proyecto, refrescar, versionConfig, configCambiada } = useApp();
   const [a, setA] = useState<Ajustes | null>(null);
   const [sync, setSync] = useState(false);
   const [codigo, setCodigo] = useState('');
-  useEffect(() => { cargarAjustes().then(setA); }, []);
+  // Se recarga al abrir y cada vez que se importa una configuración: si no, "Guardar" pisaría con valores viejos lo recién importado.
+  useEffect(() => { cargarAjustes().then(setA); }, [versionConfig]);
   if (!a) return null;
 
   const cambiar = (p: Partial<Ajustes>) => setA((x) => ({ ...x!, ...p }));
@@ -43,7 +44,7 @@ export function AjustesScreen() {
         <Field label="Nombre del técnico" value={a.tecnico} hint="Ej. Juan Pérez" onChangeText={(t) => cambiar({ tecnico: t })} />
         <Field label="Código de configuración" url value={codigo} hint="ELI1.…  o  eliluminaria://config?c=…" onChangeText={setCodigo} />
         <Button title="Importar configuración" variant="secondary" disabled={!codigo.trim()}
-          onPress={() => pedirYAplicar(codigo, async () => { setCodigo(''); setA(await cargarAjustes()); await refrescar(); })} />
+          onPress={() => pedirYAplicar(codigo, async () => { setCodigo(''); configCambiada(); await refrescar(); })} />
 
         <Seccion>Apariencia</Seccion>
         <Segmented value={a.tema} onChange={(tema) => { cambiar({ tema }); setPref(tema); }}

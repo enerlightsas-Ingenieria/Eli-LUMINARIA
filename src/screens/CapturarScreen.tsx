@@ -37,7 +37,9 @@ export function CapturarScreen() {
   const cancelar = useRef<AbortController | null>(null);
   const { estado, reanudar } = useJornada();
   const { empezar, ocupado: iniciando } = useEmpezarJornada();
-  const [cfg, setCfg] = useState({ modoTerceros: false, precisionMaxM: 20 });
+  // null = ajustes aún sin cargar: hasta entonces no se muestra nada (evita que el modo terceros esté "abierto" unos instantes)
+  const [cfgCargada, setCfg] = useState<{ modoTerceros: boolean; precisionMaxM: number } | null>(null);
+  const cfg = cfgCargada ?? { modoTerceros: true, precisionMaxM: 20 };
   useEffect(() => { cargarAjustes().then((a) => setCfg({ modoTerceros: a.modoTerceros, precisionMaxM: a.precisionMaxM })); }, []);
   const jornadaActiva = estado?.fase === 'activa';
 
@@ -52,12 +54,14 @@ export function CapturarScreen() {
   const evaluacion = evaluarCaptura({ modoTerceros: cfg.modoTerceros, jornadaActiva, posicion: buscandoGps ? null : pos, precisionMaxM: cfg.precisionMaxM });
 
   // Si falta precisión, reintenta el GPS solo cada 4 s hasta lograrla.
+  // (dependencias primitivas: un objeto nuevo en cada render reiniciaría el temporizador sin llegar nunca a reintentar)
+  const motivo = evaluacion.ok ? null : evaluacion.motivo;
   useEffect(() => {
-    if (!cfg.modoTerceros || !jornadaActiva || buscandoGps || evaluacion.ok) return;
-    if (evaluacion.motivo !== 'SIN_GPS' && evaluacion.motivo !== 'GPS_IMPRECISO') return;
+    if (!cfgCargada?.modoTerceros || !jornadaActiva || buscandoGps) return;
+    if (motivo !== 'SIN_GPS' && motivo !== 'GPS_IMPRECISO') return;
     const t = setTimeout(refrescarGps, 4000);
     return () => clearTimeout(t);
-  }, [cfg.modoTerceros, jornadaActiva, buscandoGps, evaluacion, refrescarGps]);
+  }, [cfgCargada, jornadaActiva, buscandoGps, motivo, refrescarGps]);
 
   const poner = async (i: number, origen: 'camara' | 'galeria') => {
     if (origen === 'galeria' && !galeriaPermitida(cfg.modoTerceros)) return;
@@ -131,6 +135,10 @@ export function CapturarScreen() {
     slot: { flex: 1, aspectRatio: 0.85, borderRadius: radius, borderWidth: 1.5, borderColor: c.border, borderStyle: 'dashed', backgroundColor: c.surface, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
     gps: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: c.surface, borderRadius: 12, padding: 12, borderWidth: 1, borderColor: c.border, marginBottom: 16 },
   }), [c]);
+
+  if (!cfgCargada) {
+    return <View style={{ flex: 1, backgroundColor: c.bg, alignItems: 'center', justifyContent: 'center' }}><ActivityIndicator color={c.primary} /></View>;
+  }
 
   // Puerta del modo terceros: sin jornada activa no se puede capturar
   if (cfg.modoTerceros && !jornadaActiva) {

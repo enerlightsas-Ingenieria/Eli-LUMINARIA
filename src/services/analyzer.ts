@@ -21,7 +21,7 @@ Reglas:
 
 const campo = (description: string) => ({ type: 'string', description });
 
-const TOOL = {
+export const TOOL = {
   name: 'registrar_luminaria',
   description: 'Registra las características identificadas de la luminaria.',
   input_schema: {

@@ -26,7 +26,7 @@ async function enviar(a: Ajustes, proyecto: Proyecto, alProgreso?: (hechas: numb
         foto: a.syncFotos && l.fotos[0] ? await leerBase64(l.fotos[0]).catch(() => undefined) : undefined,
       })));
       await post(a, { proyecto: infoProyecto(proyecto), luminarias });
-      await marcarSincronizadas(lote.map((l) => l.uuid));
+      await marcarSincronizadas(lote.map((l) => ({ uuid: l.uuid, actualizadoEn: l.actualizadoEn })));
       enviadas += lote.length;
       alProgreso?.(enviadas, pendientes.length);
     }
@@ -62,8 +62,9 @@ export async function sincronizar(proyecto: Proyecto, alProgreso?: (hechas: numb
     const bajada = await descargar(a, proyecto);
     return { ...subida, recibidas: bajada.nuevas + bajada.actualizadas, borradasRemotas: bajada.borradas };
   } catch (e: any) {
-    const motivo = e instanceof SinConexion ? 'sin conexión' : e.message;
-    throw new Error(`Se enviaron ${subida.enviadas} luminaria(s), pero no se pudo descargar lo del equipo: ${motivo}`);
+    const sinRed = e instanceof SinConexion;
+    if (!subida.enviadas && !subida.borradasEnviadas) throw new Error(sinRed ? 'Sin conexión con el servidor.' : `No se pudo descargar lo del equipo: ${e.message}`);
+    throw new Error(`Se enviaron ${subida.enviadas} luminaria(s), pero no se pudo descargar lo del equipo: ${sinRed ? 'sin conexión' : e.message}`);
   }
 }
 
@@ -76,10 +77,14 @@ export async function sincronizarTodo(): Promise<number> {
   corriendo = true;
   try {
     let cambios = 0;
+    let primerError: unknown = null;
     for (const p of await listarProyectos()) {
-      const r = await sincronizar(p);
-      cambios += r.enviadas + r.borradasEnviadas + r.recibidas + r.borradasRemotas;
+      try { // un proyecto con problemas no debe impedir que sincronicen los demás
+        const r = await sincronizar(p);
+        cambios += r.enviadas + r.borradasEnviadas + r.recibidas + r.borradasRemotas;
+      } catch (e) { primerError ??= e; }
     }
+    if (primerError && cambios === 0) throw primerError;
     return cambios;
   } finally { corriendo = false; }
 }

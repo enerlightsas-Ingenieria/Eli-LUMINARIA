@@ -143,9 +143,10 @@ export async function pendientesDeSync(proyectoId: number): Promise<Luminaria[]>
   const db = await abrir();
   return (await db.getAllAsync('SELECT * FROM luminarias WHERE proyectoId=? AND sincronizado=0 ORDER BY id', [proyectoId])).map(aLuminaria);
 }
-export async function marcarSincronizadas(uuids: string[]): Promise<void> {
+/** Marca como enviadas SOLO las que no cambiaron mientras se subían (si se editaron durante el envío, siguen pendientes). */
+export async function marcarSincronizadas(items: { uuid: string; actualizadoEn: string }[]): Promise<void> {
   const db = await abrir();
-  for (const u of uuids) await db.runAsync('UPDATE luminarias SET sincronizado=1 WHERE uuid=?', [u]);
+  for (const i of items) await db.runAsync('UPDATE luminarias SET sincronizado=1 WHERE uuid=? AND actualizadoEn=?', [i.uuid, i.actualizadoEn]);
 }
 
 const valores = (l: LuminariaBorrador) => COLS.map((c) => (c === 'fotos' ? JSON.stringify(l.fotos) : aSqlCol(c, (l as any)[c])));
@@ -173,6 +174,12 @@ export async function borrarLuminaria(l: Luminaria): Promise<void> {
 export async function contarDesde(tecnico: string, desdeISO: string): Promise<number> {
   const db = await abrir();
   return (await db.getFirstAsync<{ c: number }>('SELECT COUNT(*) AS c FROM luminarias WHERE tecnico=? AND creadoEn>=?', [tecnico, desdeISO]))?.c ?? 0;
+}
+
+/** Luminarias de un técnico entre dos instantes (para cerrar una jornada atrasada). */
+export async function contarEntre(tecnico: string, desdeISO: string, hastaISO: string): Promise<number> {
+  const db = await abrir();
+  return (await db.getFirstAsync<{ c: number }>('SELECT COUNT(*) AS c FROM luminarias WHERE tecnico=? AND creadoEn>=? AND creadoEn<=?', [tecnico, desdeISO, hastaISO]))?.c ?? 0;
 }
 
 export async function borradasPendientes(proyectoId: number): Promise<string[]> {

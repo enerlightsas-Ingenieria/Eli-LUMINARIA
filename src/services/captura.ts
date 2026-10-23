@@ -36,7 +36,8 @@ export async function obtenerPosicion(precision: 'alta' | 'balanceada' = 'alta')
     const l = await Location.getCurrentPositionAsync({ accuracy: precision === 'alta' ? Location.Accuracy.High : Location.Accuracy.Balanced });
     return { latitud: l.coords.latitude, longitud: l.coords.longitude, precisionM: l.coords.accuracy ?? null, simulada: !!l.mocked };
   } catch {
-    const l = await Location.getLastKnownPositionAsync().catch(() => null);
+    // Respaldo SOLO con una lectura reciente: para registrar una luminaria (15 s) o un latido (5 min). Si es más vieja → sin posición.
+    const l = await Location.getLastKnownPositionAsync({ maxAge: precision === 'alta' ? 15000 : 300000 }).catch(() => null);
     return l ? { latitud: l.coords.latitude, longitud: l.coords.longitude, precisionM: l.coords.accuracy ?? null, simulada: !!l.mocked } : null;
   }
 }

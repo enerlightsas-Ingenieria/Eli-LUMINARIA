@@ -4,13 +4,14 @@ const mockPend: any[] = [];
 const mockMarcadas: string[] = [];
 jest.mock('../src/services/db', () => ({
   pendientesDeSync: async () => mockPend,
-  marcarSincronizadas: async (u: string[]) => { mockMarcadas.push(...u); },
+  marcarSincronizadas: async (u: { uuid: string }[]) => { mockMarcadas.push(...u.map((x) => x.uuid)); },
   borradasPendientes: async () => [], limpiarBorradas: async () => {}, leerKv: async () => null, guardarKv: async () => {},
   fusionarRemotas: async () => ({ nuevas: 0, actualizadas: 0, borradas: 0 }), listarProyectos: async () => [],
 }));
 jest.mock('../src/services/fotos', () => ({ leerBase64: async () => 'BASE64' }));
 
 import { analizarFotos } from '../src/services/analyzer';
+import { validarCuerpo } from '../server/worker';
 import { sincronizar } from '../src/services/sync';
 
 const resp = (status: number, body: any) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) }) as any;
@@ -28,6 +29,15 @@ describe('analizarFotos', () => {
     expect(body.messages[0].content.filter((c: any) => c.type === 'image')).toHaveLength(2);
     expect(body.tool_choice).toEqual({ type: 'tool', name: 'registrar_luminaria' });
     expect(f.mock.calls[0][1].headers['x-api-key']).toBe('sk-test');
+  });
+
+  it('el proxy acepta exactamente la petición real que arma la app', async () => {
+    const f = jest.fn().mockResolvedValue(resp(200, { content: [{ type: 'tool_use', input: { confianza: 'alta' } }] }));
+    (global as any).fetch = f;
+    await analizarFotos(['AAA', 'BBB', 'CCC']);
+    const real = f.mock.calls[0][1].body;
+    expect(validarCuerpo(real, ['claude-sonnet-5-5'])).toMatchObject({ ok: true });
+    expect(JSON.parse(real).messages[0].content.filter((c: any) => c.type === 'text').reduce((n: number, c: any) => n + c.text.length, 0)).toBeLessThan(5000);
   });
 
   it('confianza desconocida cae a "baja"', async () => {
@@ -137,7 +147,7 @@ describe('sincronizarTodo (automática)', () => {
     jest.doMock('../src/services/db', () => ({
       listarProyectos: async () => [{ id: 1, uuid: 'p1', nombre: 'A' }, { id: 2, uuid: 'p2', nombre: 'B' }],
       pendientesDeSync: async (id: number) => (id === 1 ? [{ uuid: 'a1', fotos: [] }, { uuid: 'a2', fotos: [] }] : []),
-      marcarSincronizadas: async (u: string[]) => { marcadas.push(...u); },
+      marcarSincronizadas: async (u: { uuid: string }[]) => { marcadas.push(...u.map((x) => x.uuid)); },
       borradasPendientes: async () => [], limpiarBorradas: async () => {}, leerKv: async () => null, guardarKv: async () => {},
       fusionarRemotas: async () => ({ nuevas: 0, actualizadas: 0, borradas: 0 }),
     }));

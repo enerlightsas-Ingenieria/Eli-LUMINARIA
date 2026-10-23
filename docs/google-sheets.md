@@ -10,6 +10,10 @@
 5. Autoriza los permisos (Hojas de cálculo y Drive) y copia la URL que termina en `/exec`.
 6. En la app: **Ajustes → Sincronización** → pega la URL y el token → *Guardar* → *Sincronizar ahora*.
 
+> **Hojas existentes:** al volver a implementar, las pestañas creadas con una versión anterior **se completan solas** (las columnas nuevas
+> se añaden al final y no se mueven ni se pisan datos). Los textos que empiezan por `=`, `+` o `@` se guardan con un espacio delante para que
+> Sheets no los trate como fórmulas; la app lo recorta al descargar.
+
 > **Actualizaciones del script:** cada vez que cambies `server/google-apps-script.gs` hay que **volver a implementar**
 > (Implementar → Administrar implementaciones → editar → Nueva versión). Si ya tenías una hoja creada con una versión
 > anterior del script, bórrala o crea una pestaña nueva: las columnas cambiaron (Técnico, Eliminada, Recibido).

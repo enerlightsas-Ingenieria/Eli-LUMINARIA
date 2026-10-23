@@ -19,8 +19,10 @@ conexión la app sincroniza sola (al guardar, al volver a abrirla y cada vez que
    npx wrangler secret put APP_TOKENS        # juan:tokenDeJuan,ana:tokenDeAna   (uno por técnico)
    ```
    Genera cada token con `openssl rand -base64 24`. El proxy sólo acepta peticiones con la forma exacta de la app
-   (1 mensaje, ≤ 3 imágenes, herramienta `registrar_luminaria`, modelo permitido, `max_tokens` ≤ 1500) y registra
-   el técnico de cada llamada. Opcional: añade un binding `LIMITADOR` de Cloudflare Rate Limiting.
+   (la herramienta `registrar_luminaria` con su esquema conocido, `tool_choice` forzado, 1–3 imágenes JPEG, ≤ 5 000 caracteres de
+   texto, modelo permitido, `max_tokens` ≤ 1500) y registra el técnico de cada llamada. Aun así, quien tenga un token puede enviar
+   fotos y un texto corto: el limitador de tasa (abajo) acota el abuso residual. Si cambias la herramienta en `analyzer.ts`, actualiza
+   `PROPIEDADES` en `server/worker.ts` (una prueba comprueba que coinciden). Opcional: añade un binding `LIMITADOR` de Cloudflare Rate Limiting.
 2. **Hoja compartida** — sigue `docs/google-sheets.md` (token de equipo en `TOKEN`). Todos los técnicos escriben en
    la misma hoja; la columna **Técnico** dice quién hizo cada registro y los proyectos con el mismo nombre comparten pestaña.
 3. **Compila la app** una sola vez para todos (`eas build`, ver README).

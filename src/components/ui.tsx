@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View, ViewStyle } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Colores, radius, useTema } from '../theme';
 
@@ -43,9 +43,9 @@ export function Button({ title, onPress, variant = 'primary', disabled, loading,
   );
 }
 
-export function Field({ label, value, onChangeText, hint, multiline, numeric, secure, url, opciones, soloLectura }: {
+export function Field({ label, value, onChangeText, hint, multiline, numeric, signed, secure, url, opciones, soloLectura }: {
   label: string; value: string; onChangeText: (t: string) => void; hint?: string; multiline?: boolean;
-  numeric?: boolean; secure?: boolean; url?: boolean; opciones?: string[]; soloLectura?: boolean;
+  numeric?: boolean; /** admite signo negativo (coordenadas) */ signed?: boolean; secure?: boolean; url?: boolean; opciones?: string[]; soloLectura?: boolean;
 }) {
   const { c } = useTema();
   const s = useEstilos();
@@ -55,8 +55,9 @@ export function Field({ label, value, onChangeText, hint, multiline, numeric, se
       <TextInput
         accessibilityLabel={label} value={value} onChangeText={onChangeText} placeholder={hint}
         placeholderTextColor={c.muted} multiline={multiline} secureTextEntry={secure}
-        keyboardType={numeric ? 'decimal-pad' : url ? 'url' : 'default'}
-        autoCapitalize={url || secure || numeric ? 'none' : 'sentences'} autoCorrect={false}
+        // decimal-pad no tiene tecla de menos ni en iOS ni en Android: con signo se usa un teclado que sí la trae
+        keyboardType={signed ? Platform.select({ ios: 'numbers-and-punctuation', default: 'default' }) : numeric ? 'decimal-pad' : url ? 'url' : 'default'}
+        autoCapitalize={url || secure || numeric || signed ? 'none' : 'sentences'} autoCorrect={false}
         editable={!soloLectura}
         style={[s.input, multiline && { height: 90, textAlignVertical: 'top' }, soloLectura && { opacity: 0.6 }]}
       />

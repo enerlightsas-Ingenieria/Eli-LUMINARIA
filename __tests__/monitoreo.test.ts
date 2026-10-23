@@ -97,6 +97,27 @@ describe('monitoreo de jornadas', () => {
     expect(await A.jornada.enviarLatido('X')).toBe(false);                // ya enviado: nada más que mandar
   });
 
+  it('la hora de fin es la que declara el teléfono (cerró sin señal), acotada por la del servidor', async () => {
+    await A.jornada.registrarConsentimiento(); await A.jornada.iniciarJornada();
+    await A.jornada.enviarLatido('X');
+    minutos(60);
+    await A.jornada.cambiarFase('terminada');                              // 09:00, sin señal
+    (global as any).fetch = async () => { throw new Error('sin red'); };
+    expect(await A.jornada.enviarLatido('X')).toBe(false);
+    minutos(15 * 60);                                                      // el cierre llega 15 h después
+    (global as any).fetch = srv.llamar;
+    await A.jornada.enviarLatido('X');
+    const j = srv.hoja('_Jornadas')!.filas[1];
+    expect((j[4] as Date).toISOString()).toBe('2026-03-10T09:00:00.000Z'); // no la hora de recepción
+    expect(j[5]).toBe(1);                                                  // 1 h de jornada
+
+    // un cliente que miente: fin en el futuro → se acota a la hora del servidor; fin antes del inicio → hora del servidor
+    const mentir = (fin: string) => srv.llamar('', { body: JSON.stringify({ token: TOKEN_EQUIPO, accion: 'latido', dispositivo: 'x', tecnico: 'Z', estado: 'terminada', jornadaId: 'jx-' + fin, inicio: '2026-03-10T10:00:00.000Z', fin }) });
+    await mentir('2099-01-01T00:00:00.000Z'); await mentir('2000-01-01T00:00:00.000Z');
+    const ahoraSrv = new Date().toISOString();
+    for (const fila of srv.hoja('_Jornadas')!.filas.slice(2)) expect((fila[4] as Date).toISOString()).toBe(ahoraSrv);
+  });
+
   it('sin conexión, el cierre queda pendiente y se envía al volver la señal', async () => {
     await A.jornada.registrarConsentimiento(); await A.jornada.iniciarJornada();
     await A.jornada.enviarLatido('X');

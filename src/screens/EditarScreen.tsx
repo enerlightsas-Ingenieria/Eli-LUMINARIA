@@ -27,6 +27,8 @@ export function EditarScreen() {
   const [l, setL] = useState<LuminariaBorrador | null>(existente ?? params.borrador ?? null);
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [aviso, setAviso] = useState(params.aviso);
+  // Texto de las coordenadas: se conserva tal cual lo escribe el técnico ("-", "4."…) y se interpreta al guardar
+  const [coordTxt, setCoordTxt] = useState({ lat: (existente ?? params.borrador)?.latitud?.toString() ?? '', lng: (existente ?? params.borrador)?.longitud?.toString() ?? '' });
   const [terceros, setTerceros] = useState(false);
   useEffect(() => { cargarAjustes().then((a) => setTerceros(a.modoTerceros)); }, []);
   const guardado = useRef(false); // ref: el listener de beforeRemove debe ver el valor al instante
@@ -96,6 +98,11 @@ export function EditarScreen() {
   };
 
   const guardar = (siguiente: boolean) => {
+    // Texto que no es un número (p. ej. "-" o "4." a medias) no se guarda en silencio como "sin coordenada"
+    if ((coordTxt.lat.trim() && num(coordTxt.lat) === null) || (coordTxt.lng.trim() && num(coordTxt.lng) === null)) {
+      Alert.alert('Coordenada inválida', 'Escribe la latitud y la longitud como números, por ejemplo 4.711 y -74.0721.');
+      return;
+    }
     if (coordenadaValida(l.latitud, l.longitud)) {
       const cerca = masCercano({ latitud: l.latitud!, longitud: l.longitud! }, items.filter((x) => x.id !== l.id), 8);
       if (cerca) {
@@ -156,8 +163,8 @@ export function EditarScreen() {
         <Seccion>Identificación y ubicación</Seccion>
         <Field label="Código del activo / n.º de poste" value={l.codigo} onChangeText={(t) => set('codigo', t)} hint="Opcional, el que use tu empresa" />
         <View style={{ flexDirection: 'row', gap: 10 }}>
-          <View style={{ flex: 1 }}><Field label="Latitud" numeric soloLectura={terceros} value={l.latitud?.toString() ?? ''} onChangeText={(t) => set('latitud', num(t))} /></View>
-          <View style={{ flex: 1 }}><Field label="Longitud" numeric soloLectura={terceros} value={l.longitud?.toString() ?? ''} onChangeText={(t) => set('longitud', num(t))} /></View>
+          <View style={{ flex: 1 }}><Field label="Latitud" numeric signed soloLectura={terceros} value={coordTxt.lat} onChangeText={(t) => { setCoordTxt((p) => ({ ...p, lat: t })); set('latitud', num(t)); }} /></View>
+          <View style={{ flex: 1 }}><Field label="Longitud" numeric signed soloLectura={terceros} value={coordTxt.lng} onChangeText={(t) => { setCoordTxt((p) => ({ ...p, lng: t })); set('longitud', num(t)); }} /></View>
         </View>
         {terceros && <Text style={{ color: c.muted, fontSize: 12, marginBottom: 8, marginTop: -6 }}>Modo terceros: la coordenada la registra el GPS y no se edita a mano.</Text>}
         {l.precisionM != null && <Text style={{ color: c.muted, fontSize: 12, marginBottom: 10, marginTop: -6 }}>Precisión GPS ≈ {Math.round(l.precisionM)} m</Text>}

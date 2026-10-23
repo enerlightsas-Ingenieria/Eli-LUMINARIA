@@ -70,15 +70,15 @@ function Tabs() {
 
 /** Abre enlaces eliluminaria://config?c=… (flotas) y pide confirmación antes de aplicarlos. */
 function EnlacesDeConfiguracion() {
-  const { activar, proyecto, refrescar } = useApp();
+  const { activar, proyecto, refrescar, configCambiada } = useApp();
   useEffect(() => {
     const manejar = (url?: string | null) => {
-      if (url?.startsWith(ESQUEMA)) pedirYAplicar(url, async () => { if (proyecto) await activar(proyecto.id); else await refrescar(); });
+      if (url?.startsWith(ESQUEMA)) pedirYAplicar(url, async () => { configCambiada(); if (proyecto) await activar(proyecto.id); else await refrescar(); });
     };
     Linking.getInitialURL().then(manejar).catch(() => {});
     const sub = Linking.addEventListener('url', (e) => manejar(e.url));
     return () => sub.remove();
-  }, [activar, proyecto, refrescar]);
+  }, [activar, proyecto, refrescar, configCambiada]);
   return null;
 }
 

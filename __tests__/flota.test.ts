@@ -1,5 +1,8 @@
 import { aEnlace, codificar, decodificar, describir } from '../src/lib/config';
 import { identificar, manejar, validarCuerpo } from '../server/worker';
+import { TOOL } from '../src/services/analyzer';
+
+jest.mock('../src/services/settings', () => ({ cargarAjustes: async () => ({}) }));
 
 describe('configuración de flota', () => {
   const cfg = {
@@ -42,6 +45,15 @@ describe('configuración de flota', () => {
     expect(decodificar(generar({ terceros: true, precision: '25' }).enlace)).toEqual({ modoTerceros: true, precisionMaxM: 25 });
   });
 
+  it('make-config valida --precision: rango, número y que exista --terceros', () => {
+    const { generar } = require('../server/make-config.js');
+    expect(() => generar({ terceros: true, precision: 'veinte' })).toThrow(/entre 5 y 100/);
+    expect(() => generar({ terceros: true, precision: '200' })).toThrow(/entre 5 y 100/);
+    expect(() => generar({ terceros: true, precision: '4' })).toThrow(/entre 5 y 100/);
+    expect(() => generar({ precision: '20' })).toThrow(/--terceros/);
+    expect(decodificar(generar({ terceros: true }).enlace)).toEqual({ modoTerceros: true });
+  });
+
   it('rechaza una precisión fuera de 5–100 m o de tipo inválido', () => {
     for (const p of [0, 4, 101, '20', -1]) expect(() => decodificar(codificar({ precisionMaxM: p as any }))).toThrow(/precisión/i);
   });
@@ -54,11 +66,13 @@ describe('configuración de flota', () => {
 
 describe('proxy de IA (worker)', () => {
   const env = { ANTHROPIC_API_KEY: 'sk-secreta', APP_TOKENS: 'juan:tokJ, ana:tokA' };
+  const imagen = (o: any = {}) => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA', ...o } });
   const cuerpo = (o: any = {}) => ({
-    model: 'claude-sonnet-5-5', max_tokens: 1024, tools: [{ name: 'registrar_luminaria', input_schema: {} }],
+    model: 'claude-sonnet-5-5', max_tokens: 1024, tools: [TOOL],
     tool_choice: { type: 'tool', name: 'registrar_luminaria' },
-    messages: [{ role: 'user', content: [{ type: 'image', source: {} }, { type: 'text', text: 'x' }] }], ...o,
+    messages: [{ role: 'user', content: [imagen(), { type: 'text', text: 'x' }] }], ...o,
   });
+  const conTool = (cambio: (t: any) => void) => { const t = JSON.parse(JSON.stringify(TOOL)); cambio(t); return { tools: [t] }; };
   const peticion = (b: any, token = 'tokJ', metodo = 'POST') =>
     new Request('https://p.example/', { method: metodo, headers: { 'x-api-key': token }, ...(metodo === 'POST' ? { body: typeof b === 'string' ? b : JSON.stringify(b) } : {}) });
   const ok = () => jest.fn().mockResolvedValue(new Response('{"content":[]}', { status: 200 }));
@@ -91,10 +105,21 @@ describe('proxy de IA (worker)', () => {
     ['modelo no permitido', { model: 'otro-modelo' }],
     ['max_tokens excesivo', { max_tokens: 100000 }],
     ['otra herramienta', { tools: [{ name: 'otra' }] }],
+    ['esquema de herramienta arbitrario', conTool((t) => { t.input_schema.properties.respuesta_libre = { type: 'string', description: 'x' }; })],
+    ['propiedad de la herramienta que no es texto', conTool((t) => { t.input_schema.properties.marca = { type: 'object' }; })],
+    ['descripción de herramienta enorme', conTool((t) => { t.description = 'x'.repeat(5000); })],
+    ['herramienta con claves extra', conTool((t) => { t.cache_control = {}; })],
+    ['tool_choice automático', { tool_choice: { type: 'auto' } }],
+    ['sin tool_choice', { tool_choice: undefined }],
+    ['texto libre enorme', { messages: [{ role: 'user', content: [imagen(), { type: 'text', text: 'escribe un ensayo '.repeat(500) }] }] }],
+    ['varios textos que suman demasiado', { messages: [{ role: 'user', content: [imagen(), ...Array(4).fill({ type: 'text', text: 'a'.repeat(2000) })] }] }],
+    ['imagen que no es JPEG', { messages: [{ role: 'user', content: [imagen({ media_type: 'image/png' })] }] }],
+    ['imagen desde URL', { messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'url', url: 'https://x' } }] }] }],
+    ['imagen gigante', { messages: [{ role: 'user', content: [imagen({ data: 'A'.repeat(4_500_001) })] }] }],
     ['varios mensajes', { messages: [{ role: 'user', content: [] }, { role: 'user', content: [] }] }],
     ['sin imágenes', { messages: [{ role: 'user', content: [{ type: 'text', text: 'chatea conmigo' }] }] }],
-    ['demasiadas imágenes', { messages: [{ role: 'user', content: Array(4).fill({ type: 'image', source: {} }) }] }],
-    ['contenido tool_result', { messages: [{ role: 'user', content: [{ type: 'image', source: {} }, { type: 'tool_result' }] }] }],
+    ['demasiadas imágenes', { messages: [{ role: 'user', content: Array(4).fill(imagen()) }] }],
+    ['contenido tool_result', { messages: [{ role: 'user', content: [imagen(), { type: 'tool_result' }] }] }],
   ])('rechaza %s con 400', async (_n, o) => {
     const f = ok();
     expect((await manejar(peticion(cuerpo(o)), env, f)).status).toBe(400);
@@ -111,6 +136,13 @@ describe('proxy de IA (worker)', () => {
   it('propaga el estado de Anthropic', async () => {
     const f = jest.fn().mockResolvedValue(new Response('{"error":"x"}', { status: 529 }));
     expect((await manejar(peticion(cuerpo()), env, f)).status).toBe(529);
+  });
+
+  it('la lista de propiedades del proxy coincide con la herramienta real de la app', () => {
+    // si alguien cambia analyzer.ts y no el proxy, la app dejaría de funcionar en producción: esta prueba lo impide
+    expect(validarCuerpo(JSON.stringify(cuerpo()), ['claude-sonnet-5-5'])).toMatchObject({ ok: true });
+    const conUna = JSON.parse(JSON.stringify(TOOL)); delete conUna.input_schema.properties.marca; conUna.input_schema.required = conUna.input_schema.required.filter((r: string) => r !== 'marca');
+    expect(validarCuerpo(JSON.stringify(cuerpo({ tools: [conUna] })), ['claude-sonnet-5-5'])).toMatchObject({ ok: false });
   });
 
   it('validarCuerpo acepta la petición real de la app', () => {

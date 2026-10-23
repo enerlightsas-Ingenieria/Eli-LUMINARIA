@@ -38,7 +38,7 @@ describe('db', () => {
     expect(ls).toHaveLength(1);
     expect(ls[0]).toMatchObject({ marca: 'Philips', fotos: ['file:///a.jpg'], sincronizado: false, latitud: 4.7 });
 
-    await db.marcarSincronizadas([ls[0].uuid]);
+    await db.marcarSincronizadas([{ uuid: ls[0].uuid, actualizadoEn: ls[0].actualizadoEn }]);
     expect(await db.pendientesDeSync(ps[0].id)).toHaveLength(0);
 
     await db.guardarLuminaria({ ...ls[0], id, marca: 'Schréder' }); // editar reabre pendiente
