@@ -27,7 +27,7 @@ Identifica con IA (Claude visión) las características básicas y las guarda en
 
 ## Dos apps, un mismo núcleo
 - **App móvil** (Android/iOS, Expo): raíz del repositorio.
-- **App web instalable (PWA)**: carpeta `web/` — sin tiendas ni cuentas de desarrollador; se usa desde el navegador del teléfono. Ver `docs/web.md`.
+- **App web instalable (PWA)**: carpeta `web/` — sin tiendas, sin cuentas de desarrollador y **sin costos fijos**; funciona **sin conexión** y se usa desde el navegador del teléfono. Ver `docs/web.md` (incluye cómo usarla offline y cómo controlar el gasto de IA).
 - **Núcleo compartido** en `src/core` y `src/lib`: sincronización, jornada, IA, reglas y formatos existen una sola vez.
 
 ## Empezar
