@@ -25,6 +25,11 @@ Identifica con IA (Claude visión) las características básicas y las guarda en
 - **Exportar** CSV (Excel), **GeoJSON** (QGIS/ArcGIS) y **KML** (Google Earth).
 - **Offline-first** (SQLite local), tema claro/oscuro/automático, accesibilidad (etiquetas, roles), háptica.
 
+## Dos apps, un mismo núcleo
+- **App móvil** (Android/iOS, Expo): raíz del repositorio.
+- **App web instalable (PWA)**: carpeta `web/` — sin tiendas ni cuentas de desarrollador; se usa desde el navegador del teléfono. Ver `docs/web.md`.
+- **Núcleo compartido** en `src/core` y `src/lib`: sincronización, jornada, IA, reglas y formatos existen una sola vez.
+
 ## Empezar
 **Guía paso a paso (servidor, compilación, teléfonos y lista de verificación del piloto): `docs/puesta-en-marcha.md`.**
 

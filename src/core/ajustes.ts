@@ -19,6 +19,8 @@ export interface Ajustes {
   modoTerceros: boolean;
   /** Precisión GPS máxima (m) exigida en modo terceros. */
   precisionMaxM: number;
+  /** Solo web: la cuenta es de supervisor (ve el panel del equipo). */
+  supervisor?: boolean;
 }
 
 export const MODELO_POR_DEFECTO = 'claude-sonnet-5-5';

@@ -75,6 +75,9 @@ envía cada 5 minutos su ubicación aproximada, la hora y cuántas luminarias ll
 Para contratistas que trabajan en el horario que ellos eligen, usa el **modo terceros** (`--terceros` en `make-config.js`): verifica cada captura
 sin seguirlos fuera de su jornada. Detalle, alertas, cláusulas y notas de tiendas en `docs/terceros.md`.
 
+## Versión web (PWA)
+También hay una **versión web instalable** que usa los mismos datos, la misma hoja y las mismas reglas: ver `docs/web.md`.
+
 ## Android e iOS a la vez
 - Misma app, mismos datos y misma hoja. Un técnico con iPhone y otro con Android ven los mismos registros.
 - **Fotos de galería:** iOS suele conservar el GPS de la foto; **Android normalmente lo elimina**. La app lo detecta y usa tu

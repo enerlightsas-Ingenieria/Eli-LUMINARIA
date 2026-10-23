@@ -18,7 +18,10 @@ Genera cada token con `openssl rand -base64 24`. No reutilices unos por otros.
    implementa como aplicación web, y añade el activador por tiempo `auditarTodo` (cada 15 min).
 3. **Comprueba la hoja:** abre `<URL /exec>?vista=equipo&token=<TOKEN_ADMIN>`; debe cargar el mapa vacío ("Aún no hay técnicos con jornada").
 
-## 2. Compilar la app (≈ 30 min + espera de las compilaciones)
+## 1b. Versión web (opcional, sin tiendas)
+Si prefieres que se use desde el navegador, añade los secretos `SYNC_URL`, `SYNC_TOKEN`, `ADMIN_TOKENS` y `SYNC_TOKEN_ADMIN` al proxy, compila `web/` y publícala en un hosting estático con https: `docs/web.md`. Los enlaces de configuración web (`--worker --web`) funcionan al tocarlos, incluso desde WhatsApp.
+
+## 2. Compilar la app móvil (≈ 30 min + espera de las compilaciones)
 ```bash
 npm install && npm run typecheck && npm test
 npm i -g eas-cli && eas login
