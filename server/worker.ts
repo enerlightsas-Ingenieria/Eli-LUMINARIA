@@ -13,13 +13,17 @@
  *                      técnico lo pone el proxy según SU token, no lo declara el cliente)
  *   /equipo         → datos del mapa/panel de supervisión (solo tokens de ADMIN_TOKENS)
  *
+ * Usuarios:  lo normal es la pestaña "_Usuarios" de la hoja de Google (nombre, rol, clave, activo): el administrador crea
+ *            técnicos y supervisores ahí, sin tocar secretos. APP_TOKENS / ADMIN_TOKENS siguen funcionando como alternativa.
+ *
  * Secretos:  wrangler secret put ANTHROPIC_API_KEY
- *            wrangler secret put APP_TOKENS        # "juan:tok1,ana:tok2"
+ *            wrangler secret put APP_TOKENS        # (opcional) "juan:tok1,ana:tok2"
  *            wrangler secret put SYNC_URL          # URL /exec de la Web App de Google Apps Script
  *            wrangler secret put SYNC_TOKEN        # = TOKEN del script
- *            wrangler secret put ADMIN_TOKENS      # "supervisora:tokA"   (quienes pueden abrir el panel)
+ *            wrangler secret put ADMIN_TOKENS      # (opcional) "supervisora:tokA"   (quienes pueden abrir el panel)
  *            wrangler secret put SYNC_TOKEN_ADMIN  # = TOKEN_ADMIN del script
- * Opcional:  MODELOS_PERMITIDOS = "claude-sonnet-5-5,claude-haiku-5-5"
+ * Opcional:  USUARIOS_CACHE_SEG = 60  (segundos que el proxy recuerda una clave antes de volver a preguntar a la hoja)
+ *            MODELOS_PERMITIDOS = "claude-sonnet-5-5,claude-haiku-5-5"
  *            ORIGENES_PERMITIDOS = "https://app.tuempresa.com"  (si no se define, cualquier origen; los tokens siguen protegiendo)
  * Despliegue: npx wrangler deploy server/worker.ts --name eli-luminaria-proxy --compatibility-date 2026-01-01
  *
@@ -57,6 +61,41 @@ export function identificar(token: string, tokens: string | undefined): string |
     if (iguales(token, secreto)) return nombre;
   }
   return null;
+}
+
+export type Identidad = { nombre: string; rol: 'tecnico' | 'supervisor' };
+
+const cacheUsuarios = new Map<string, { v: Identidad | null; hasta: number }>();
+export const vaciarCacheUsuarios = () => cacheUsuarios.clear();
+
+/**
+ * Quién es esta clave: primero los secretos (sin red), después la pestaña _Usuarios (con memoria de unos segundos para no
+ * llamar al script en cada petición; baja o cambio de rol tardan como mucho ese tiempo en aplicarse).
+ * Lanza error si la hoja no responde (no es lo mismo que "clave desconocida").
+ */
+export async function autenticar(clave: string, env: any, llamar: typeof fetch): Promise<Identidad | null> {
+  if (!clave) return null;
+  const sup = identificar(clave, env.ADMIN_TOKENS);
+  if (sup) return { nombre: sup, rol: 'supervisor' };
+  const tec = identificar(clave, env.APP_TOKENS);
+  if (tec) return { nombre: tec, rol: 'tecnico' };
+  if (!env.SYNC_URL || !env.SYNC_TOKEN) return null;
+
+  const llave = env.SYNC_URL + '\n' + clave;
+  const ttl = Math.max(0, Number(env.USUARIOS_CACHE_SEG ?? 60)) * 1000;
+  const guardado = cacheUsuarios.get(llave);
+  if (guardado && guardado.hasta > Date.now()) return guardado.v;
+
+  const r = await haciaHojas({ accion: 'usuario', clave }, env.SYNC_TOKEN, env, llamar);
+  const c: any = await r.json().catch(() => null);
+  if (!c?.ok) throw new Error('hoja');
+  const u = c.usuario;
+  const v: Identidad | null = u && typeof u.nombre === 'string' && u.nombre ? { nombre: u.nombre, rol: u.rol === 'supervisor' ? 'supervisor' : 'tecnico' } : null;
+  if (ttl > 0) {
+    if (cacheUsuarios.size > 500) cacheUsuarios.clear();
+    cacheUsuarios.set(llave, { v, hasta: Date.now() + ttl });
+  }
+  return v;
 }
 
 const soloClaves = (o: any, permitidas: string[]) => o && typeof o === 'object' && Object.keys(o).every((k) => permitidas.includes(k));
@@ -168,17 +207,20 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   const ruta = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
   const clave = request.headers.get('x-api-key') ?? '';
 
+  if (ruta !== '/' && ruta !== '/analizar' && ruta !== '/sync' && ruta !== '/equipo') return json(404, { error: 'Not found' });
+
+  let quien: Identidad | null;
+  try { quien = await autenticar(clave, env, llamar); }
+  catch { return json(502, { error: 'No se pudo verificar el usuario (la hoja de Google no respondió).' }); }
+  if (!quien) return json(401, { error: 'Unauthorized' });
+
   if (ruta === '/equipo') {
-    if (!identificar(clave, env.ADMIN_TOKENS)) return json(401, { error: 'Unauthorized' });
+    if (quien.rol !== 'supervisor') return json(401, { error: 'Unauthorized' });
     return haciaHojas({ accion: 'equipo' }, env.SYNC_TOKEN_ADMIN, env, llamar);
   }
-  if (ruta !== '/' && ruta !== '/analizar' && ruta !== '/sync') return json(404, { error: 'Not found' });
+  if (env.LIMITADOR && !(await env.LIMITADOR.limit({ key: quien.nombre })).success) return json(429, { error: 'Demasiadas solicitudes' });
 
-  const tecnico = identificar(clave, env.APP_TOKENS);
-  if (!tecnico) return json(401, { error: 'Unauthorized' });
-  if (env.LIMITADOR && !(await env.LIMITADOR.limit({ key: tecnico })).success) return json(429, { error: 'Demasiadas solicitudes' });
-
-  return ruta === '/sync' ? sincronizar(request, env, llamar, tecnico) : analizar(request, env, llamar, tecnico);
+  return ruta === '/sync' ? sincronizar(request, env, llamar, quien.nombre) : analizar(request, env, llamar, quien.nombre);
 }
 
 export async function manejar(request: Request, env: any, llamar: typeof fetch = fetch): Promise<Response> {

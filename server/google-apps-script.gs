@@ -9,6 +9,7 @@
  *   { token, proyecto:{...}, accion:'listar', desde:'ISO' }                → devuelve lo recibido desde esa marca
  *   { token, accion:'latido', dispositivo, tecnico, estado, ... }           → monitoreo de jornada (pestañas _Equipo y _Jornadas)
  *   { token: TOKEN_ADMIN, accion:'equipo' }                                 → datos del panel/mapa de supervisión (lo usa la web)
+ *   { token, accion:'usuario', clave }                                      → quién es esa clave según la pestaña _Usuarios (lo usa el proxy)
  * Mapa en vivo para el administrador: <URL de la Web App>?vista=equipo&token=<TOKEN_ADMIN>
  * El orden lo pone EL SERVIDOR (columna "Recibido"), no los relojes de los teléfonos.
  */
@@ -26,7 +27,7 @@ var AGRUPADAS_MIN = 4;
 var AGRUPADAS_VENTANA_MIN = 10;   // ...dentro de esta ventana de tiempo
 var TOLERANCIA_JORNADA_MIN = 2;   // margen al comprobar que la captura cae dentro de su jornada
 var AUDITORIA_EN_LINEA_MAX_FILAS = 3000; // en pestañas más grandes la auditoría la hace solo el activador por tiempo (auditarTodo), no cada envío
-var HOJA_EQUIPO = '_Equipo', HOJA_JORNADAS = '_Jornadas'; // pestañas del sistema (los proyectos no pueden empezar por "_")
+var HOJA_EQUIPO = '_Equipo', HOJA_JORNADAS = '_Jornadas', HOJA_USUARIOS = '_Usuarios'; // pestañas del sistema (los proyectos no pueden empezar por "_")
 
 var COLUMNAS = [
   ['uuid', 'UUID'], ['id', 'ID (local del teléfono)'], ['codigo', 'Código activo'], ['creadoEn', 'Fecha'],
@@ -57,6 +58,7 @@ function doPost(e) {
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
     if (d.accion === 'equipo') { var datos = datosEquipo(TOKEN_ADMIN); datos.ok = true; return salida(datos); }
     if (d.accion === 'latido') return salida(registrarLatido(d, ahora));
+    if (d.accion === 'usuario') return salida({ ok: true, usuario: buscarUsuario(d.clave) });
     var hoja = obtenerHoja(d.proyecto && d.proyecto.nombre);
 
     if (d.accion === 'listar') return salida({ ok: true, ahora: ahora, luminarias: listar(hoja, d.desde || '') });
@@ -353,6 +355,67 @@ function upsert(hoja, columnas, iClave, clave, obj, conservar) {
 }
 
 function texto(v, max) { return String(v === undefined || v === null ? '' : v).substring(0, max); }
+
+/* ---------------- Usuarios (pestaña _Usuarios: el administrador crea personas y roles aquí) ---------------- */
+
+var COLUMNAS_USUARIOS = [['nombre', 'Nombre'], ['rol', 'Rol (tecnico o supervisor)'], ['clave', 'Clave'], ['activo', 'Activo (si/no)']];
+
+/** Crea la pestaña si no existe y la deja lista. También se puede ejecutar a mano. */
+function prepararUsuarios() {
+  var nueva = !buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
+  var hoja = hojaSistema(HOJA_USUARIOS, COLUMNAS_USUARIOS, ['nombre', 'rol', 'clave', 'activo']);
+  if (nueva) hoja.appendRow(['Ejemplo Técnico', 'tecnico', '', 'no']);
+  return hoja;
+}
+
+/** Rellena con una clave aleatoria las filas que tengan nombre pero no clave. Menú: ELI-LUMINARIA → Generar claves faltantes. */
+function generarClavesFaltantes() {
+  var hoja = prepararUsuarios();
+  var n = hoja.getLastRow();
+  if (n < 2) return 0;
+  var datos = hoja.getRange(2, 1, n - 1, 4).getValues();
+  var hechas = 0;
+  datos.forEach(function (r, i) {
+    if (String(r[0]).trim() && !String(r[2]).trim() && !usuarioInactivo(r[3])) { // la fila de ejemplo (Activo = no) se deja como está
+      hoja.getRange(i + 2, 3).setValue(Utilities.getUuid().replace(/-/g, '').substring(0, 12));
+      hechas++;
+    }
+  });
+  return hechas;
+}
+
+function onOpen() {
+  try {
+    SpreadsheetApp.getUi().createMenu('ELI-LUMINARIA')
+      .addItem('Preparar pestaña Usuarios', 'prepararUsuarios')
+      .addItem('Generar claves faltantes', 'generarClavesFaltantes')
+      .addToUi();
+  } catch (e) {}
+}
+
+function usuarioInactivo(v) {
+  var a = String(v === undefined || v === null ? '' : v).trim().toLowerCase();
+  return a === 'no' || a === 'n' || a === 'false' || a === '0';
+}
+
+/** { nombre, rol } de la clave, o null. Sin pestaña, sin clave o con Activo = no → null. Cualquier rol que no sea "supervisor" es técnico. */
+function buscarUsuario(clave) {
+  clave = String(clave === undefined || clave === null ? '' : clave).trim();
+  if (!clave) return null;
+  var hoja = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
+  if (!hoja || hoja.getLastRow() < 2) return null;
+  var datos = hoja.getRange(2, 1, hoja.getLastRow() - 1, 4).getValues();
+  for (var i = 0; i < datos.length; i++) {
+    var r = datos[i];
+    if (String(r[2]).trim() !== clave) continue;
+    if (usuarioInactivo(r[3])) return null;
+    var nombre = String(r[0]).trim();
+    if (!nombre) return null;
+    var rol = String(r[1]).trim().toLowerCase().indexOf('sup') === 0 ? 'supervisor' : 'tecnico';
+    return { nombre: nombre, rol: rol };
+  }
+  return null;
+}
 
 /** Un latido por teléfono con jornada: sobrescribe SU fila (solo se guarda la última posición, sin historial de rutas). */
 function registrarLatido(d, ahora) {

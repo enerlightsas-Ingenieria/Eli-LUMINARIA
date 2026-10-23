@@ -6,7 +6,7 @@ Tiempo estimado: 1–2 horas la primera vez. Orden recomendado.
 | Qué | Dónde vive | Quién la usa |
 |---|---|---|
 | API key de Anthropic | Solo en el proxy (Cloudflare) | Nadie más |
-| Token del técnico (`nombre:token`) | `APP_TOKENS` del proxy + el enlace de cada técnico | Cada técnico (revocable) |
+| Clave del técnico | Pestaña `_Usuarios` de la hoja (ver `docs/usuarios.md`) + el enlace de cada persona | Cada persona (revocable) |
 | `TOKEN` del equipo | Script de Google + enlace de configuración | Todos los teléfonos |
 | `TOKEN_ADMIN` | Solo en el script de Google | **Solo tú** (mapa en vivo) |
 

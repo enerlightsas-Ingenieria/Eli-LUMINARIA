@@ -45,11 +45,11 @@ export function crearServidor(rutaScript?: string) {
   const fuente = fs.readFileSync(rutaScript ?? path.join(__dirname, '../../server/google-apps-script.gs'), 'utf8');
   const html = { createHtmlOutput: (h: string) => ({ html: h, setTitle() { return this; }, addMetaTag() { return this; } }) };
   const gs = new Function('SpreadsheetApp', 'LockService', 'ContentService', 'DriveApp', 'Utilities', 'HtmlService',
-    fuente + '\n;return { doPost, doGet, datosEquipo, calcularAlertas, auditarTodo };')(
+    fuente + '\n;return { doPost, doGet, datosEquipo, calcularAlertas, auditarTodo, generarClavesFaltantes, prepararUsuarios, buscarUsuario };')(
     { getActiveSpreadsheet: () => libro },
     { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     { createTextOutput: (t: string) => ({ t, setMimeType() { return this; } }), MimeType: { JSON: 'json' } },
-    {}, {}, html,
+    {}, { getUuid: () => crypto.randomUUID() }, html,
   );
   const llamar = async (_url: string, init: any) => {
     const salida = gs.doPost({ postData: { contents: init.body } });

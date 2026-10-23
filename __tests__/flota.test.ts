@@ -1,5 +1,5 @@
 import { aEnlace, codificar, decodificar, describir } from '../src/lib/config';
-import { identificar, manejar, validarCuerpo } from '../server/worker';
+import { identificar, manejar, validarCuerpo, vaciarCacheUsuarios } from '../server/worker';
 import { TOOL } from '../src/services/analyzer';
 
 jest.mock('../src/services/settings', () => ({ cargarAjustes: async () => ({}) }));
@@ -241,14 +241,91 @@ describe('proxy: CORS, puerta de sincronización y panel de supervisión (para l
       expect(cuerpoEnviado(f)).toEqual({ accion: 'equipo', token: 'TOKEN-ADMIN-HOJA' });
     });
 
-    it('un token de administrador no sirve para analizar ni sincronizar (separación de funciones)', async () => {
-      expect((await manejar(req('/sync', {}, 'tokS'), env, hojas())).status).toBe(401);
-      expect((await manejar(req('/', {}, 'tokS'), env, hojas())).status).toBe(401);
+    it('un supervisor también puede sincronizar (su rol incluye el de técnico)', async () => {
+      expect((await manejar(req('/sync', {}, 'tokS'), env, hojas())).status).toBe(200);
     });
   });
 
   it('rutas desconocidas → 404 y GET → 405', async () => {
     expect((await manejar(req('/otra', {}), env, hojas())).status).toBe(404);
     expect((await manejar(new Request('https://p.example/sync', { method: 'GET' }), env, hojas())).status).toBe(405);
+  });
+});
+
+describe('usuarios por rol desde la pestaña _Usuarios', () => {
+  const { crearServidor } = require('./helpers/hoja');
+  const montar = (extra: any = {}) => {
+    const gs = crearServidor();
+    const env: any = { ANTHROPIC_API_KEY: 'sk', SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, ...extra };
+    const f = jest.fn((u: any, i: any) => gs.llamar(u, i));
+    const req = (ruta: string, clave: string, cuerpo: any = {}) => new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave }, body: JSON.stringify(cuerpo) });
+    const usuarios = () => { gs.gs.prepararUsuarios(); return gs.hoja('_Usuarios'); };
+    return { gs, env, f, req, usuarios };
+  };
+
+  beforeEach(() => vaciarCacheUsuarios());
+
+  it('sin pestaña _Usuarios nadie entra; con ella, el técnico sincroniza y no ve el panel; el supervisor sí', async () => {
+    const m = montar();
+    expect((await manejar(m.req('/sync', 'abc'), m.env, m.f as any)).status).toBe(401);
+    const h = m.usuarios();
+    h.appendRow(['Ana', 'tecnico', 'claveAna', 'si']);
+    h.appendRow(['Sofía', 'Supervisor', 'claveSofia', 'si']);
+    expect((await manejar(m.req('/sync', 'claveAna', { accion: 'listar', proyecto: { nombre: 'P' }, desde: '' }), m.env, m.f as any)).status).toBe(200);
+    expect((await manejar(m.req('/equipo', 'claveAna'), m.env, m.f as any)).status).toBe(401);
+    const sup = await manejar(m.req('/equipo', 'claveSofia'), m.env, m.f as any);
+    expect(sup.status).toBe(200); expect((await sup.json()).ok).toBe(true);
+  });
+
+  it('el latido se atribuye al nombre de la hoja, no al que declare el cliente', async () => {
+    const m = montar(); m.usuarios().appendRow(['Ana', 'tecnico', 'claveAna', 'si']);
+    await manejar(m.req('/sync', 'claveAna', { accion: 'latido', tecnico: 'Otro', dispositivo: 'd1', estado: 'activa' }), m.env, m.f as any);
+    expect(m.gs.hoja('_Equipo').filas[1][1]).toBe('Ana');
+  });
+
+  it('Activo = no, clave vacía y rol raro (→ técnico) se tratan con el menor privilegio', async () => {
+    const m = montar(); const h = m.usuarios();
+    h.appendRow(['Baja', 'tecnico', 'claveBaja', 'no']);
+    h.appendRow(['Raro', 'jefe', 'claveRaro', 'si']);
+    h.appendRow(['SinClave', 'supervisor', '', 'si']);
+    expect((await manejar(m.req('/sync', 'claveBaja'), m.env, m.f as any)).status).toBe(401);
+    expect((await manejar(m.req('/sync', ' '), m.env, m.f as any)).status).toBe(401);
+    expect((await manejar(m.req('/equipo', 'claveRaro'), m.env, m.f as any)).status).toBe(401);
+    expect((await manejar(m.req('/sync', 'claveRaro'), m.env, m.f as any)).status).toBe(200);
+  });
+
+  it('dar de baja surte efecto al vencer la memoria; mientras tanto no se pregunta a la hoja en cada petición', async () => {
+    const m = montar({ USUARIOS_CACHE_SEG: 60 }); const h = m.usuarios();
+    h.appendRow(['Ana', 'tecnico', 'claveAna', 'si']);
+    await manejar(m.req('/sync', 'claveAna'), m.env, m.f as any);
+    const antes = m.f.mock.calls.length;
+    await manejar(m.req('/sync', 'claveAna'), m.env, m.f as any);
+    expect(m.f.mock.calls.length - antes).toBe(1);        // solo la sincronización: la identidad salió de la memoria
+    h.filas[2][3] = 'no';
+    expect((await manejar(m.req('/sync', 'claveAna'), m.env, m.f as any)).status).toBe(200);   // aún recordada
+    vaciarCacheUsuarios();
+    expect((await manejar(m.req('/sync', 'claveAna'), m.env, m.f as any)).status).toBe(401);
+  });
+
+  it('los secretos APP_TOKENS / ADMIN_TOKENS siguen funcionando y la clave de la hoja no se confunde con el token del script', async () => {
+    const m = montar({ APP_TOKENS: 'juan:tokJ' });
+    expect((await manejar(m.req('/sync', 'tokJ'), m.env, m.f as any)).status).toBe(200);
+    expect(m.f).toHaveBeenCalledTimes(1);                  // tokJ no consultó la hoja de usuarios
+    expect((await manejar(m.req('/sync', 'CAMBIA-ESTE-TOKEN'), m.env, m.f as any)).status).toBe(401);
+  });
+
+  it('si la hoja no responde → 502 (no 401), y no se recuerda el fallo', async () => {
+    const m = montar();
+    const caido = jest.fn().mockRejectedValue(new Error('x'));
+    expect((await manejar(m.req('/sync', 'abc'), m.env, caido as any)).status).toBe(502);
+  });
+
+  it('el script solo revela identidad con el token del equipo, y generarClavesFaltantes completa solo las filas vacías', async () => {
+    const m = montar(); const h = m.usuarios();
+    h.appendRow(['Ana', 'tecnico', '', 'si']); h.appendRow(['Beto', 'tecnico', 'fija', 'si']);
+    expect(m.gs.gs.generarClavesFaltantes()).toBe(1);
+    expect(h.filas[2][2]).toMatch(/^[0-9a-f]{12}$/); expect(h.filas[3][2]).toBe('fija');
+    const r = await m.gs.llamar('', { body: JSON.stringify({ token: 'malo', accion: 'usuario', clave: 'fija' }) });
+    expect((await r.json()).ok).toBe(false);
   });
 });
