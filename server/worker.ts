@@ -28,7 +28,7 @@
  * IA:        ANTHROPIC_API_KEY (Claude) y/o GEMINI_API_KEY (Gemini, tiene capa gratuita). ORDEN_IA="gemini,claude" (por defecto): si el
  *            primero falla —sin créditos, límite, caída— se usa el siguiente. El administrador cambia cuál va primero desde la app
  *            (Administración → Inteligencia artificial), y eso manda sobre ORDEN_IA.
- *            GEMINI_MODEL (por defecto gemini-2.5-flash). Con la capa gratuita Google puede usar las fotos para mejorar sus productos.
+ *            GEMINI_MODEL (opcional; por defecto el sistema busca solo un modelo disponible en tu cuenta). Con la capa gratuita Google puede usar las fotos para mejorar sus productos.
  * Opcional:  USUARIOS_CACHE_SEG = 60  (segundos que el proxy recuerda una clave antes de volver a preguntar a la hoja)
  *            MODELOS_PERMITIDOS = "claude-sonnet-5-5,claude-haiku-5-5"
  *            ORIGENES_PERMITIDOS = "https://app.tuempresa.com"  (si no se define, cualquier origen; los tokens siguen protegiendo)
@@ -205,13 +205,65 @@ async function conClaude(cuerpo: any, env: any, llamar: typeof fetch): Promise<I
   return { ok: true, respuesta: new Response(r.body, { status: 200, headers: { 'content-type': 'application/json' } }) };
 }
 
-async function conGemini(cuerpo: any, env: any, llamar: typeof fetch): Promise<Intento> {
-  const modelo = encodeURIComponent(env.GEMINI_MODEL || 'gemini-2.5-flash');
-  const r = await llamar(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-    body: JSON.stringify(aGemini(cuerpo)),
+const URL_GEMINI = 'https://generativelanguage.googleapis.com/v1beta';
+const MODELO_GEMINI_RE = /^gemini-[a-z0-9.\-]{1,60}$/;
+const MODELO_GEMINI_DEFECTO = 'gemini-2.5-flash';
+
+/** De los modelos que ofrece la cuenta, el más nuevo y estable de la familia "flash" (con visión). */
+export function mejorModelo(nombres: string[]): string | undefined {
+  const puntuar = (re: RegExp) => nombres
+    .map((n) => ({ n, m: n.match(re) }))
+    .filter((x) => x.m)
+    .sort((a, b) => parseFloat(b.m![1]) - parseFloat(a.m![1]) || (a.m![2] ? 1 : 0) - (b.m![2] ? 1 : 0))[0]?.n;
+  return puntuar(/^gemini-(\d+(?:\.\d+)?)-flash(-lite)?$/) ?? puntuar(/^gemini-(\d+(?:\.\d+)?)-flash(-lite)?-preview(?:-[\d-]+)?$/);
+}
+
+/** Modelos de Gemini que la clave puede usar para generar contenido (sin el prefijo "models/"). */
+async function listarModelosGemini(env: any, llamar: typeof fetch): Promise<string[]> {
+  const r = await llamar(`${URL_GEMINI}/models?pageSize=200`, { headers: { 'x-goog-api-key': env.GEMINI_API_KEY } });
+  if (!r.ok) { await r.body?.cancel().catch(() => {}); return []; }
+  const j: any = await r.json().catch(() => null);
+  return ((j?.models ?? []) as any[])
+    .filter((m) => Array.isArray(m.supportedGenerationMethods) && m.supportedGenerationMethods.includes('generateContent'))
+    .map((m) => String(m.name ?? '').replace(/^models\//, ''))
+    .filter((n) => MODELO_GEMINI_RE.test(n));
+}
+
+let modeloDetectado: { modelo: string; hasta: number } | null = null;
+export const olvidarModeloDetectado = () => { modeloDetectado = null; };
+
+/** Modelo a usar: el que eligió el administrador, luego GEMINI_MODEL, luego el que se detectó, luego el de siempre. */
+async function modeloGemini(env: any, llamar: typeof fetch): Promise<{ modelo: string; origen: 'admin' | 'env' | 'detectado' | 'defecto' }> {
+  const cfg = await configIA(env, llamar);
+  if (cfg.modelo) return { modelo: cfg.modelo, origen: 'admin' };
+  if (env.GEMINI_MODEL) return { modelo: env.GEMINI_MODEL, origen: 'env' };
+  if (modeloDetectado && modeloDetectado.hasta > Date.now()) return { modelo: modeloDetectado.modelo, origen: 'detectado' };
+  return { modelo: MODELO_GEMINI_DEFECTO, origen: 'defecto' };
+}
+
+/**
+ * Llama a Gemini. Si el modelo no existe para esta cuenta (404) y no lo fijó el administrador, busca entre los modelos
+ * disponibles el mejor y reintenta una vez (queda recordado una hora).
+ */
+async function generarConGemini(cuerpoGemini: any, env: any, llamar: typeof fetch): Promise<{ r: Response; modelo: string; autoElegido: boolean }> {
+  const { modelo, origen } = await modeloGemini(env, llamar);
+  const enviar = (m: string) => llamar(`${URL_GEMINI}/models/${encodeURIComponent(m)}:generateContent`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY }, body: JSON.stringify(cuerpoGemini),
   });
+  let r = await enviar(modelo);
+  if (r.status === 404 && origen !== 'admin') {
+    const elegido = mejorModelo(await listarModelosGemini(env, llamar));
+    if (elegido && elegido !== modelo) {
+      await r.body?.cancel().catch(() => {});
+      r = await enviar(elegido);
+      if (r.ok) { modeloDetectado = { modelo: elegido, hasta: Date.now() + 3_600_000 }; return { r, modelo: elegido, autoElegido: true }; }
+    }
+  }
+  return { r, modelo, autoElegido: false };
+}
+
+async function conGemini(cuerpo: any, env: any, llamar: typeof fetch): Promise<Intento> {
+  const { r } = await generarConGemini(aGemini(cuerpo), env, llamar);
   if (!r.ok) { await r.body?.cancel().catch(() => {}); return { ok: false, estado: r.status }; }
   const convertida = deGemini(await r.json().catch(() => null));
   if (!convertida) return { ok: false, estado: 502 };   // bloqueada por seguridad o sin llamada a la herramienta
@@ -261,39 +313,46 @@ async function analizar(request: Request, env: any, llamar: typeof fetch, tecnic
   return json(ultimo === 429 ? 429 : ultimo === 401 || ultimo === 403 ? 502 : ultimo, { error: `El servicio de IA no respondió (${detalle.join('; ')}).` });
 }
 
-const cacheIA = new Map<string, { v: Proveedor | undefined; hasta: number }>();
+const cacheIA = new Map<string, { v: { ia?: Proveedor; modelo?: string }; hasta: number }>();
 export const vaciarCacheIA = () => cacheIA.clear();
 
-/** Qué IA eligió el administrador (pestaña _Config), con memoria corta. Si la hoja no responde, se usa el orden por defecto. */
-async function iaPrincipal(env: any, llamar: typeof fetch): Promise<Proveedor | undefined> {
-  if (!env.SYNC_URL || !env.SYNC_TOKEN) return undefined;
+/** Ajustes que eligió el administrador (pestaña _Config: IA principal y modelo de Gemini), con memoria corta. Sin hoja → vacío. */
+async function configIA(env: any, llamar: typeof fetch): Promise<{ ia?: Proveedor; modelo?: string }> {
+  if (!env.SYNC_URL || !env.SYNC_TOKEN) return {};
   const ttl = Math.max(0, Number(env.USUARIOS_CACHE_SEG ?? 60)) * 1000;
   const g = cacheIA.get(env.SYNC_URL);
   if (g && g.hasta > Date.now()) return g.v;
   try {
     const r = await haciaHojas({ accion: 'config' }, env.SYNC_TOKEN, env, llamar);
     const c: any = await r.json();
-    const v: Proveedor | undefined = c?.ok && (c.config?.ia === 'claude' || c.config?.ia === 'gemini') ? c.config.ia : undefined;
+    const k = c?.ok ? c.config ?? {} : {};
+    const v = {
+      ia: k.ia === 'claude' || k.ia === 'gemini' ? (k.ia as Proveedor) : undefined,
+      modelo: typeof k.gemini_modelo === 'string' && MODELO_GEMINI_RE.test(k.gemini_modelo) ? (k.gemini_modelo as string) : undefined,
+    };
     if (ttl > 0) cacheIA.set(env.SYNC_URL, { v, hasta: Date.now() + ttl });
     return v;
-  } catch { return undefined; }
+  } catch { return {}; }
 }
+const iaPrincipal = async (env: any, llamar: typeof fetch) => (await configIA(env, llamar)).ia;
 
 const SIN_CLAVES = (txt: string, env: any) => [env.ANTHROPIC_API_KEY, env.GEMINI_API_KEY].filter(Boolean).reduce((t: string, k: string) => t.split(k).join('***'), txt);
 
 /** Llamada mínima a un proveedor para el botón "Probar la IA" del administrador: dice si funciona y, si no, por qué (sin claves). */
 async function probarProveedor(p: Proveedor, env: any, llamar: typeof fetch): Promise<{ ok: boolean; estado: number; mensaje: string }> {
   try {
+    let usado = '', auto = false;
     const r = p === 'claude'
       ? await llamar('https://api.anthropic.com/v1/messages', {
         method: 'POST', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', 'x-api-key': env.ANTHROPIC_API_KEY },
         body: JSON.stringify({ model: String(env.MODELOS_PERMITIDOS ?? 'claude-haiku-5-5').split(',')[0].trim(), max_tokens: 8, messages: [{ role: 'user', content: 'Responde solo: ok' }] }),
       })
-      : await llamar(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL || 'gemini-2.5-flash')}:generateContent`, {
-        method: 'POST', headers: { 'content-type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
-        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'Responde solo: ok' }] }], generationConfig: { maxOutputTokens: 8 } }),
-      });
-    if (r.ok) { await r.body?.cancel().catch(() => {}); return { ok: true, estado: r.status, mensaje: 'Funciona.' }; }
+      : await (async () => {
+        const g = await generarConGemini({ contents: [{ role: 'user', parts: [{ text: 'Responde solo: ok' }] }], generationConfig: { maxOutputTokens: 8 } }, env, llamar);
+        usado = g.modelo; auto = g.autoElegido;
+        return g.r;
+      })();
+    if (r.ok) { await r.body?.cancel().catch(() => {}); return { ok: true, estado: r.status, mensaje: usado ? `Funciona con el modelo ${usado}${auto ? ' (elegido automáticamente porque el anterior no existe para tu cuenta)' : ''}.` : 'Funciona.' }; }
     const j: any = await r.json().catch(() => null);
     const msg = String(j?.error?.message ?? j?.error ?? '').slice(0, 220);
     return { ok: false, estado: r.status, mensaje: SIN_CLAVES(msg, env) || `Respondió ${r.status}.` };
@@ -307,12 +366,26 @@ async function administrarIA(request: Request, env: any, llamar: typeof fetch): 
   let c: any;
   try { c = JSON.parse(texto); } catch { return json(400, { ok: false, error: 'JSON inválido' }); }
   const disponibles = { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_API_KEY };
-  const estado = async () => ({ ok: true, principal: (await iaPrincipal(env, llamar)) ?? proveedores({ ...env, ANTHROPIC_API_KEY: 'x', GEMINI_API_KEY: 'x' })[0], disponibles, modeloGemini: env.GEMINI_MODEL || 'gemini-2.5-flash' });
+  const estado = async () => ({ ok: true, principal: (await iaPrincipal(env, llamar)) ?? proveedores({ ...env, ANTHROPIC_API_KEY: 'x', GEMINI_API_KEY: 'x' })[0], disponibles, modeloGemini: (await modeloGemini(env, llamar)).modelo });
   if (c?.accion === 'estado') { cacheIA.clear(); return json(200, await estado()); }
   if (c?.accion === 'guardar') {
     if (c.proveedor !== 'claude' && c.proveedor !== 'gemini') return json(400, { ok: false, error: 'Proveedor inválido' });
     const r = await haciaHojas({ accion: 'config_guardar', clave: 'ia', valor: c.proveedor }, env.SYNC_TOKEN_ADMIN, env, llamar);
     cacheIA.clear();
+    const j: any = await r.clone().json().catch(() => null);
+    return j?.ok ? json(200, await estado()) : r;
+  }
+  if (c?.accion === 'modelos') {
+    if (!disponibles.gemini) return json(200, { ok: true, modelos: [], actual: '', mensaje: 'Sin clave de Gemini en el servidor.' });
+    const todos = await listarModelosGemini(env, llamar);
+    const orden = [...todos].sort((a, b) => Number(/flash/.test(b)) - Number(/flash/.test(a)) || b.localeCompare(a));
+    return json(200, { ok: true, modelos: orden.slice(0, 30), actual: (await modeloGemini(env, llamar)).modelo, sugerido: mejorModelo(todos) ?? '' });
+  }
+  if (c?.accion === 'modelo') {
+    const m = c.modelo === 'auto' ? 'auto' : c.modelo;
+    if (typeof m !== 'string' || (m !== 'auto' && !MODELO_GEMINI_RE.test(m))) return json(400, { ok: false, error: 'Modelo inválido' });
+    const r = await haciaHojas({ accion: 'config_guardar', clave: 'gemini_modelo', valor: m }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    cacheIA.clear(); olvidarModeloDetectado();
     const j: any = await r.clone().json().catch(() => null);
     return j?.ok ? json(200, await estado()) : r;
   }

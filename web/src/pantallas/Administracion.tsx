@@ -4,7 +4,7 @@ import { avisar, confirmar } from '../componentes/dialogos';
 import { Boton, Cabecera, Campo, Cargando, Ficha, Hoja, Seccion, Segmentado } from '../componentes/ui';
 import { useApp } from '../contexto/App';
 import { ir } from '../router';
-import { elegirIA, enlaceDeAcceso, estadoIA, guardarUsuario, listarUsuarios, probarIA, type EstadoIA, type Proveedor, type ResultadoPrueba, type Usuario } from '../servicios/identidad';
+import { elegirIA, enlaceDeAcceso, elegirModeloGemini, estadoIA, guardarUsuario, listarUsuarios, modelosGemini, probarIA, type EstadoIA, type Proveedor, type ResultadoPrueba, type Usuario } from '../servicios/identidad';
 
 const ROLES: { valor: Rol; texto: string }[] = [{ valor: 'tecnico', texto: 'Técnico' }, { valor: 'supervisor', texto: 'Supervisor' }, { valor: 'admin', texto: 'Administrador' }];
 const TEXTO_ROL: Record<Rol, string> = { tecnico: 'Técnico', supervisor: 'Supervisor', admin: 'Administrador' };
@@ -22,6 +22,7 @@ export function Administracion() {
   const [ia, setIa] = useState<EstadoIA | null>(null);
   const [prueba, setPrueba] = useState<Record<Proveedor, ResultadoPrueba> | null>(null);
   const [probando, setProbando] = useState(false);
+  const [modelos, setModelos] = useState<{ modelos: string[]; actual: string; sugerido: string; mensaje?: string } | null>(null);
 
   const cargar = useCallback(async () => {
     try { setLista(await listarUsuarios()); setError(''); } catch (e: any) { setError(e.message ?? String(e)); }
@@ -31,6 +32,13 @@ export function Administracion() {
 
   const cambiarIA = async (p: Proveedor) => {
     try { setIa(await elegirIA(p)); setPrueba(null); } catch (e: any) { await avisar('No se pudo cambiar la IA', e.message ?? String(e)); }
+  };
+  const verModelos = async () => {
+    try { setModelos(await modelosGemini()); } catch (e: any) { await avisar('No se pudieron listar los modelos', e.message ?? String(e)); }
+  };
+  const usarModelo = async (m: string) => {
+    try { setIa(await elegirModeloGemini(m)); setModelos(null); setPrueba(null); await avisar('Modelo guardado', m === 'auto' ? 'Gemini elegirá solo un modelo disponible.' : `Gemini usará ${m}. Pulsa "Probar la IA" para comprobarlo.`); }
+    catch (e: any) { await avisar('No se pudo guardar el modelo', e.message ?? String(e)); }
   };
   const probar = async () => {
     setProbando(true); setPrueba(null);
@@ -86,6 +94,17 @@ export function Administracion() {
       <Segmentado valor={ia?.principal ?? 'gemini'} alCambiar={cambiarIA} opciones={[{ valor: 'gemini', texto: 'Gemini (gratis)' }, { valor: 'claude', texto: 'Claude' }]} />
       {ia && <p className="muted" style={{ margin: '8px 0' }}>Claves en el servidor: Gemini {ia.disponibles.gemini ? '✅' : '❌ falta'} · Claude {ia.disponibles.claude ? '✅' : '❌ falta'}. Modelo de Gemini: {ia.modeloGemini}.</p>}
       <Boton texto="Probar la IA" variante="secundario" cargando={probando} onClick={probar} />
+      <Boton texto="Elegir el modelo de Gemini" variante="secundario" onClick={verModelos} />
+      {modelos && (
+        <div role="group" aria-label="Modelos de Gemini" style={{ margin: '8px 0' }}>
+          {modelos.mensaje && <p className="muted">{modelos.mensaje}</p>}
+          {!modelos.mensaje && !modelos.modelos.length && <p className="muted">Google no devolvió modelos para esta clave. Revisa que la clave sea válida.</p>}
+          <div className="fichas">
+            <button type="button" className="ficha" onClick={() => usarModelo('auto')}>Automático{modelos.sugerido ? ` (${modelos.sugerido})` : ''}</button>
+            {modelos.modelos.map((m) => <button key={m} type="button" className={`ficha${m === modelos.actual ? ' activa' : ''}`} aria-pressed={m === modelos.actual} onClick={() => usarModelo(m)}>{m}</button>)}
+          </div>
+        </div>
+      )}
       {prueba && (['gemini', 'claude'] as Proveedor[]).map((p) => (
         <p key={p} role="status" style={{ margin: '8px 0' }}><b>{p === 'gemini' ? 'Gemini' : 'Claude'}:</b> {prueba[p].ok ? '✅ funciona' : `❌ ${prueba[p].estado ? `error ${prueba[p].estado} — ` : ''}${prueba[p].mensaje}`}</p>
       ))}

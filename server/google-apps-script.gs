@@ -386,7 +386,11 @@ function texto(v, max) { return String(v === undefined || v === null ? '' : v).s
 /* ---------------- Ajustes del sistema (pestaña _Config) ---------------- */
 
 var COLUMNAS_CONFIG = [['clave', 'Clave'], ['valor', 'Valor']];
-var CONFIG_PERMITIDA = { ia: ['gemini', 'claude'] }; // qué IA se intenta primero
+var CONFIG_PERMITIDA = { ia: ['gemini', 'claude'], gemini_modelo: /^gemini-[a-z0-9.\-]{1,60}$/ }; // qué IA va primero y qué modelo de Gemini usar
+function configValida(k, v) {
+  var p = CONFIG_PERMITIDA[k];
+  return !!p && (p instanceof RegExp ? p.test(v) : p.indexOf(v) >= 0);
+}
 
 /** { clave: valor } de la pestaña _Config (solo claves conocidas). */
 function leerConfig() {
@@ -395,14 +399,15 @@ function leerConfig() {
   if (!hoja || hoja.getLastRow() < 2) return cfg;
   hoja.getRange(2, 1, hoja.getLastRow() - 1, 2).getValues().forEach(function (r) {
     var k = String(r[0]).trim(), v = String(r[1]).trim().toLowerCase();
-    if (CONFIG_PERMITIDA[k] && CONFIG_PERMITIDA[k].indexOf(v) >= 0) cfg[k] = v;
+    if (configValida(k, v)) cfg[k] = v;
   });
   return cfg;
 }
 
 function guardarConfig(d) {
   var k = String(d.clave || ''), v = String(d.valor || '').trim().toLowerCase();
-  if (!CONFIG_PERMITIDA[k] || CONFIG_PERMITIDA[k].indexOf(v) < 0) return { ok: false, error: 'Ajuste no permitido.' };
+  if (k === 'gemini_modelo' && v === 'auto') v = '';   // "auto" = que el sistema elija el modelo disponible
+  if (!(CONFIG_PERMITIDA[k] && (v === '' && k === 'gemini_modelo' || configValida(k, v)))) return { ok: false, error: 'Ajuste no permitido.' };
   var hoja = hojaSistema(HOJA_CONFIG, COLUMNAS_CONFIG, ['clave', 'valor']);
   var enc = buscarFila(hoja, COLUMNAS_CONFIG, 0, k);
   if (enc.fila) hoja.getRange(enc.fila, 2).setValue(v); else hoja.appendRow([k, v]);

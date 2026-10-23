@@ -22,7 +22,12 @@ npx wrangler deploy server/worker.ts --name eli-luminaria-proxy --compatibility-
 ```
 Pega la clave cuando la pida (no la escribas en chats ni documentos). Sin `ANTHROPIC_API_KEY` el servidor usa solo Gemini.
 
-Modelo: `GEMINI_MODEL` (por defecto `gemini-2.5-flash`). Si Google lo retira o quieres otro con visión, cámbialo con `npx wrangler secret put GEMINI_MODEL --name eli-luminaria-proxy` (el nombre exacto está en ai.google.dev/gemini-api/docs/models).
+## Modelo de Gemini
+Google cambia y retira modelos con frecuencia (una cuenta nueva puede no tener acceso a los viejos y recibir "404"). Por eso:
+- **Por defecto es automático:** si el modelo de siempre no existe para tu cuenta, el servidor consulta la lista de modelos que tu clave puede usar, elige el flash estable más nuevo, reintenta y lo recuerda una hora.
+- **Elegirlo a mano:** Administración → Inteligencia artificial → **Elegir el modelo de Gemini**. Verás la lista real de tu cuenta; toca uno (o *Automático*). Si fijas uno y deja de existir, la IA falla y el aviso lo dice, en vez de cambiarlo a escondidas.
+- `GEMINI_MODEL` (secreto opcional) fija un modelo para todos si no hay uno elegido en la app.
+- **Probar la IA** muestra qué modelo funcionó.
 
 ## Cosas que debes saber de la capa gratuita
 - **Privacidad:** con la capa gratuita, Google puede usar lo que envías (las fotos) para mejorar sus productos. Las fotos son de luminarias en la vía pública; no se envía la ubicación ni el nombre del técnico. Si eso no es aceptable, activa la facturación en Google (la capa de pago no usa los datos para entrenar) o usa solo Claude.

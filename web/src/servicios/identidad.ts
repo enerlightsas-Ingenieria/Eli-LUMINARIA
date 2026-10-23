@@ -68,3 +68,5 @@ export const elegirIA = (proveedor: Proveedor): Promise<EstadoIA> => llamarProxy
 export async function probarIA(): Promise<Record<Proveedor, ResultadoPrueba>> {
   return (await llamarProxy('/ia', { accion: 'probar' }, 40000)).resultados;
 }
+export const modelosGemini = (): Promise<{ modelos: string[]; actual: string; sugerido: string; mensaje?: string }> => llamarProxy('/ia', { accion: 'modelos' });
+export const elegirModeloGemini = (modelo: string): Promise<EstadoIA> => llamarProxy('/ia', { accion: 'modelo', modelo });

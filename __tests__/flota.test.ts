@@ -1,5 +1,5 @@
 import { aEnlace, codificar, decodificar, describir } from '../src/lib/config';
-import { identificar, manejar, validarCuerpo, vaciarCacheUsuarios, vaciarCacheIA, aGemini, deGemini, proveedores } from '../server/worker';
+import { identificar, manejar, validarCuerpo, vaciarCacheUsuarios, vaciarCacheIA, olvidarModeloDetectado, mejorModelo, aGemini, deGemini, proveedores } from '../server/worker';
 import { TOOL } from '../src/services/analyzer';
 
 jest.mock('../src/services/settings', () => ({ cargarAjustes: async () => ({}) }));
@@ -577,5 +577,86 @@ describe('el administrador elige la IA y la prueba desde la app', () => {
     const f = jest.fn(async (u: any, i: any) => (String(u).includes('gs.example') ? m.gs.llamar(u, i) : new Response('{}', { status: 404 })));
     const r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, f as any);
     expect(r.status).toBe(404); expect((await r.json()).error).toContain('gemini 404; claude 404');
+  });
+});
+
+describe('Gemini: modelo no disponible en la cuenta (404)', () => {
+  const { crearServidor } = require('./helpers/hoja');
+  const imagen = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' } };
+  const analisis = JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 1024, tools: [TOOL], tool_choice: { type: 'tool', name: 'registrar_luminaria' }, messages: [{ role: 'user', content: [imagen, { type: 'text', text: 'x' }] }] });
+  const LISTA = { models: [
+    { name: 'models/gemini-2.0-flash', supportedGenerationMethods: ['generateContent'] }, { name: 'models/gemini-3.5-flash-lite', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-3.5-flash', supportedGenerationMethods: ['generateContent'] }, { name: 'models/gemini-3.5-flash-preview-05-20', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] }, { name: 'models/gemini-3.5-pro', supportedGenerationMethods: ['generateContent'] },
+  ] };
+  const montar = (viven: string[], extra: any = {}) => {
+    const gs = crearServidor();
+    const env: any = { GEMINI_API_KEY: 'AIza-g', APP_TOKENS: 'juan:tokJ', ADMIN_TOKENS: 'jefe:claveJefe', SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, ...extra };
+    const usados: string[] = [];
+    const f = jest.fn(async (u: any, i: any) => {
+      const url = String(u);
+      if (url.includes('gs.example')) return gs.llamar(u, i);
+      if (url.includes('/models?')) return new Response(JSON.stringify(LISTA), { status: 200 });
+      const m = url.match(/models\/([^:]+):generateContent/)![1];
+      usados.push(m);
+      return viven.includes(m)
+        ? new Response(JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { name: 'registrar_luminaria', args: { fabricante: 'G' } } }] } }] }), { status: 200 })
+        : new Response(JSON.stringify({ error: { message: `models/${m} is not found for API version v1beta` } }), { status: 404 });
+    });
+    const pet = (ruta: string, clave: string, cuerpo: string) => new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave }, body: cuerpo });
+    const ia = async (cuerpo: any) => (await manejar(pet('/ia', 'claveJefe', JSON.stringify(cuerpo)), env, f as any)).json();
+    return { gs, env, f, usados, pet, ia };
+  };
+  beforeEach(() => { vaciarCacheUsuarios(); vaciarCacheIA(); olvidarModeloDetectado(); });
+
+  it('mejorModelo elige el flash estable más nuevo; sin estables, el preview; ignora pro y lo que no es gemini', () => {
+    expect(mejorModelo(['gemini-2.0-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.5-pro'])).toBe('gemini-3.5-flash');
+    expect(mejorModelo(['gemini-2.5-flash', 'gemini-3.5-flash-lite'])).toBe('gemini-3.5-flash-lite');
+    expect(mejorModelo(['gemini-3.5-flash-preview-05-20', 'gemini-3.5-pro'])).toBe('gemini-3.5-flash-preview-05-20');
+    expect(mejorModelo(['gemini-3.5-pro', 'gemini-embedding'])).toBeUndefined();
+    expect(mejorModelo([])).toBeUndefined();
+  });
+
+  it('el modelo por defecto no existe → busca el disponible, reintenta y lo recuerda (no vuelve a fallar)', async () => {
+    const m = montar(['gemini-3.5-flash']);
+    const r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
+    expect(r.status).toBe(200); expect(r.headers.get('x-ia-proveedor')).toBe('gemini');
+    expect(m.usados).toEqual(['gemini-2.5-flash', 'gemini-3.5-flash']);
+    await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
+    expect(m.usados.slice(2)).toEqual(['gemini-3.5-flash']);               // la segunda vez va directo
+  });
+
+  it('si el administrador fijó el modelo y no existe, NO se cambia a escondidas: falla y lo dice', async () => {
+    const m = montar(['gemini-3.5-flash']);
+    expect((await m.ia({ accion: 'modelo', modelo: 'gemini-9-flash' })).ok).toBe(true);
+    const r = await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any);
+    expect(r.status).toBe(404); expect((await r.json()).error).toContain('gemini 404');
+    expect(m.usados).toEqual(['gemini-9-flash']);
+  });
+
+  it('el administrador lista los modelos, elige uno (se guarda en _Config) y puede volver a "auto"', async () => {
+    const m = montar(['gemini-3.5-flash']);
+    const l = await m.ia({ accion: 'modelos' });
+    expect(l.modelos).toContain('gemini-3.5-flash'); expect(l.modelos).not.toContain('text-embedding-004'); expect(l.sugerido).toBe('gemini-3.5-flash');
+    const e = await m.ia({ accion: 'modelo', modelo: 'gemini-3.5-flash' });
+    expect(e.modeloGemini).toBe('gemini-3.5-flash');
+    expect(m.gs.hoja('_Config')!.filas.some((f: any[]) => f[0] === 'gemini_modelo' && f[1] === 'gemini-3.5-flash')).toBe(true);
+    expect((await manejar(m.pet('/analizar', 'tokJ', analisis), m.env, m.f as any)).status).toBe(200);
+    expect(m.usados).toEqual(['gemini-3.5-flash']);
+    expect((await m.ia({ accion: 'modelo', modelo: 'auto' })).modeloGemini).toBe('gemini-2.5-flash');
+  });
+
+  it('valida el nombre del modelo y solo el administrador puede cambiarlo', async () => {
+    const m = montar([]);
+    for (const modelo of ['', 'GPT-4', 'gemini-../x', 'gemini-' + 'a'.repeat(70), 5 as any]) expect((await manejar(m.pet('/ia', 'claveJefe', JSON.stringify({ accion: 'modelo', modelo })), m.env, m.f as any)).status).toBe(400);
+    expect((await manejar(m.pet('/ia', 'tokJ', JSON.stringify({ accion: 'modelo', modelo: 'gemini-3.5-flash' })), m.env, m.f as any)).status).toBe(401);
+    expect((await manejar(m.pet('/ia', 'tokJ', JSON.stringify({ accion: 'modelos' })), m.env, m.f as any)).status).toBe(401);
+  });
+
+  it('"Probar la IA" dice qué modelo funcionó y si se eligió solo', async () => {
+    const m = montar(['gemini-3.5-flash']);
+    const j = await m.ia({ accion: 'probar' });
+    expect(j.resultados.gemini.ok).toBe(true);
+    expect(j.resultados.gemini.mensaje).toContain('gemini-3.5-flash'); expect(j.resultados.gemini.mensaje).toContain('automáticamente');
   });
 });
