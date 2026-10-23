@@ -1,15 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { resumenSync } from '@compartido/core/sync';
 import type { Luminaria } from '@compartido/types';
 import { Foto } from '../componentes/Foto';
 import { Icono } from '../componentes/Icono';
 import { TarjetaJornada } from '../componentes/TarjetaJornada';
-import { Cabecera, Ficha, Hoja } from '../componentes/ui';
+import { Boton, Cabecera, Cargando, Ficha, Hoja } from '../componentes/ui';
 import { avisar } from '../componentes/dialogos';
 import { useApp } from '../contexto/App';
 import { ir } from '../router';
 import { exportar, Formato } from '../servicios/exportar';
-import { sincronizacion } from '../servicios/nucleo';
+import { analizarLote, sincronizacion } from '../servicios/nucleo';
+import { sinAnalizar } from '../servicios/analisisPendiente';
+import { useEnLinea } from '../servicios/red';
 
 type Filtro = 'todas' | 'pendientes' | 'sinGps';
 
@@ -19,6 +21,11 @@ export function Registros() {
   const [filtro, setFiltro] = useState<Filtro>('todas');
   const [menuExportar, setMenuExportar] = useState(false);
   const [sincronizando, setSincronizando] = useState(false);
+  const enLinea = useEnLinea();
+  const [lote, setLote] = useState<{ hechas: number; total: number } | null>(null);
+  const cancelarLote = useRef<AbortController | null>(null);
+  const iaDisponible = ajustes.iaActiva !== false && !!ajustes.apiKey;
+  const porAnalizar = useMemo(() => items.filter(sinAnalizar), [items]);
 
   const visibles = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -42,6 +49,16 @@ export function Registros() {
     finally { setSincronizando(false); }
   };
 
+  const analizarAhora = async () => {
+    cancelarLote.current = new AbortController();
+    setLote({ hechas: 0, total: porAnalizar.length });
+    const r = await analizarLote(items, (hechas, total) => setLote({ hechas, total }), cancelarLote.current.signal);
+    setLote(null); cancelarLote.current = null;
+    await refrescar();
+    await avisar(r.error ? 'Análisis detenido' : 'Análisis terminado',
+      `${r.hechas} luminaria(s) analizada(s)${r.sinDatos ? `, ${r.sinDatos} sin datos legibles` : ''}.${r.error ? `\n\nMotivo: ${r.error}\nLas pendientes siguen en la lista; puedes reintentar.` : ''}`);
+  };
+
   const formatos: { f: Formato; texto: string }[] = [
     { f: 'csv', texto: 'CSV (Excel)' }, { f: 'geojson', texto: 'GeoJSON (QGIS / ArcGIS)' }, { f: 'kml', texto: 'KML (Google Earth)' },
   ];
@@ -60,6 +77,13 @@ export function Registros() {
         </div>
       )}
       <TarjetaJornada />
+      {iaDisponible && porAnalizar.length > 0 && (
+        <div className="tarjeta" style={{ marginBottom: 10 }} data-testid="lote-ia">
+          <b>{porAnalizar.length} luminaria{porAnalizar.length === 1 ? '' : 's'} sin analizar con IA</b>
+          <p className="muted" style={{ fontSize: 14, margin: '4px 0 10px' }}>Se capturaron sin conexión o sin IA. Cada análisis consume crédito de la API: tú decides cuándo.</p>
+          <Boton texto={enLinea ? 'Analizar ahora' : 'Necesitas conexión'} variante="secundario" icono="chispa" deshabilitado={!enLinea} onClick={analizarAhora} />
+        </div>
+      )}
       <div className="buscador"><Icono nombre="buscar" tam={18} /><input aria-label="Buscar" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar marca, código, técnico…" /></div>
       <div className="filtros" role="group" aria-label="Filtros">
         {([['todas', 'Todas'], ['pendientes', `Sin sincronizar (${pendientes})`], ['sinGps', 'Sin coordenada']] as [Filtro, string][]).map(([f, t]) => (
@@ -92,6 +116,12 @@ export function Registros() {
         ))}
       </div>
 
+      {lote && (
+        <div className="cubierta" role="status">
+          <Cargando texto={`Analizando con IA… ${lote.hechas}/${lote.total}`} />
+          <Boton texto="Detener" variante="secundario" bloque={false} onClick={() => cancelarLote.current?.abort()} />
+        </div>
+      )}
       <button type="button" className="fab" onClick={() => ir('/capturar')} aria-label="Nueva luminaria"><Icono nombre="camara" />Nueva</button>
       <Hoja abierta={menuExportar} alCerrar={() => setMenuExportar(false)} titulo="Exportar proyecto" subtitulo={`${items.length} luminarias`}
         opciones={formatos.map(({ f, texto }) => ({ texto, onClick: () => { exportar(f, items, proyecto ?? undefined).catch((e) => avisar('No se pudo exportar', e.message ?? String(e))); } }))} />

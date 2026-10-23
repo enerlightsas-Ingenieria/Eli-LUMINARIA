@@ -118,3 +118,10 @@ h1, h2, p { margin: 0; }
 .interruptor { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; cursor: pointer; }
 .interruptor input { width: 22px; height: 22px; accent-color: var(--primario); flex: none; }
 code { background: var(--superficie2); padding: 1px 5px; border-radius: 4px; }
+.avisos { position: sticky; top: 0; z-index: 8; }
+.banda { background: var(--superficie2); color: var(--texto); padding: 8px 14px; font-size: 14px; border-bottom: 1px solid var(--borde); }
+.banda.sin-conexion { background: #7a4b00; color: #fff; border-color: #b36b00; }
+.banda.ok { background: color-mix(in srgb, var(--ok) 22%, var(--superficie)); }
+.banda.aviso { background: color-mix(in srgb, var(--aviso) 25%, var(--superficie)); }
+.banda .enlace { background: none; border: 0; color: var(--primario); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 0; }
+.cabecera { top: 0; }

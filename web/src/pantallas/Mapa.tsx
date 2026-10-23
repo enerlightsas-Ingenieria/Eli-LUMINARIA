@@ -6,9 +6,11 @@ import { colorTecnologia, Marca, MapaLeaflet } from '../componentes/MapaLeaflet'
 import { useApp } from '../contexto/App';
 import { ir } from '../router';
 import { obtenerPosicion } from '../servicios/gps';
+import { useEnLinea } from '../servicios/red';
 
 export function Mapa() {
   const { items, proyecto } = useApp();
+  const enLinea = useEnLinea();
   const [ajustar, setAjustar] = useState(1);
   const [yo, setYo] = useState<{ lat: number; lng: number; n: number } | null>(null);
 
@@ -27,6 +29,7 @@ export function Mapa() {
   return (
     <>
       <Cabecera titulo="Mapa" subtitulo={`${proyecto?.nombre ?? ''} · ${marcas.length} con coordenada`} acciones={[{ icono: 'mapa', etiqueta: 'Ajustar a todas', onClick: () => setAjustar((n) => n + 1) }]} />
+      {!enLinea && <p className="aviso" role="status" data-testid="mapa-sin-conexion">Sin conexión: el fondo del mapa no carga, pero tus luminarias se muestran igual como puntos.</p>}
       <MapaLeaflet marcas={marcas} ajustar={ajustar} yo={yo} alCentrarEnMi={centrar} />
     </>
   );

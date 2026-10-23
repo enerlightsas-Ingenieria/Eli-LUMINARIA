@@ -106,6 +106,11 @@ export async function listarLuminarias(proyectoId: number): Promise<Luminaria[]>
   return ls.sort((a, b) => b.id - a.id);
 }
 
+export async function obtenerLuminaria(id: number): Promise<Luminaria | undefined> {
+  const db = await abrir();
+  return (await pedir(db.transaction('luminarias').objectStore('luminarias').get(id))) as Luminaria | undefined;
+}
+
 export async function pendientesDeSync(proyectoId: number): Promise<Luminaria[]> {
   return (await listarLuminarias(proyectoId)).filter((l) => !l.sincronizado).sort((a, b) => a.id - b.id);
 }

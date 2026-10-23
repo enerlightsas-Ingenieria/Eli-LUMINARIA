@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { AutoSync } from './componentes/AutoSync';
+import { EstadoConexion } from './componentes/EstadoConexion';
 import { Dialogos } from './componentes/dialogos';
 import { Icono } from './componentes/Icono';
 import { Cargando } from './componentes/ui';
@@ -74,6 +75,7 @@ function Cuerpo() {
   }
   return (
     <div className="app">
+      <EstadoConexion />
       <main className={`pantalla${conPestanas ? '' : ' sin-pestanas'}`}>{pantalla}</main>
       {conPestanas && <Pestanas activa={primero} supervisor={supervisor} />}
       {!supervisor && <AutoSync />}

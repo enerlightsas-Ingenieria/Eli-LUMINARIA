@@ -67,7 +67,7 @@ test('técnico: configura por enlace, captura con IA, guarda y se sincroniza a l
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);   // sincronización automática (3 s después de guardar)
   const fila = filas(b, 'Barrio A')[0];
   expect(fila).toMatchObject({ Marca: 'Philips', 'Código activo': 'P-001', Técnico: 'Ana', Tecnología: 'LED', 'Pines fotocelda': 7, Latitud: 4.711, Longitud: -74.0721, 'Origen de la foto': 'camara' });
-  await expect(page.getByText('Pendiente')).toHaveCount(0);                          // ya no figura como pendiente
+  await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);                          // ya no figura como pendiente
 });
 
 test('dos técnicos: lo que hace uno aparece en el otro; las ediciones y borrados se propagan', async ({ browser }) => {
@@ -113,14 +113,14 @@ test('sin conexión: captura manual con opciones rápidas y se envía sola al vo
   await page.getByRole('group', { name: 'Opciones para Pines de la fotocelda' }).getByRole('button', { name: '7', exact: true }).click();
   await expect(page.getByLabel('Tecnología', { exact: true })).toHaveValue('LED');
   await guardar(page);
-  await expect(page.getByText('Pendiente')).toBeVisible();
+  await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
   expect(b.estado.llamadasIA).toBe(0);                                              // offline: no se intentó la IA
   expect(filas(b, 'Barrio A')).toHaveLength(0);
 
   await ctx.setOffline(false);                                                       // vuelve la señal
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);
   expect(filas(b, 'Barrio A')[0]).toMatchObject({ Marca: 'Schréder', Tecnología: 'LED', 'Pines fotocelda': 7 });
-  await expect(page.getByText('Pendiente')).toHaveCount(0);
+  await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);
 });
 
 test('jornada: el supervisor ve en su panel quién trabaja, dónde, y cuándo pausa o termina', async ({ browser }) => {
@@ -201,16 +201,13 @@ test('modo terceros: exige jornada, solo cámara, GPS preciso y coordenadas bloq
   expect(f['Alertas']).toBe('');                                                      // la auditoría del servidor no ve nada raro
 });
 
-test('PWA: una vez cargada, abre sin conexión', async ({ browser }) => {
+test('PWA: desde la PRIMERA visita queda lista y abre sin conexión (sin recargar antes)', async ({ browser }) => {
   const b = crearBackend();
   const { ctx, page } = await telefono(browser, b);
   await page.goto(WEB);
-  await expect(page.getByRole('heading', { name: 'ELI-LUMINARIA' })).toBeVisible();
-  await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
-  await page.reload();                                                                // ya controlada por el service worker: guarda los archivos
-  await page.waitForFunction(() => !!navigator.serviceWorker.controller);
+  await expect(page.getByTestId('banda-lista')).toBeVisible({ timeout: 20_000 });      // "Lista para trabajar sin conexión"
   await ctx.setOffline(true);
-  await page.reload();
+  await page.reload();                                                                  // navegación completa sin internet: la sirve el service worker
   await expect(page.getByRole('heading', { name: 'ELI-LUMINARIA' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Nueva luminaria' })).toBeVisible();
 });

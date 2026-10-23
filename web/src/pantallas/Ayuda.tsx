@@ -32,8 +32,13 @@ export function Ayuda() {
       )}
       <Seccion>Permisos</Seccion>
       <p className="muted">Necesita <b>cámara</b> y <b>ubicación</b>. Si los bloqueaste, toca el candado junto a la dirección (o en iPhone: Ajustes → Safari → Cámara/Ubicación) y permítelos. La página debe abrirse con <b>https</b>.</p>
-      <Seccion>Sin conexión</Seccion>
-      <p className="muted">Una vez abierta con internet, la app abre sin conexión. Puedes capturar y guardar; todo se envía solo al volver la señal. La IA y el mapa necesitan internet. En iPhone, instala la app en la pantalla de inicio para que el sistema no borre tus datos pendientes.</p>
+      <Seccion>Trabajar sin conexión</Seccion>
+      <ol className="muted" style={{ paddingLeft: 20, margin: 0 }}>
+        <li><b>Prepárala una vez con internet:</b> abre la app y espera el aviso <b>✅ Lista para trabajar sin conexión</b> (también lo ves en Ajustes → Uso sin conexión). Basta con hacerlo una vez, y de nuevo cuando salga una versión nueva.</li>
+        <li><b>En campo, sin señal:</b> abre la app desde su ícono, captura, llena los datos (con las opciones rápidas) y guarda. Verás la banda <b>📴 Sin conexión</b>; lo guardado queda como <b>Pendiente</b>.</li>
+        <li><b>Al volver la señal:</b> se envía solo. Si capturaste sin IA, aparecerá <b>"N luminarias sin analizar"</b> y tú decides cuándo analizarlas (cada análisis consume crédito de la API).</li>
+      </ol>
+      <p className="muted" style={{ marginTop: 8 }}>Necesitan internet: la IA, el fondo del mapa y la sincronización. En iPhone, instala la app en la pantalla de inicio para que Safari no borre tus datos pendientes. Si tu empresa quiere cero costo de IA, puedes apagarla en Ajustes.</p>
       <Seccion>Jornada</Seccion>
       <p className="muted">Durante la jornada activa mantén la página abierta: la pantalla se mantiene encendida y se envía tu posición cada 5 minutos. Si cambias de aplicación o bloqueas el teléfono, el envío se detiene y se reanuda al volver.</p>
       <Seccion>Diferencias con la app móvil</Seccion>

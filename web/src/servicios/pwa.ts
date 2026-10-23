@@ -33,3 +33,16 @@ export function registrarServiceWorker() {
 export async function pedirAlmacenamientoPersistente(): Promise<boolean> {
   try { return (await navigator.storage?.persist?.()) ?? false; } catch { return false; }
 }
+
+export type EstadoSinConexion = 'lista' | 'preparando' | 'no-disponible';
+
+/** ¿Ya están guardados en este dispositivo todos los archivos de la app para abrirla sin internet? */
+export async function estadoSinConexion(): Promise<EstadoSinConexion> {
+  if (!import.meta.env.PROD || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return 'no-disponible';
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg || reg.active?.state !== 'activated') return 'preparando';
+    // el service worker solo se activa cuando terminó de guardar todos los archivos (precache.json)
+    return (await caches.keys()).some((k) => k.startsWith('eli-')) ? 'lista' : 'preparando';
+  } catch { return 'no-disponible'; }
+}

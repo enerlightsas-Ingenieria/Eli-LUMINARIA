@@ -34,6 +34,7 @@ export function Editar({ id }: { id: string }) {
   const lRef = useRef<LuminariaBorrador | null>(null);
   lRef.current = l;
   const terceros = ajustes.modoTerceros;
+  const iaDisponible = ajustes.iaActiva !== false && !!ajustes.apiKey;
 
   const iniciar = (b: LuminariaBorrador, a?: string) => {
     cargado.current = true;
@@ -153,7 +154,7 @@ export function Editar({ id }: { id: string }) {
       {!!aviso && <p className="aviso" role="status">{aviso}</p>}
       {!!l.confianza && <div style={{ marginBottom: 8 }}><Ficha texto={`Confianza IA: ${l.confianza} — verifica los datos`} color={l.confianza === 'alta' ? 'ok' : l.confianza === 'media' ? 'aviso' : 'peligro'} /></div>}
       <div className="pila">
-        <Boton texto="Re-analizar con IA" variante="secundario" icono="chispa" cargando={ocupado === 'Analizando con IA…'} deshabilitado={!l.fotos.length} onClick={reanalizar} />
+        {iaDisponible && <Boton texto="Re-analizar con IA" variante="secundario" icono="chispa" cargando={ocupado === 'Analizando con IA…'} deshabilitado={!l.fotos.length} onClick={reanalizar} />}
         {!!anterior && <Boton texto="Copiar datos del último registro" variante="secundario" icono="copiar" onClick={copiarDelAnterior} />}
       </div>
 

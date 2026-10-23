@@ -21,6 +21,8 @@ export interface Ajustes {
   precisionMaxM: number;
   /** Solo web: la cuenta es de supervisor (ve el panel del equipo). */
   supervisor?: boolean;
+  /** Solo web: permite apagar el análisis con IA (cada análisis consume crédito de la API). Por defecto activado. */
+  iaActiva?: boolean;
 }
 
 export const MODELO_POR_DEFECTO = 'claude-sonnet-5-5';

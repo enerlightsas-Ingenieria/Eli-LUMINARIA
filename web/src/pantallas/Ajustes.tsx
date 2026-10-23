@@ -10,6 +10,7 @@ import { ir } from '../router';
 import { cargarAjustes, guardarAjustes } from '../servicios/ajustes';
 import { sincronizacion } from '../servicios/nucleo';
 import { pedirAlmacenamientoPersistente } from '../servicios/pwa';
+import { useEstadoSinConexion } from '../servicios/usoSinConexion';
 
 declare const __VERSION__: string;
 
@@ -19,6 +20,7 @@ export function AjustesPantalla() {
   const [codigo, setCodigo] = useState('');
   const [sync, setSync] = useState(false);
   const [persistente, setPersistente] = useState<boolean | null>(null);
+  const estadoOffline = useEstadoSinConexion();
 
   // Se recarga al abrir y cada vez que se importa una configuración: si no, "Guardar" pisaría con valores viejos lo recién importado.
   useEffect(() => { cargarAjustes().then(setA); }, [versionConfig]);
@@ -49,8 +51,13 @@ export function AjustesPantalla() {
       <Seccion>Apariencia</Seccion>
       <Segmentado valor={a.tema} alCambiar={(tema) => { cambiar({ tema }); document.documentElement.dataset.tema = tema; }} opciones={[{ valor: 'auto', texto: 'Automático' }, { valor: 'claro', texto: 'Claro' }, { valor: 'oscuro', texto: 'Oscuro' }]} />
 
+      <Seccion>Uso sin conexión</Seccion>
+      <p data-testid="estado-offline" style={{ marginBottom: 8 }}>{estadoOffline === 'lista' ? '✅ Lista: puedes abrir la app y capturar sin internet.' : estadoOffline === 'preparando' ? '⏳ Preparando… mantén la página abierta con internet unos segundos.' : '⚠️ No disponible en este navegador (abre la página con https).'}</p>
+      <p className="muted">Sin señal puedes capturar, llenar datos y guardar: todo queda en este dispositivo y se envía solo al volver la conexión. La IA, el mapa de fondo y la sincronización sí necesitan internet.</p>
+
       <Seccion>Análisis con IA</Seccion>
-      <p className="muted" style={{ marginBottom: 12 }}>Usa Claude (visión) a través del servidor de tu empresa, que guarda la clave de la IA. Aquí va el <b>token personal</b> que te dieron, no la clave de Anthropic.</p>
+      <label className="interruptor"><input type="checkbox" checked={a.iaActiva !== false} onChange={(e) => cambiar({ iaActiva: e.target.checked })} /> Usar análisis con IA (cada análisis consume crédito de la API)</label>
+      <p className="muted" style={{ marginBottom: 12 }}>Apágalo para trabajar 100 % manual, sin ningún costo de IA. Usa Claude (visión) a través del servidor de tu empresa, que guarda la clave de la IA. Aquí va el <b>token personal</b> que te dieron, no la clave de Anthropic.</p>
       <Campo etiqueta="Servidor (URL del proxy)" tipo="url" valor={a.endpoint} alCambiar={(t) => cambiar({ endpoint: t })} />
       <Campo etiqueta="Token personal" secreto valor={a.apiKey} alCambiar={(t) => cambiar({ apiKey: t })} />
       <Campo etiqueta="Modelo" valor={a.modelo} alCambiar={(t) => cambiar({ modelo: t })} />

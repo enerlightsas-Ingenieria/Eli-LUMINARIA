@@ -14,5 +14,5 @@
     "baseUrl": ".",
     "paths": { "@compartido/*": ["../src/*"] }
   },
-  "include": ["src", "tests", "e2e", "vite.config.ts", "playwright.config.ts", "../src/core", "../src/lib", "../src/types.ts", "../server/worker.ts", "../__tests__/helpers/hoja.ts"]
+  "include": ["src", "tests", "e2e", "plugins", "vite.config.ts", "playwright.config.ts", "../src/core", "../src/lib", "../src/types.ts", "../server/worker.ts", "../__tests__/helpers/hoja.ts"]
 }

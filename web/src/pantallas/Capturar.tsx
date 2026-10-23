@@ -37,6 +37,7 @@ export function Capturar() {
   const cancelar = useRef<AbortController | null>(null);
 
   const terceros = ajustes.modoTerceros;
+  const iaDisponible = ajustes.iaActiva !== false && !!ajustes.apiKey;
   const jornadaActiva = estado?.fase === 'activa';
 
   const refrescarGps = useCallback(async () => {
@@ -158,8 +159,8 @@ export function Capturar() {
       </div>
 
       <div className="pila" style={{ marginTop: 24 }}>
-        <Boton texto="Analizar con IA" icono="chispa" deshabilitado={!tomadas.length || !evaluacion.ok} onClick={() => continuar(true)} />
-        <Boton texto="Llenar manualmente" variante="secundario" deshabilitado={!tomadas.length || !evaluacion.ok} onClick={() => continuar(false)} />
+        {iaDisponible && <Boton texto="Analizar con IA" icono="chispa" deshabilitado={!tomadas.length || !evaluacion.ok} onClick={() => continuar(true)} />}
+        <Boton texto="Llenar manualmente" variante={iaDisponible ? 'secundario' : 'primario'} deshabilitado={!tomadas.length || !evaluacion.ok} onClick={() => continuar(false)} />
       </div>
 
       {camaraEn !== null && (

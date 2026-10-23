@@ -6,6 +6,7 @@ import { crearSincronizador } from '@compartido/core/sync';
 import type { Ajustes } from '@compartido/core/ajustes';
 import * as almacen from './almacen';
 import { cargarAjustes } from './ajustes';
+import { analizarPendientes, ResultadoLote } from './analisisPendiente';
 import { base64DeFoto } from './fotos';
 import { obtenerPosicion } from './gps';
 
@@ -27,6 +28,15 @@ export const jornada = crearJornada({
   plataforma: () => 'web',
   version: () => (typeof __VERSION__ === 'string' ? __VERSION__ : ''),
 });
+
+/** Analiza en lote lo capturado sin IA (manual, el usuario decide cuándo: cada análisis consume crédito). */
+export const analizarLote = (items: import('@compartido/types').Luminaria[], alProgreso?: (h: number, t: number) => void, senal?: AbortSignal): Promise<ResultadoLote> =>
+  analizarPendientes(items, {
+    analizar: (b, c) => analizarFotos(b, c),
+    leerFotos: (ids) => Promise.all(ids.map(base64DeFoto)),
+    leer: almacen.obtenerLuminaria,
+    guardar: (l) => almacen.guardarLuminaria(l),
+  }, alProgreso, senal);
 
 /** Panel de supervisión: datos del equipo vía el proxy (requiere un token de ADMIN_TOKENS). */
 export async function datosEquipo(): Promise<any> {

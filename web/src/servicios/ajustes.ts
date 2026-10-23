@@ -4,7 +4,7 @@ const CLAVE = 'eli.ajustes.v1';
 
 export const ajustesPorDefecto = (): Ajustes => ({
   apiKey: '', endpoint: ENDPOINT_POR_DEFECTO, modelo: MODELO_POR_DEFECTO, syncUrl: '', syncToken: '', syncFotos: false,
-  autoSync: true, tecnico: '', tema: 'auto', modoTerceros: false, precisionMaxM: 20, supervisor: false,
+  autoSync: true, tecnico: '', tema: 'auto', modoTerceros: false, precisionMaxM: 20, supervisor: false, iaActiva: true,
 });
 
 export async function cargarAjustes(): Promise<Ajustes> {
