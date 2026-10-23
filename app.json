@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "ELI-LUMINARIA",
+    "slug": "eli-luminaria",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "eliluminaria",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": { "image": "./assets/splash-icon.png", "resizeMode": "contain", "backgroundColor": "#0F1B2D" },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "co.enerlight.eliluminaria",
+      "buildNumber": "1",
+      "infoPlist": { "ITSAppUsesNonExemptEncryption": false }
+    },
+    "android": {
+      "package": "co.enerlight.eliluminaria",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "backgroundColor": "#0F1B2D",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": ["CAMERA", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "ACCESS_MEDIA_LOCATION"],
+      "blockedPermissions": ["RECORD_AUDIO", "READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"],
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      ["expo-image-picker", { "cameraPermission": "ELI-LUMINARIA usa la cámara para fotografiar luminarias.", "photosPermission": "Permite elegir fotos de luminarias de tu galería.", "microphonePermission": false }],
+      ["expo-location", { "locationWhenInUsePermission": "ELI-LUMINARIA usa tu ubicación para registrar la coordenada de cada luminaria." }],
+      "expo-sqlite",
+      "expo-secure-store"
+    ]
+  }
+}

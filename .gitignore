@@ -1,0 +1,12 @@
+node_modules/
+.expo/
+dist/
+web-build/
+*.apk
+*.aab
+*.keystore
+.env*
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
