@@ -1,10 +1,10 @@
+import type { Posicion } from '../core/tipos';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
 export interface Foto { uri: string; base64: string; origen: 'camara' | 'galeria'; exifLat?: number; exifLng?: number }
-/** simulada: Android marca la ubicación como proveniente de una app de GPS falso (iOS no expone este dato). */
-export interface Posicion { latitud: number; longitud: number; precisionM: number | null; simulada?: boolean }
+export type { Posicion };
 
 /** Abre cámara o galería, reduce la imagen (1280 px) y devuelve JPEG + base64. */
 export async function tomarFoto(origen: 'camara' | 'galeria'): Promise<Foto | null> {

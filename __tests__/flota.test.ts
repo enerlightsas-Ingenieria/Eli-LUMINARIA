@@ -149,3 +149,106 @@ describe('proxy de IA (worker)', () => {
     expect(validarCuerpo(JSON.stringify(cuerpo()), ['claude-sonnet-5-5']).ok).toBe(true);
   });
 });
+
+describe('proxy: CORS, puerta de sincronización y panel de supervisión (para la web)', () => {
+  const env: any = {
+    ANTHROPIC_API_KEY: 'sk-secreta', APP_TOKENS: 'juan:tokJ', ADMIN_TOKENS: 'sup:tokS',
+    SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'TOKEN-HOJA', SYNC_TOKEN_ADMIN: 'TOKEN-ADMIN-HOJA',
+  };
+  const req = (ruta: string, cuerpo: any, token = 'tokJ', extra: any = {}) =>
+    new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': token, ...(extra.headers ?? {}) }, body: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo) });
+  const hojas = (respuesta: any = { ok: true }) => jest.fn().mockResolvedValue(new Response(JSON.stringify(respuesta), { status: 200 }));
+  const cuerpoEnviado = (f: jest.Mock) => JSON.parse((f.mock.calls[0] as any)[1].body);
+
+  it('responde el preflight de CORS (el navegador lo exige por la cabecera x-api-key)', async () => {
+    const r = await manejar(new Request('https://p.example/sync', { method: 'OPTIONS', headers: { origin: 'https://app.example' } }), env, hojas());
+    expect(r.status).toBe(204);
+    expect(r.headers.get('access-control-allow-origin')).toBe('*');
+    expect(r.headers.get('access-control-allow-headers')).toContain('x-api-key');
+    expect(r.headers.get('access-control-allow-methods')).toContain('POST');
+  });
+
+  it('con ORIGENES_PERMITIDOS solo refleja los orígenes de la lista', async () => {
+    const e = { ...env, ORIGENES_PERMITIDOS: 'https://app.example, https://otra.example' };
+    const ok = await manejar(new Request('https://p.example/sync', { method: 'OPTIONS', headers: { origin: 'https://otra.example' } }), e, hojas());
+    expect(ok.headers.get('access-control-allow-origin')).toBe('https://otra.example');
+    const mal = await manejar(new Request('https://p.example/sync', { method: 'OPTIONS', headers: { origin: 'https://malo.example' } }), e, hojas());
+    expect(mal.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('las respuestas de error también llevan CORS (si no, la web vería un error opaco)', async () => {
+    const r = await manejar(req('/sync', {}, 'robado'), env, hojas());
+    expect(r.status).toBe(401);
+    expect(r.headers.get('access-control-allow-origin')).toBe('*');
+  });
+
+  describe('/sync', () => {
+    it('reenvía al script con el token del script y NUNCA el que mande el cliente', async () => {
+      const f = hojas({ ok: true, recibidas: 1 });
+      const r = await manejar(req('/sync', { token: 'quiero-otro', proyecto: { nombre: 'A' }, luminarias: [{ uuid: 'u1', tecnico: 'Ana' }] }), env, f);
+      expect(await r.json()).toEqual({ ok: true, recibidas: 1 });
+      expect((f.mock.calls[0] as any)[0]).toBe('https://gs.example/exec');
+      const b = cuerpoEnviado(f);
+      expect(b.token).toBe('TOKEN-HOJA');
+      expect(b.luminarias[0]).toEqual({ uuid: 'u1', tecnico: 'Ana' });          // los datos pasan intactos
+    });
+
+    it('en los latidos el técnico lo pone el proxy según el token (no se puede suplantar)', async () => {
+      const f = hojas();
+      await manejar(req('/sync', { accion: 'latido', tecnico: 'Alguien Más', dispositivo: 'd', estado: 'activa' }), env, f);
+      expect(cuerpoEnviado(f).tecnico).toBe('juan');
+    });
+
+    it('solo permite subir, listar y latir: nada de acciones de administración', async () => {
+      const f = hojas();
+      for (const accion of ['equipo', 'borrar', 'x']) {
+        expect((await manejar(req('/sync', { accion }), env, f)).status).toBe(400);
+      }
+      expect(f).not.toHaveBeenCalled();
+      expect((await manejar(req('/sync', { accion: 'listar', proyecto: {}, desde: '' }), env, f)).status).toBe(200);
+    });
+
+    it('rechaza sin token, JSON inválido, arreglos, y cuerpos enormes', async () => {
+      const f = hojas();
+      expect((await manejar(req('/sync', {}, ''), env, f)).status).toBe(401);
+      expect((await manejar(req('/sync', '{no json'), env, f)).status).toBe(400);
+      expect((await manejar(req('/sync', [1, 2]), env, f)).status).toBe(400);
+      expect((await manejar(req('/sync', 'x'.repeat(12_000_001)), env, f)).status).toBe(413);
+      expect(f).not.toHaveBeenCalled();
+    });
+
+    it('si el script de Google responde basura o no responde, devuelve un error claro (502)', async () => {
+      const html = jest.fn().mockResolvedValue(new Response('<html>Error</html>', { status: 200 }));
+      const a = await manejar(req('/sync', {}), env, html);
+      expect(a.status).toBe(502); expect((await a.json()).ok).toBe(false);
+      const caido = jest.fn().mockRejectedValue(new Error('boom'));
+      expect((await manejar(req('/sync', {}), env, caido)).status).toBe(502);
+    });
+
+    it('avisa si el proxy no tiene configurado el destino', async () => {
+      const r = await manejar(req('/sync', {}), { ...env, SYNC_URL: undefined }, hojas());
+      expect(r.status).toBe(500); expect((await r.json()).error).toMatch(/SYNC_URL/);
+    });
+  });
+
+  describe('/equipo (panel de supervisión)', () => {
+    it('un técnico NO puede ver el panel; un administrador sí, y con el token administrador del script', async () => {
+      const f = hojas({ ok: true, tecnicos: [{ tecnico: 'Ana' }], luminarias: [], calidad: {} });
+      expect((await manejar(req('/equipo', {}, 'tokJ'), env, f)).status).toBe(401);
+      expect(f).not.toHaveBeenCalled();
+      const r = await manejar(req('/equipo', {}, 'tokS'), env, f);
+      expect(r.status).toBe(200); expect((await r.json()).tecnicos[0].tecnico).toBe('Ana');
+      expect(cuerpoEnviado(f)).toEqual({ accion: 'equipo', token: 'TOKEN-ADMIN-HOJA' });
+    });
+
+    it('un token de administrador no sirve para analizar ni sincronizar (separación de funciones)', async () => {
+      expect((await manejar(req('/sync', {}, 'tokS'), env, hojas())).status).toBe(401);
+      expect((await manejar(req('/', {}, 'tokS'), env, hojas())).status).toBe(401);
+    });
+  });
+
+  it('rutas desconocidas → 404 y GET → 405', async () => {
+    expect((await manejar(req('/otra', {}), env, hojas())).status).toBe(404);
+    expect((await manejar(new Request('https://p.example/sync', { method: 'GET' }), env, hojas())).status).toBe(405);
+  });
+});

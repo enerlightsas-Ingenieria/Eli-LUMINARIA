@@ -8,6 +8,7 @@
  *   { token, proyecto:{uuid,nombre}, luminarias:[...], borradas:[uuid] }   → guarda/actualiza/marca borradas
  *   { token, proyecto:{...}, accion:'listar', desde:'ISO' }                → devuelve lo recibido desde esa marca
  *   { token, accion:'latido', dispositivo, tecnico, estado, ... }           → monitoreo de jornada (pestañas _Equipo y _Jornadas)
+ *   { token: TOKEN_ADMIN, accion:'equipo' }                                 → datos del panel/mapa de supervisión (lo usa la web)
  * Mapa en vivo para el administrador: <URL de la Web App>?vista=equipo&token=<TOKEN_ADMIN>
  * El orden lo pone EL SERVIDOR (columna "Recibido"), no los relojes de los teléfonos.
  */
@@ -50,8 +51,11 @@ function doPost(e) {
   try {
     lock.waitLock(30000);
     var d = JSON.parse(e.postData.contents);
-    if (d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' });
+    // 'equipo' (panel de supervisión de la web) exige TOKEN_ADMIN; todo lo demás, el token del equipo
+    var esAdmin = d.accion === 'equipo' && d.token === TOKEN_ADMIN;
+    if (!esAdmin && d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' });
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
+    if (d.accion === 'equipo') { var datos = datosEquipo(TOKEN_ADMIN); datos.ok = true; return salida(datos); }
     if (d.accion === 'latido') return salida(registrarLatido(d, ahora));
     var hoja = obtenerHoja(d.proyecto && d.proyecto.nombre);
 
