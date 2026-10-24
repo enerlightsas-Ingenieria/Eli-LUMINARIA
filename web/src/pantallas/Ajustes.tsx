@@ -3,7 +3,7 @@ import { resumenSync } from '@compartido/core/sync';
 import { ENDPOINT_POR_DEFECTO, MODELO_POR_DEFECTO } from '@compartido/core/ajustes';
 import { rolDe } from '@compartido/core/ajustes';
 import type { Ajustes as TipoAjustes } from '@compartido/core/ajustes';
-import { avisar } from '../componentes/dialogos';
+import { avisar, confirmar } from '../componentes/dialogos';
 import { pedirYAplicar } from '../componentes/importarConfig';
 import { Boton, Cabecera, Campo, Segmentado, Seccion } from '../componentes/ui';
 import { useApp } from '../contexto/App';
@@ -11,12 +11,13 @@ import { ir } from '../router';
 import { cargarAjustes, guardarAjustes } from '../servicios/ajustes';
 import { sincronizacion } from '../servicios/nucleo';
 import { pedirAlmacenamientoPersistente } from '../servicios/pwa';
+import { borrarTodoLocal } from '../servicios/almacen';
 import { useEstadoSinConexion } from '../servicios/usoSinConexion';
 
 declare const __VERSION__: string;
 
 export function AjustesPantalla() {
-  const { proyecto, refrescar, recargarAjustes, versionConfig, configCambiada } = useApp();
+  const { pendientes, proyecto, refrescar, recargarAjustes, versionConfig, configCambiada } = useApp();
   const [a, setA] = useState<TipoAjustes | null>(null);
   const [codigo, setCodigo] = useState('');
   const [sync, setSync] = useState(false);
@@ -29,6 +30,13 @@ export function AjustesPantalla() {
   if (!a) return null;
 
   const cambiar = (p: Partial<TipoAjustes>) => setA((x) => ({ ...x!, ...p }));
+  const borrarDatosLocales = async () => {
+    const sinEnviar = pendientes ? ` Hay ${pendientes} registro${pendientes === 1 ? '' : 's'} sin sincronizar que se perderán.` : '';
+    if (!(await confirmar('Borrar todo', `Se borrarán los registros, proyectos, fotos y ajustes de este dispositivo.${sinEnviar} No afecta a la hoja de Google ni a otras personas. Esta acción no se puede deshacer.`, 'Borrar todo', true))) return;
+    await borrarTodoLocal();
+    location.replace(location.pathname);
+    location.reload();
+  };
   const guardar = async () => { await guardarAjustes(a); await recargarAjustes(); await avisar('Listo', 'Ajustes guardados.'); };
 
   const sincronizarYa = async () => {
@@ -81,6 +89,10 @@ export function AjustesPantalla() {
         {persistente === true ? 'El navegador protegerá tus datos locales contra borrados automáticos.' : persistente === false ? 'El navegador podría borrar los datos locales si falta espacio o pasan días sin usar la página. Instala la app en tu pantalla de inicio y mantén la sincronización al día.' : ''}
       </p>
       {persistente === false && <div style={{ marginTop: 8 }}><Boton texto="Proteger datos locales" variante="secundario" onClick={async () => setPersistente(await pedirAlmacenamientoPersistente())} /></div>}
+
+      <Seccion>Empezar de cero en este dispositivo</Seccion>
+      <p className="muted" style={{ marginBottom: 8 }}>Borra los registros, proyectos, fotos y ajustes guardados en este teléfono o navegador. Lo que no se haya sincronizado se pierde. Después abre de nuevo tu enlace de acceso.</p>
+      <Boton texto="Borrar todos los datos de este dispositivo" variante="peligro" onClick={borrarDatosLocales} />
 
       <Seccion>Acerca de</Seccion>
       <p className="muted">ELI-LUMINARIA web {typeof __VERSION__ === 'string' ? __VERSION__ : ''}<br />Inventario de luminarias con IA y GPS. Los datos viven en este dispositivo; solo salen las fotos que envías a analizar y lo que sincronizas.<br />Tu ubicación solo se comparte con tu empresa mientras tienes una jornada ACTIVA.</p>

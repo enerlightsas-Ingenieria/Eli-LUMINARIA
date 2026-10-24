@@ -198,3 +198,43 @@ describe('limpieza de pestañas obsoletas', () => {
     expect(srv.hojas).toHaveLength(1);
   });
 });
+
+describe('reinicio total desde cero', () => {
+  const poblado = async () => {
+    const srv = crearServidor();
+    for (const n of ['Barrio A', 'Barrio B']) await post(srv, { proyecto: { nombre: n }, luminarias: [{ uuid: 'u-' + n, fabricante: 'F', tecnico: 'Ana' }] });
+    await post(srv, { token: 'CAMBIA-ESTE-TOKEN', accion: 'latido', dispositivo: 'd', tecnico: 'Ana', estado: 'activa' });
+    srv.gs.prepararUsuarios();
+    srv.hoja('_Usuarios')!.appendRow(['Ana', 'tecnico', 'clave123', 'si']);
+    await post(srv, { token: 'CAMBIA-ESTE-TOKEN-ADMIN', accion: 'config_guardar', clave: 'ia', valor: 'claude' });
+    srv.hojas.push(new Hoja('Prueba (anterior)'));
+    srv.carpetas.push({ nombre: 'ELI-LUMINARIA Fotos', papelera: false }, { nombre: 'Otra carpeta', papelera: false });
+    return srv;
+  };
+
+  it('borra proyectos, jornadas, equipo y archivadas; conserva usuarios y la IA elegida; manda a la papelera solo la carpeta de fotos', async () => {
+    const srv = await poblado();
+    const r = srv.gs.reiniciarDatos(false);
+    expect(srv.hojas.map((h: any) => h.getName()).sort()).toEqual(['_Config', '_Usuarios']);
+    expect(r).toMatchObject({ carpetasDeFotos: 1, usuarios: 'conservados' });
+    expect(srv.carpetas.map((c) => c.papelera)).toEqual([true, false]);              // la otra carpeta de Drive no se toca
+    expect(srv.hoja('_Usuarios')!.filas[2][0]).toBe('Ana');
+  });
+
+  it('con usuarios=true también borra _Usuarios y aun así queda una pestaña', async () => {
+    const srv = await poblado();
+    srv.gs.reiniciarDatos(true);
+    expect(srv.hojas.map((h: any) => h.getName())).toEqual(['_Config']);
+    const solo = crearServidor(); await post(solo, { proyecto: { nombre: 'X' }, luminarias: [{ uuid: 'a' }] });
+    solo.gs.reiniciarDatos(true);
+    expect(solo.hojas.length).toBeGreaterThanOrEqual(1);                              // Google exige al menos una
+  });
+
+  it('tras el reinicio el sistema arranca limpio: se crea el proyecto otra vez y no queda nada del anterior', async () => {
+    const srv = await poblado();
+    srv.gs.reiniciarDatos(false);
+    const r = await post(srv, { accion: 'listar', proyecto: { nombre: 'Barrio A' }, desde: '' });
+    expect(r.ok).toBe(true); expect(r.luminarias).toEqual([]);
+    expect(srv.gs.datosEquipo('CAMBIA-ESTE-TOKEN-ADMIN').tecnicos).toEqual([]);
+  });
+});

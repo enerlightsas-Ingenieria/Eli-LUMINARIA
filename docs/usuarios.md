@@ -45,3 +45,7 @@ En la hoja: menú **ELI-LUMINARIA → Limpiar pestañas obsoletas**. Muestra la 
 - proyectos sin ningún registro (se recrean solos al sincronizar).
 
 Nunca toca `_Usuarios`, `_Config`, `_Equipo`, `_Jornadas` ni proyectos con registros.
+
+## Empezar de cero
+1. **Hoja de Google:** menú **ELI-LUMINARIA → Reiniciar TODO desde cero**. Pide tres confirmaciones (la última, escribir `BORRAR`). Borra todos los proyectos, el monitoreo de jornadas y manda la carpeta de fotos a la papelera de Drive (recuperable 30 días). Pregunta si borrar también la lista de usuarios.
+2. **Cada teléfono o navegador:** Ajustes → **Borrar todos los datos de este dispositivo**. Si no se hace, el teléfono conserva sus registros viejos. Después se abre de nuevo el enlace de acceso de esa persona.

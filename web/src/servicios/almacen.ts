@@ -12,6 +12,20 @@ let dbp: Promise<IDBDatabase> | null = null;
 /** Solo para pruebas: cierra y descarta la conexión en memoria. */
 export async function reiniciarConexion() { const actual = dbp; dbp = null; if (actual) (await actual).close(); }
 
+/**
+ * Borra TODO lo local de este dispositivo: registros, proyectos, fotos y ajustes (incluida la clave de acceso).
+ * Lo que no se haya sincronizado se pierde. Después hay que abrir de nuevo el enlace de acceso.
+ */
+export async function borrarTodoLocal(): Promise<void> {
+  await reiniciarConexion();
+  await new Promise<void>((res) => {
+    const r = indexedDB.deleteDatabase(NOMBRE_DB);
+    r.onsuccess = () => res(); r.onerror = () => res(); r.onblocked = () => res();   // bloqueada: otra pestaña la tiene abierta; se vacía al cerrarla
+    setTimeout(res, 3000);
+  });
+  try { localStorage.clear(); sessionStorage.clear(); } catch { /* sin almacenamiento */ }
+}
+
 const pedir = <T>(r: IDBRequest<T>) => new Promise<T>((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 const terminar = (t: IDBTransaction) => new Promise<void>((res, rej) => { t.oncomplete = () => res(); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); });
 

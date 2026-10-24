@@ -432,6 +432,40 @@ function limpiarPestanasObsoletas() {
   ui.alert('Listo: ' + n + ' pestaña(s) borrada(s).');
 }
 
+/* ---------------- Reinicio total ---------------- */
+
+/**
+ * Borra TODOS los datos: cada pestaña de proyecto, _Equipo y _Jornadas, y manda a la papelera de Drive la carpeta de fotos
+ * (se puede recuperar 30 días). Conserva _Config; _Usuarios solo se borra si se pide. Siempre queda al menos una pestaña.
+ */
+function reiniciarDatos(incluirUsuarios) {
+  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  var quitar = libro.getSheets().filter(function (h) {
+    var c = h.getName().toLowerCase();
+    if (c === '_config') return false;
+    if (c === '_usuarios') return incluirUsuarios === true;
+    return true; // proyectos, _equipo, _jornadas y cualquier otra
+  });
+  if (quitar.length >= libro.getSheets().length) libro.insertSheet('Inicio'); // Google exige al menos una pestaña
+  quitar.forEach(function (h) { libro.deleteSheet(h); });
+  var fotos = 0;
+  var it = DriveApp.getFoldersByName(CARPETA_FOTOS);
+  while (it.hasNext()) { it.next().setTrashed(true); fotos++; }
+  return { pestanas: quitar.length, carpetasDeFotos: fotos, usuarios: incluirUsuarios === true ? 'borrados' : 'conservados' };
+}
+
+/** Menú ELI-LUMINARIA → Reiniciar TODO desde cero: tres confirmaciones, la última escribiendo BORRAR. */
+function reiniciarDesdeCero() {
+  var ui = SpreadsheetApp.getUi();
+  var a = ui.alert('Reiniciar todo desde cero', 'Se borrarán TODOS los registros de TODOS los proyectos, el monitoreo de jornadas y la carpeta de fotos de Drive (irá a la papelera). Esta acción no se puede deshacer en la hoja.', ui.ButtonSet.YES_NO);
+  if (a !== ui.Button.YES) return;
+  var p = ui.prompt('Confirmación', 'Escribe BORRAR (en mayúsculas) para continuar:', ui.ButtonSet.OK_CANCEL);
+  if (p.getSelectedButton() !== ui.Button.OK || p.getResponseText().trim() !== 'BORRAR') { ui.alert('No se borró nada.'); return; }
+  var u = ui.alert('Usuarios', '¿Borrar también la lista de usuarios (pestaña _Usuarios)?\n\nSÍ = habrá que crear a todos de nuevo (tu cuenta de administrador de Cloudflare sigue funcionando).\nNO = se conservan los usuarios y sus enlaces.', ui.ButtonSet.YES_NO);
+  var r = reiniciarDatos(u === ui.Button.YES);
+  ui.alert('Listo', r.pestanas + ' pestaña(s) borrada(s); carpetas de fotos a la papelera: ' + r.carpetasDeFotos + '; usuarios ' + r.usuarios + '.\n\nSiguiente: borra los datos en cada teléfono (Ajustes → Borrar todos los datos de este dispositivo).', ui.ButtonSet.OK);
+}
+
 /* ---------------- Ajustes del sistema (pestaña _Config) ---------------- */
 
 var COLUMNAS_CONFIG = [['clave', 'Clave'], ['valor', 'Valor']];
@@ -503,6 +537,7 @@ function onOpen() {
   try {
     SpreadsheetApp.getUi().createMenu('ELI-LUMINARIA')
       .addItem('Limpiar pestañas obsoletas', 'limpiarPestanasObsoletas')
+      .addItem('Reiniciar TODO desde cero (borra los datos)', 'reiniciarDesdeCero')
       .addItem('Preparar pestaña Usuarios', 'prepararUsuarios')
       .addItem('Generar claves faltantes', 'generarClavesFaltantes')
       .addToUi();

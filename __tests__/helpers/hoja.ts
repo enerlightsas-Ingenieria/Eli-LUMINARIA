@@ -42,20 +42,22 @@ export class Hoja {
 
 export function crearServidor(rutaScript?: string) {
   const hojas: Hoja[] = [];
+  const carpetas: { nombre: string; papelera: boolean }[] = [];   // carpetas de Drive simuladas (las de fotos)
   const libro = { getSheets: () => hojas, insertSheet: (n: string) => { const h = new Hoja(n); hojas.push(h); return h; }, deleteSheet: (h: Hoja) => { hojas.splice(hojas.indexOf(h), 1); } };
   const fuente = fs.readFileSync(rutaScript ?? path.join(__dirname, '../../server/google-apps-script.gs'), 'utf8');
   const html = { createHtmlOutput: (h: string) => ({ html: h, setTitle() { return this; }, addMetaTag() { return this; } }) };
   const gs = new Function('SpreadsheetApp', 'LockService', 'ContentService', 'DriveApp', 'Utilities', 'HtmlService',
-    fuente + '\n;return { doPost, doGet, datosEquipo, calcularAlertas, auditarTodo, generarClavesFaltantes, prepararUsuarios, buscarUsuario, pestanasObsoletas, eliminarPestanas };')(
+    fuente + '\n;return { doPost, doGet, datosEquipo, calcularAlertas, auditarTodo, generarClavesFaltantes, prepararUsuarios, buscarUsuario, pestanasObsoletas, eliminarPestanas, reiniciarDatos };')(
     { getActiveSpreadsheet: () => libro },
     { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     { createTextOutput: (t: string) => ({ t, setMimeType() { return this; } }), MimeType: { JSON: 'json' } },
-    {}, { getUuid: () => crypto.randomUUID() }, html,
+    { getFoldersByName: (n: string) => { const l = carpetas.filter((c) => c.nombre === n); let i = 0; return { hasNext: () => i < l.length, next: () => { const c = l[i++]; return { setTrashed: () => { c.papelera = true; } }; } }; } },
+    { getUuid: () => crypto.randomUUID() }, html,
   );
   const llamar = async (_url: string, init: any) => {
     const salida = gs.doPost({ postData: { contents: init.body } });
     return new Response(salida.t, { status: 200, headers: { 'content-type': 'application/json' } });
   };
   const hoja = (nombre: string) => hojas.find((h) => h.nombre === nombre);
-  return { hojas, llamar, hoja, gs };
+  return { hojas, llamar, hoja, gs, carpetas };
 }

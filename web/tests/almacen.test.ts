@@ -14,6 +14,23 @@ beforeEach(async () => {
   await new Promise<void>((res) => { const r = indexedDB.deleteDatabase('eli-luminaria'); r.onsuccess = () => res(); r.onerror = () => res(); r.onblocked = () => res(); });
 });
 
+describe('borrar todo lo local', () => {
+  it('deja el dispositivo como nuevo: sin registros ni ajustes; vuelve a crear solo el proyecto General', async () => {
+    const ps = await db.listarProyectos();
+    await db.crearProyecto('Barrio A');
+    await db.guardarLuminaria(borrador(ps[0].id));
+    localStorage.setItem('eli.ajustes.v1', JSON.stringify({ apiKey: 'secreta' }));
+    expect((await db.listarProyectos()).length).toBe(2);
+
+    await db.borrarTodoLocal();
+
+    expect(localStorage.getItem('eli.ajustes.v1')).toBeNull();
+    const nuevos = await db.listarProyectos();
+    expect(nuevos.map((p) => p.nombre)).toEqual(['General']);
+    expect(await db.listarLuminarias(nuevos[0].id)).toHaveLength(0);
+  });
+});
+
 describe('almacén web (IndexedDB)', () => {
   it('primera ejecución: crea el proyecto "General"; guardar, leer, actualizar y borrar', async () => {
     const ps = await db.listarProyectos();
