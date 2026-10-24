@@ -156,3 +156,45 @@ describe('mapa en vivo: salidas HTML escapadas', () => {
     expect(fuente).not.toMatch(/\.innerHTML\s*=\s*[^'\s]/);
   });
 });
+
+describe('limpieza de pestañas obsoletas', () => {
+  const nuevoProyecto = async (srv: ReturnType<typeof crearServidor>, nombre: string, conDatos: boolean) => {
+    await post(srv, { accion: 'listar', proyecto: { nombre }, desde: '' });                    // crea la pestaña con encabezados
+    if (conDatos) await post(srv, { proyecto: { nombre }, luminarias: [{ uuid: 'x-' + nombre, fabricante: 'F' }] });
+  };
+
+  it('propone solo lo que ya no se usa: archivadas "(anterior)", hojas en blanco de Google y proyectos vacíos', async () => {
+    const srv = crearServidor();
+    await nuevoProyecto(srv, 'Barrio A', true);                       // con datos → se queda
+    await nuevoProyecto(srv, 'Barrio Vacío', false);                  // sin registros → obsoleta
+    srv.hojas.push(new Hoja('Hoja 1'));                               // en blanco de Google → obsoleta
+    const vieja = new Hoja('Prueba (anterior)'); vieja.filas = [['Marca'], ['x'], ['y']]; srv.hojas.push(vieja);
+    const vieja2 = new Hoja('Prueba (anterior 2)'); vieja2.filas = [['Marca'], ['z']]; srv.hojas.push(vieja2);
+    srv.gs.prepararUsuarios();                                        // sistema → se queda
+    await post(srv, { token: 'CAMBIA-ESTE-TOKEN', accion: 'latido', dispositivo: 'd', tecnico: 'Ana', estado: 'activa' });   // _Equipo, _Jornadas
+    const obs = srv.gs.pestanasObsoletas();
+    expect(obs.map((p: any) => p.nombre).sort()).toEqual(['Barrio Vacío', 'Hoja 1', 'Prueba (anterior 2)', 'Prueba (anterior)']);
+    expect(obs.find((p: any) => p.nombre === 'Prueba (anterior)').filas).toBe(2);
+  });
+
+  it('nunca propone pestañas del sistema ni proyectos con datos, aunque tengan nombres raros', async () => {
+    const srv = crearServidor();
+    await nuevoProyecto(srv, 'Zona Norte', true);
+    const h = new Hoja('hoja1'); h.filas = [['Mis notas'], ['importante']]; srv.hojas.push(h);   // parece de Google pero tiene contenido
+    srv.gs.prepararUsuarios();
+    await post(srv, { token: 'CAMBIA-ESTE-TOKEN', accion: 'latido', dispositivo: 'd', tecnico: 'Ana', estado: 'activa' });
+    const nombres = srv.gs.pestanasObsoletas().map((p: any) => p.nombre);
+    expect(nombres).toEqual([]);
+    for (const n of ['_Usuarios', '_Equipo', '_Jornadas', 'Zona Norte']) expect(srv.hoja(n)).toBeDefined();
+  });
+
+  it('eliminarPestanas borra solo las indicadas y deja siempre al menos una pestaña', async () => {
+    const srv = crearServidor();
+    await nuevoProyecto(srv, 'Barrio A', true);
+    const vieja = new Hoja('Prueba (anterior)'); vieja.filas = [['Marca'], ['x']]; srv.hojas.push(vieja);
+    expect(srv.gs.eliminarPestanas(['Prueba (anterior)', 'No existe'])).toEqual(['Prueba (anterior)']);
+    expect(srv.hoja('Barrio A')).toBeDefined(); expect(srv.hoja('Prueba (anterior)')).toBeUndefined();
+    expect(srv.gs.eliminarPestanas(['Barrio A'])).toEqual([]);          // era la última: no se borra
+    expect(srv.hojas).toHaveLength(1);
+  });
+});

@@ -37,3 +37,11 @@ En la pestaña `_Usuarios` de tu hoja de Google (nombre, rol, clave, activo). La
 - El proxy recuerda cada clave `USUARIOS_CACHE_SEG` segundos (60 por defecto).
 - `APP_TOKENS` (técnicos en secretos) sigue funcionando si ya lo usabas.
 - La administración de usuarios es solo de la web; la app móvil nativa no la incluye.
+
+## Limpiar la hoja de Google
+En la hoja: menú **ELI-LUMINARIA → Limpiar pestañas obsoletas**. Muestra la lista y solo borra si aceptas. Propone únicamente:
+- pestañas `… (anterior)` (quedaron archivadas al cambiar el diseño de columnas),
+- hojas en blanco de Google (`Hoja 1`),
+- proyectos sin ningún registro (se recrean solos al sincronizar).
+
+Nunca toca `_Usuarios`, `_Config`, `_Equipo`, `_Jornadas` ni proyectos con registros.

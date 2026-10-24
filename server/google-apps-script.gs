@@ -383,6 +383,55 @@ function upsert(hoja, columnas, iClave, clave, obj, conservar) {
 
 function texto(v, max) { return String(v === undefined || v === null ? '' : v).substring(0, max); }
 
+/* ---------------- Limpieza de pestañas que ya no se usan ---------------- */
+
+var PESTANAS_SISTEMA = ['_equipo', '_jornadas', '_usuarios', '_config'];
+var PESTANAS_VACIAS_DE_GOOGLE = ['hoja 1', 'hoja1', 'sheet1', 'sheet 1'];
+
+/**
+ * Pestañas que ya no sirven, con el motivo. NUNCA incluye las del sistema ni una pestaña de proyecto que tenga datos:
+ *  - "Proyecto (anterior)": quedaron archivadas al cambiar el diseño de columnas.
+ *  - "Hoja 1" / "Sheet1" vacías (las crea Google al abrir la hoja).
+ *  - pestañas de proyecto sin ningún registro (solo encabezados): se vuelven a crear solas cuando alguien sincroniza.
+ */
+function pestanasObsoletas() {
+  var res = [];
+  SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(function (h) {
+    var nombre = h.getName(), clave = nombre.toLowerCase();
+    if (PESTANAS_SISTEMA.indexOf(clave) >= 0 || clave.charAt(0) === '_') return;
+    var filas = h.getLastRow();
+    if (/ \(anterior( \d+)?\)$/.test(nombre)) res.push({ nombre: nombre, motivo: 'archivada con el diseño anterior de columnas', filas: Math.max(0, filas - 1) });
+    else if (PESTANAS_VACIAS_DE_GOOGLE.indexOf(clave) >= 0 && filas <= 1) res.push({ nombre: nombre, motivo: 'hoja en blanco de Google', filas: 0 });
+    else if (filas <= 1 && h.getRange(1, 1).getValue() === COLUMNAS[0][1]) res.push({ nombre: nombre, motivo: 'proyecto sin registros (se recrea sola al sincronizar)', filas: 0 });
+  });
+  return res;
+}
+
+/** Borra las pestañas indicadas (siempre queda al menos una pestaña en el libro). Devuelve los nombres borrados. */
+function eliminarPestanas(nombres) {
+  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  var borradas = [];
+  nombres.forEach(function (n) {
+    var h = buscarHoja(libro, n);
+    if (!h || libro.getSheets().length <= 1) return;
+    libro.deleteSheet(h);
+    borradas.push(n);
+  });
+  return borradas;
+}
+
+/** Menú ELI-LUMINARIA → Limpiar pestañas obsoletas: muestra la lista y pide confirmación antes de borrar. */
+function limpiarPestanasObsoletas() {
+  var ui = SpreadsheetApp.getUi();
+  var lista = pestanasObsoletas();
+  if (!lista.length) { ui.alert('No hay pestañas obsoletas. Todo está en uso.'); return; }
+  var texto = lista.map(function (p) { return '• ' + p.nombre + ' — ' + p.motivo + (p.filas ? ' (' + p.filas + ' registros)' : ''); }).join('\n');
+  var r = ui.alert('¿Borrar estas pestañas?', texto + '\n\nEsta acción no se puede deshacer. No se tocan las pestañas del sistema (_Usuarios, _Config, _Equipo, _Jornadas) ni los proyectos con registros.', ui.ButtonSet.YES_NO);
+  if (r !== ui.Button.YES) return;
+  var n = eliminarPestanas(lista.map(function (p) { return p.nombre; })).length;
+  ui.alert('Listo: ' + n + ' pestaña(s) borrada(s).');
+}
+
 /* ---------------- Ajustes del sistema (pestaña _Config) ---------------- */
 
 var COLUMNAS_CONFIG = [['clave', 'Clave'], ['valor', 'Valor']];
@@ -453,6 +502,7 @@ function rolDe(texto) {
 function onOpen() {
   try {
     SpreadsheetApp.getUi().createMenu('ELI-LUMINARIA')
+      .addItem('Limpiar pestañas obsoletas', 'limpiarPestanasObsoletas')
       .addItem('Preparar pestaña Usuarios', 'prepararUsuarios')
       .addItem('Generar claves faltantes', 'generarClavesFaltantes')
       .addToUi();

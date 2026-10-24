@@ -42,11 +42,11 @@ export class Hoja {
 
 export function crearServidor(rutaScript?: string) {
   const hojas: Hoja[] = [];
-  const libro = { getSheets: () => hojas, insertSheet: (n: string) => { const h = new Hoja(n); hojas.push(h); return h; } };
+  const libro = { getSheets: () => hojas, insertSheet: (n: string) => { const h = new Hoja(n); hojas.push(h); return h; }, deleteSheet: (h: Hoja) => { hojas.splice(hojas.indexOf(h), 1); } };
   const fuente = fs.readFileSync(rutaScript ?? path.join(__dirname, '../../server/google-apps-script.gs'), 'utf8');
   const html = { createHtmlOutput: (h: string) => ({ html: h, setTitle() { return this; }, addMetaTag() { return this; } }) };
   const gs = new Function('SpreadsheetApp', 'LockService', 'ContentService', 'DriveApp', 'Utilities', 'HtmlService',
-    fuente + '\n;return { doPost, doGet, datosEquipo, calcularAlertas, auditarTodo, generarClavesFaltantes, prepararUsuarios, buscarUsuario };')(
+    fuente + '\n;return { doPost, doGet, datosEquipo, calcularAlertas, auditarTodo, generarClavesFaltantes, prepararUsuarios, buscarUsuario, pestanasObsoletas, eliminarPestanas };')(
     { getActiveSpreadsheet: () => libro },
     { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     { createTextOutput: (t: string) => ({ t, setMimeType() { return this; } }), MimeType: { JSON: 'json' } },
