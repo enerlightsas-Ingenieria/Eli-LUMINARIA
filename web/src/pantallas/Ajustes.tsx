@@ -12,6 +12,7 @@ import { cargarAjustes, guardarAjustes } from '../servicios/ajustes';
 import { sincronizacion } from '../servicios/nucleo';
 import { pedirAlmacenamientoPersistente } from '../servicios/pwa';
 import { borrarTodoLocal } from '../servicios/almacen';
+import { cerrarSesion } from '../servicios/identidad';
 import { useEstadoSinConexion } from '../servicios/usoSinConexion';
 
 declare const __VERSION__: string;
@@ -37,6 +38,10 @@ export function AjustesPantalla() {
     location.replace(location.pathname);
     location.reload();
   };
+  const salir = async () => {
+    if (!(await confirmar('Cerrar sesión', 'Saldrás de tu cuenta en este dispositivo. Los registros guardados aquí se conservan, pero lo que no esté sincronizado no se enviará hasta que vuelvas a entrar.', 'Cerrar sesión'))) return;
+    await cerrarSesion(); configCambiada(); ir('/', true);
+  };
   const guardar = async () => { await guardarAjustes(a); await recargarAjustes(); await avisar('Listo', 'Ajustes guardados.'); };
 
   const sincronizarYa = async () => {
@@ -58,6 +63,8 @@ export function AjustesPantalla() {
       {rolDe(a) === 'admin' && <Boton texto="Administración (usuarios e IA)" icono="usuarios" onClick={() => ir('/admin')} />}
       <Campo etiqueta="Código de configuración" valor={codigo} alCambiar={setCodigo} pista="ELI1.…  o el enlace completo" tipo="url" />
       <Boton texto="Importar configuración" variante="secundario" deshabilitado={!codigo.trim()} onClick={() => pedirYAplicar(codigo, () => { setCodigo(''); configCambiada(); refrescar(); })} />
+
+      {!!a.apiKey && <Boton texto="Cerrar sesión" variante="secundario" onClick={salir} />}
 
       <Seccion>Apariencia</Seccion>
       <Segmentado valor={a.tema} alCambiar={(tema) => { cambiar({ tema }); document.documentElement.dataset.tema = tema; }} opciones={[{ valor: 'auto', texto: 'Automático' }, { valor: 'claro', texto: 'Claro' }, { valor: 'oscuro', texto: 'Oscuro' }]} />

@@ -19,10 +19,16 @@ export async function aplicarConfig(cfg: ConfigFlota): Promise<{ proyectosNuevos
     supervisor: cfg.supervisor ?? a.supervisor,
     rol: cfg.apiKey && cfg.apiKey !== a.apiKey ? undefined : a.rol,   // otra cuenta en este teléfono: el rol se vuelve a pedir al servidor
   });
+  return { proyectosNuevos: await asegurarProyectos(cfg.proyectos ?? []) };
+}
+
+/** Crea los proyectos que falten (sin distinguir mayúsculas). Devuelve cuántos creó. */
+export async function asegurarProyectos(nombres: string[]): Promise<number> {
   const existentes = new Set((await listarProyectos()).map((p) => p.nombre.trim().toLowerCase()));
-  let proyectosNuevos = 0;
-  for (const nombre of cfg.proyectos ?? []) {
-    if (!existentes.has(nombre.toLowerCase())) { await crearProyecto(nombre); existentes.add(nombre.toLowerCase()); proyectosNuevos++; }
+  let nuevos = 0;
+  for (const nombre of nombres) {
+    const n = nombre.trim();
+    if (n && !existentes.has(n.toLowerCase())) { await crearProyecto(n); existentes.add(n.toLowerCase()); nuevos++; }
   }
-  return { proyectosNuevos };
+  return nuevos;
 }

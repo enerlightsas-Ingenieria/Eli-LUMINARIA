@@ -1,8 +1,9 @@
 import { rolDe, type Rol } from '@compartido/core/ajustes';
 import { codificar, type ConfigFlota } from '@compartido/lib/config';
-import { cargarAjustes, guardarAjustes } from './ajustes';
+import { ajustesPorDefecto, cargarAjustes, guardarAjustes } from './ajustes';
+import { asegurarProyectos } from './configuracion';
 
-export interface Usuario { nombre: string; rol: Rol; clave: string; activo: boolean }
+export interface Usuario { nombre: string; rol: Rol; clave: string; activo: boolean; terceros?: boolean }
 
 const ANTHROPIC = 'api.anthropic.com';
 
@@ -36,16 +37,56 @@ export async function verificarIdentidad(): Promise<boolean> {
   let j: any;
   try { j = await llamarProxy('/yo', {}, 8000); } catch { return false; }
   const a = await cargarAjustes();
-  if (rolDe(a) === j.rol && a.rol === j.rol && a.tecnico === j.nombre && !a.supervisor) return false;
-  await guardarAjustes({ ...a, rol: j.rol, supervisor: false, tecnico: j.nombre });
+  const terceros = typeof j.terceros === 'boolean' ? j.terceros : a.modoTerceros;   // lo decide el administrador (si el servidor lo informa)
+  const creados = Array.isArray(j.proyectos) ? await asegurarProyectos(j.proyectos) : 0;
+  if (rolDe(a) === j.rol && a.rol === j.rol && a.tecnico === j.nombre && !a.supervisor && a.modoTerceros === terceros) return creados > 0;
+  await guardarAjustes({ ...a, rol: j.rol, supervisor: false, tecnico: j.nombre, modoTerceros: terceros });
   return true;
+}
+
+/** Dirección del servidor de la empresa: la que trae la web publicada (servidor.json); si falta, se pide a mano al entrar. */
+export async function servidorPorDefecto(): Promise<string> {
+  try {
+    const r = await fetch(`${import.meta.env.BASE_URL}servidor.json`, { cache: 'no-cache' });
+    const j = await r.json();
+    return typeof j?.proxy === 'string' && /^https:\/\//i.test(j.proxy) ? j.proxy.replace(/\/+$/, '') : '';
+  } catch { return ''; }
+}
+
+export class ErrorIngreso extends Error {}
+
+/** Entrar con usuario y clave: el servidor confirma quién es y la app queda lista (servidor, cuenta, rol y proyectos). */
+export async function ingresar(servidor: string, usuario: string, clave: string): Promise<{ nombre: string; rol: Rol }> {
+  const base = servidor.trim().replace(/\/+$/, '');
+  if (!/^https:\/\/[^\s/]+/i.test(base)) throw new ErrorIngreso('La dirección del servidor debe empezar por https://');
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+  let r: Response;
+  try { r = await fetch(`${base}/ingresar`, { method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ usuario: usuario.trim(), clave: clave.trim() }), signal: ctl.signal }); }
+  catch { throw new ErrorIngreso('No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.'); }
+  finally { clearTimeout(t); }
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j?.ok) throw new ErrorIngreso(j?.error ?? `El servidor respondió ${r.status}.`);
+  const a = await cargarAjustes();
+  await guardarAjustes({
+    ...a, endpoint: base, syncUrl: `${base}/sync`, apiKey: clave.trim(), tecnico: j.nombre, rol: j.rol, supervisor: false,
+    modoTerceros: typeof j.terceros === 'boolean' ? j.terceros : a.modoTerceros,
+  });
+  if (Array.isArray(j.proyectos)) await asegurarProyectos(j.proyectos);
+  return { nombre: j.nombre, rol: j.rol };
+}
+
+/** Sale de la cuenta: borra la clave y el rol de este dispositivo. Los registros guardados se conservan. */
+export async function cerrarSesion(): Promise<void> {
+  const a = await cargarAjustes();
+  const base = ajustesPorDefecto();
+  await guardarAjustes({ ...a, apiKey: '', rol: undefined, supervisor: false, tecnico: '', endpoint: base.endpoint, syncUrl: '', modoTerceros: false });
 }
 
 export async function listarUsuarios(): Promise<Usuario[]> {
   return (await llamarProxy('/usuarios', { accion: 'listar' })).usuarios as Usuario[];
 }
 
-export async function guardarUsuario(u: { nombre: string; rol: Rol; activo: boolean; claveNueva?: boolean }): Promise<Usuario> {
+export async function guardarUsuario(u: { nombre: string; rol: Rol; activo: boolean; claveNueva?: boolean; clave?: string; terceros?: boolean }): Promise<Usuario> {
   return (await llamarProxy('/usuarios', { accion: 'guardar', ...u })).usuario as Usuario;
 }
 

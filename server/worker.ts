@@ -12,6 +12,7 @@
  *   /sync           → puerta hacia el script de Google (la web nunca ve el token del script; en los latidos el nombre del
  *                      técnico lo pone el proxy según SU token, no lo declara el cliente)
  *   /equipo         → datos del mapa/panel de supervisión (supervisores y administradores)
+ *   /ingresar       → entrar con usuario y clave (sin cabecera): devuelve nombre, rol y proyectos
  *   /yo             → quién soy (nombre y rol según la clave)
  *   /ia             → administración de la IA: estado, elegir principal (Gemini/Claude), probar (solo administradores)
  *   /usuarios       → menú de administración: listar/crear/editar personas (solo administradores)
@@ -72,7 +73,7 @@ export function identificar(token: string, tokens: string | undefined): string |
 }
 
 export type Rol = 'tecnico' | 'supervisor' | 'admin';
-export type Identidad = { nombre: string; rol: Rol };
+export type Identidad = { nombre: string; rol: Rol; terceros?: boolean };
 const ROLES: Rol[] = ['tecnico', 'supervisor', 'admin'];
 
 const cacheUsuarios = new Map<string, { v: Identidad | null; hasta: number }>();
@@ -100,7 +101,7 @@ export async function autenticar(clave: string, env: any, llamar: typeof fetch):
   const c: any = await r.json().catch(() => null);
   if (!c?.ok) throw new Error('hoja');
   const u = c.usuario;
-  const v: Identidad | null = u && typeof u.nombre === 'string' && u.nombre ? { nombre: u.nombre, rol: ROLES.includes(u.rol) ? u.rol : 'tecnico' } : null;
+  const v: Identidad | null = u && typeof u.nombre === 'string' && u.nombre ? { nombre: u.nombre, rol: ROLES.includes(u.rol) ? u.rol : 'tecnico', ...(typeof u.terceros === 'boolean' ? { terceros: u.terceros } : {}) } : null;
   if (ttl > 0) {
     if (cacheUsuarios.size > 500) cacheUsuarios.clear();
     cacheUsuarios.set(llave, { v, hasta: Date.now() + ttl });
@@ -465,6 +466,63 @@ async function sincronizar(request: Request, env: any, llamar: typeof fetch, tec
   return haciaHojas(c, env.SYNC_TOKEN, env, llamar);
 }
 
+const norm = (s: unknown) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** Intentos fallidos de ingreso por conexión+usuario (en memoria): frena adivinar claves probando. */
+const intentos = new Map<string, { n: number; hasta: number }>();
+export const olvidarIntentos = () => intentos.clear();
+const MAX_INTENTOS = 8, VENTANA_MS = 10 * 60 * 1000;
+
+/** Usuario y clave → identidad. Primero los secretos (nombre:clave) y luego la pestaña _Usuarios. */
+async function verificarIngreso(usuario: string, clave: string, env: any, llamar: typeof fetch): Promise<Identidad | null> {
+  if (!usuario || !clave) return null;
+  for (const [lista, rol] of [[env.ADMIN_TOKENS, 'admin'], [env.APP_TOKENS, 'tecnico']] as const) {
+    const nombre = identificar(clave, lista);
+    if (nombre && norm(nombre) === norm(usuario)) return { nombre, rol };
+  }
+  if (!env.SYNC_URL || !env.SYNC_TOKEN) return null;
+  const r = await haciaHojas({ accion: 'ingresar', usuario, clave }, env.SYNC_TOKEN, env, llamar);
+  const c: any = await r.json().catch(() => null);
+  if (!c?.ok) throw new Error('hoja');
+  const u = c.usuario;
+  return u && typeof u.nombre === 'string' && u.nombre ? { nombre: u.nombre, rol: ROLES.includes(u.rol) ? u.rol : 'tecnico', ...(typeof u.terceros === 'boolean' ? { terceros: u.terceros } : {}) } : null;
+}
+
+/** Nombres de los proyectos que ya existen en la hoja (para que cada persona los vea al entrar). Si la hoja no responde, vacío. */
+async function proyectosDeLaHoja(env: any, llamar: typeof fetch): Promise<string[]> {
+  if (!env.SYNC_URL || !env.SYNC_TOKEN) return [];
+  try {
+    const c: any = await (await haciaHojas({ accion: 'proyectos' }, env.SYNC_TOKEN, env, llamar)).json();
+    return c?.ok && Array.isArray(c.proyectos) ? c.proyectos.filter((x: unknown) => typeof x === 'string').slice(0, 100) : [];
+  } catch { return []; }
+}
+
+/** POST /ingresar { usuario, clave } → { ok, nombre, rol, terceros?, proyectos }. No requiere cabecera: es la puerta de entrada. */
+async function ingresar(request: Request, env: any, llamar: typeof fetch): Promise<Response> {
+  const texto = await request.text();
+  if (texto.length > 1000) return json(413, { ok: false, error: 'Payload too large' });
+  let c: any;
+  try { c = JSON.parse(texto); } catch { return json(400, { ok: false, error: 'JSON inválido' }); }
+  if (typeof c?.usuario !== 'string' || typeof c?.clave !== 'string' || !c.usuario.trim() || !c.clave || c.usuario.length > 80 || c.clave.length > 100) {
+    return json(400, { ok: false, error: 'Escribe tu usuario y tu clave.' });
+  }
+  const ip = request.headers.get('cf-connecting-ip') ?? 'sin-ip';
+  const llave = `${ip}|${norm(c.usuario)}`, ahora = Date.now();
+  const previo = intentos.get(llave);
+  if (previo && previo.hasta > ahora && previo.n >= MAX_INTENTOS) return json(429, { ok: false, error: 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.' });
+
+  let quien: Identidad | null;
+  try { quien = await verificarIngreso(c.usuario.trim(), c.clave.trim(), env, llamar); }
+  catch { return json(502, { ok: false, error: 'No se pudo verificar el usuario (la hoja de Google no respondió). Inténtalo de nuevo.' }); }
+  if (!quien) {
+    if (intentos.size > 2000) intentos.clear();
+    intentos.set(llave, { n: (previo && previo.hasta > ahora ? previo.n : 0) + 1, hasta: ahora + VENTANA_MS });
+    return json(401, { ok: false, error: 'Usuario o clave incorrectos.' });
+  }
+  intentos.delete(llave);
+  return json(200, { ok: true, nombre: quien.nombre, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), proyectos: await proyectosDeLaHoja(env, llamar) });
+}
+
 /** Menú de administración: listar y crear/editar personas. El token del administrador del script se pone AQUÍ. */
 async function administrarUsuarios(request: Request, env: any, llamar: typeof fetch, quien: Identidad): Promise<Response> {
   const texto = await request.text();
@@ -476,7 +534,8 @@ async function administrarUsuarios(request: Request, env: any, llamar: typeof fe
   if (c.accion === 'guardar') {
     if (typeof c.nombre !== 'string' || !c.nombre.trim() || c.nombre.length > 60) return json(400, { ok: false, error: 'Nombre inválido' });
     if (!ROLES.includes(c.rol)) return json(400, { ok: false, error: 'Rol inválido' });
-    const r = await haciaHojas({ accion: 'usuarios_guardar', nombre: c.nombre, rol: c.rol, activo: c.activo !== false, claveNueva: c.claveNueva === true, por: quien.nombre }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    if (c.clave !== undefined && c.clave !== '' && (typeof c.clave !== 'string' || !/^\S{8,64}$/.test(c.clave))) return json(400, { ok: false, error: 'La clave debe tener entre 8 y 64 caracteres, sin espacios.' });
+    const r = await haciaHojas({ accion: 'usuarios_guardar', nombre: c.nombre, rol: c.rol, activo: c.activo !== false, claveNueva: c.claveNueva === true, terceros: c.terceros === true, ...(c.clave ? { clave: c.clave } : {}), por: quien.nombre }, env.SYNC_TOKEN_ADMIN, env, llamar);
     vaciarCacheUsuarios();   // los cambios se notan al instante en este servidor (en otros, tras USUARIOS_CACHE_SEG)
     return r;
   }
@@ -488,14 +547,16 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   const ruta = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
   const clave = request.headers.get('x-api-key') ?? '';
 
-  if (!['/', '/analizar', '/sync', '/equipo', '/yo', '/usuarios', '/ia'].includes(ruta)) return json(404, { error: 'Not found' });
+  if (!['/', '/analizar', '/sync', '/equipo', '/yo', '/usuarios', '/ia', '/ingresar'].includes(ruta)) return json(404, { error: 'Not found' });
+
+  if (ruta === '/ingresar') return ingresar(request, env, llamar);
 
   let quien: Identidad | null;
   try { quien = await autenticar(clave, env, llamar); }
   catch { return json(502, { error: 'No se pudo verificar el usuario (la hoja de Google no respondió).' }); }
   if (!quien) return json(401, { error: 'Unauthorized' });
 
-  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, rol: quien.rol });
+  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), proyectos: await proyectosDeLaHoja(env, llamar) });
   if (ruta === '/equipo') {
     if (quien.rol === 'tecnico') return json(401, { error: 'Unauthorized' });
     return haciaHojas({ accion: 'equipo' }, env.SYNC_TOKEN_ADMIN, env, llamar);

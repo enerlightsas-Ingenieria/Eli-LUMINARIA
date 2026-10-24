@@ -15,14 +15,14 @@ export function Boton({ texto, onClick, variante = 'primario', deshabilitado, ca
 }
 
 /** Campo de texto con opciones rápidas (un toque) para llenar a mano más rápido. */
-export function Campo({ etiqueta, valor, alCambiar, pista, multilinea, numerico, conSigno, secreto, soloLectura, opciones, tipo }: {
+export function Campo({ etiqueta, valor, alCambiar, pista, multilinea, numerico, conSigno, secreto, soloLectura, opciones, tipo, autoComplete }: {
   etiqueta: string; valor: string; alCambiar: (t: string) => void; pista?: string; multilinea?: boolean; numerico?: boolean;
-  conSigno?: boolean; secreto?: boolean; soloLectura?: boolean; opciones?: string[]; tipo?: string;
+  conSigno?: boolean; secreto?: boolean; soloLectura?: boolean; opciones?: string[]; tipo?: string; autoComplete?: string;
 }) {
   const id = `c-${etiqueta.replace(/\W+/g, '-').toLowerCase()}`;
   const comun = {
     id, value: valor, placeholder: pista, readOnly: soloLectura, autoCapitalize: secreto || numerico || conSigno || tipo === 'url' ? 'none' : 'sentences',
-    autoCorrect: 'off', spellCheck: false, onChange: (e: { target: { value: string } }) => alCambiar(e.target.value),
+    autoCorrect: 'off', spellCheck: false, autoComplete, onChange: (e: { target: { value: string } }) => alCambiar(e.target.value),
   } as const;
   return (
     <div className="campo">

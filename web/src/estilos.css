@@ -47,6 +47,8 @@ h1, h2, p { margin: 0; }
 .campo input[readonly], .campo textarea[readonly] { opacity: .6; }
 .campo input:focus, .campo textarea:focus, .buscador input:focus { outline: 2px solid var(--primario); outline-offset: 0; }
 /* Todas las opciones visibles: se acomodan en varias líneas (antes eran una fila con desplazamiento oculto y las de la derecha no se alcanzaban). */
+.ingreso { max-width: 420px; margin: 0 auto; padding: 48px 4px 24px; }
+.ingreso h1 { font-size: 26px; margin-bottom: 4px; }
 .fichas { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0 2px; }
 .fichas.lista { max-height: 46vh; overflow-y: auto; align-content: flex-start; overscroll-behavior: contain; }
 .fichas.lista .ficha { max-width: 100%; overflow-wrap: anywhere; text-align: left; height: auto; padding: 8px 14px; }
@@ -127,3 +129,5 @@ code { background: var(--superficie2); padding: 1px 5px; border-radius: 4px; }
 .banda.aviso { background: color-mix(in srgb, var(--aviso) 25%, var(--superficie)); }
 .banda .enlace { background: none; border: 0; color: var(--primario); font: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 0; }
 .cabecera { top: 0; }
+.acceso { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 12px 0; padding: 12px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie2); }
+.acceso dt { color: var(--muted); font-weight: 600; } .acceso dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; user-select: all; }

@@ -209,7 +209,11 @@ test('PWA: desde la PRIMERA visita queda lista y abre sin conexión (sin recarga
   await ctx.setOffline(true);
   await page.reload();                                                                  // navegación completa sin internet: la sirve el service worker
   await expect(page.getByRole('heading', { name: 'ELI-LUMINARIA' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Nueva luminaria' })).toBeVisible();
+  await expect(page.getByRole('form', { name: 'Ingreso' })).toBeVisible();              // sin cuenta, lo primero es ingresar (la pantalla ya está en el teléfono)
+  await page.getByLabel('Usuario', { exact: true }).fill('ana');
+  await page.getByLabel('Clave', { exact: true }).fill('lo-que-sea-123');
+  await page.getByRole('button', { name: 'Entrar' }).click();
+  await expect(page.getByRole('alert')).toContainText('No hay conexión con el servidor');   // y sin internet lo explica en vez de fallar mudo
 });
 
 test('errores: token de IA inválido → aviso y sigue a mano; enlace de configuración dañado → mensaje claro', async ({ browser }) => {
@@ -254,12 +258,12 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await admin.page.getByRole('button', { name: 'Administrar usuarios' }).click();
   await expect(admin.page.getByText('Elegir el modelo de Gemini')).toHaveCount(0);            // aquí no hay IA
   await admin.page.getByRole('button', { name: 'Nuevo usuario' }).click();
-  await admin.page.getByLabel('Nombre', { exact: true }).fill('Carla Gómez');
-  await admin.page.getByRole('button', { name: 'Crear y ver enlace' }).click();
+  await admin.page.getByLabel('Nombre (es su usuario)').fill('Carla Gómez');
+  await admin.page.getByRole('button', { name: 'Crear y ver datos de acceso' }).click();
   const url = await admin.page.getByLabel('Enlace de acceso').inputValue();
   expect(url).toContain('#/config?c=ELI1.');
   expect(url).not.toContain('tokSup');                                  // el enlace lleva la clave de Carla, no la del administrador
-  expect(b.gs.hoja('_Usuarios')!.filas.some((f: any[]) => f[0] === 'Carla Gómez' && f[1] === 'tecnico' && /^[0-9a-f]{20}$/.test(f[2]))).toBe(true);
+  expect(b.gs.hoja('_Usuarios')!.filas.some((f: any[]) => f[0] === 'Carla Gómez' && f[1] === 'tecnico' && /^[a-hj-km-np-z2-9]{5}-[a-hj-km-np-z2-9]{5}$/.test(f[2]))).toBe(true);
 
   // Carla abre su enlace en su teléfono: queda como técnico, sin panel ni administración, y captura
   const carla = await telefono(browser, b);
@@ -284,7 +288,7 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await admin.page.getByRole('dialog').getByRole('button', { name: 'Cancelar' }).click();
   await admin.page.getByRole('button', { name: /Carla Gómez/ }).click();
   await admin.page.getByRole('tab', { name: 'Supervisor' }).click();
-  await admin.page.getByRole('button', { name: 'Guardar y ver enlace' }).click();
+  await admin.page.getByRole('button', { name: 'Guardar y ver datos de acceso' }).click();
   await expect(admin.page.getByRole('dialog', { name: 'Acceso de Carla Gómez' })).toBeVisible();
   await carla.page.reload();
   await expect(carla.page.getByRole('link', { name: 'Panel' })).toBeVisible({ timeout: 15_000 });
@@ -328,4 +332,62 @@ test('administración de la IA: se ven TODOS los modelos (se pueden alcanzar y e
   expect(resultado.solapa).toBe(true);                                    // el mapa sí pasa por detrás de la barra (la prueba no es vacía)
   expect(resultado.tapada).toBe(false);                                   // y la barra queda por encima
   await expect(admin.page.getByRole('link', { name: 'Ajustes' })).toBeVisible();
+});
+
+test('ingreso con usuario y clave (sin enlaces): el administrador crea la cuenta, la persona entra, ve los proyectos y puede salir', async ({ browser }) => {
+  const b = crearBackend();
+  await b.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'listar', proyecto: { nombre: 'Barrio A' }, desde: '' }) });   // proyecto que ya existe en la hoja
+
+  const admin = await telefono(browser, b);
+  await configurar(admin.page, enlace({ token: 'tokSup' }));
+  await admin.page.getByRole('link', { name: 'Ajustes' }).click();
+  await admin.page.getByRole('button', { name: 'Administración (usuarios e IA)' }).click();
+  await admin.page.getByRole('button', { name: 'Administrar usuarios' }).click();
+  await admin.page.getByRole('button', { name: 'Nuevo usuario' }).click();
+  await admin.page.getByLabel('Nombre (es su usuario)').fill('Darío Ruiz');
+  await admin.page.getByLabel('Clave (opcional)').fill('clave-dario-1');
+  await admin.page.getByLabel(/Contratista/).check();
+  await admin.page.getByRole('button', { name: 'Crear y ver datos de acceso' }).click();
+  await expect(admin.page.getByTestId('acceso-usuario')).toHaveText('Darío Ruiz');
+  await expect(admin.page.getByTestId('acceso-clave')).toHaveText('clave-dario-1');
+  await expect(admin.page.getByTestId('acceso-direccion')).toContainText(WEB);
+
+  // Darío abre la web SIN enlace: ve el ingreso (no hay nada que configurar a mano)
+  const dario = await telefono(browser, b);
+  await dario.ctx.route(`${WEB}/servidor.json`, (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ proxy: WORKER }) }));
+  await dario.page.goto(WEB + '/');
+  await expect(dario.page.getByRole('form', { name: 'Ingreso' })).toBeVisible();
+  await expect(dario.page.getByRole('link', { name: 'Registros' })).toHaveCount(0);       // sin cuenta no hay menú ni datos
+
+  await dario.page.getByLabel('Usuario', { exact: true }).fill('dario ruiz');             // sin mayúsculas ni acento
+  await dario.page.getByLabel('Clave', { exact: true }).fill('clave-equivocada');
+  await dario.page.getByRole('button', { name: 'Entrar' }).click();
+  await expect(dario.page.getByRole('alert')).toContainText('Usuario o clave incorrectos');
+
+  await dario.page.getByLabel('Clave', { exact: true }).fill('clave-dario-1');
+  await dario.page.getByRole('button', { name: 'Entrar' }).click();
+  await expect(dario.page.getByRole('link', { name: 'Registros' })).toBeVisible({ timeout: 15_000 });
+  await dario.page.getByRole('link', { name: 'Ajustes' }).click();
+  await expect(dario.page.getByTestId('cuenta')).toContainText('Darío Ruiz · Técnico');
+  await expect(dario.page.getByText(/Modo terceros activo/)).toBeVisible();                // lo decidió el administrador
+  await expect(dario.page.getByRole('button', { name: 'Administración (usuarios e IA)' })).toHaveCount(0);
+  await dario.page.getByRole('link', { name: 'Proyectos' }).click();
+  await expect(dario.page.getByRole('button', { name: /Proyecto Barrio A/ })).toBeVisible();   // el proyecto de la hoja llegó solo
+
+  // Salir devuelve al ingreso; los datos de la cuenta se borran de este teléfono
+  await dario.page.getByRole('link', { name: 'Ajustes' }).click();
+  await dario.page.getByRole('button', { name: 'Cerrar sesión' }).click();
+  await dialogo(dario.page).getByRole('button', { name: 'Cerrar sesión', exact: true }).click();
+  await expect(dario.page.getByRole('form', { name: 'Ingreso' })).toBeVisible();
+
+  // el administrador lo da de baja: con la misma clave ya no puede entrar
+  await admin.page.getByRole('dialog').getByRole('button', { name: 'Cancelar' }).click();
+  await admin.page.getByRole('button', { name: /Darío Ruiz, Técnico/ }).click();
+  await admin.page.getByLabel(/Con acceso/).uncheck();
+  await admin.page.getByRole('button', { name: 'Guardar y ver datos de acceso' }).click();
+  await expect(admin.page.getByRole('button', { name: /Darío Ruiz, Técnico, de baja/ })).toBeVisible();
+  await dario.page.getByLabel('Usuario', { exact: true }).fill('Darío Ruiz');
+  await dario.page.getByLabel('Clave', { exact: true }).fill('clave-dario-1');
+  await dario.page.getByRole('button', { name: 'Entrar' }).click();
+  await expect(dario.page.getByRole('alert')).toContainText('Usuario o clave incorrectos');
 });

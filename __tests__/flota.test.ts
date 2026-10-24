@@ -1,5 +1,5 @@
 import { aEnlace, codificar, decodificar, describir } from '../src/lib/config';
-import { identificar, manejar, validarCuerpo, vaciarCacheUsuarios, vaciarCacheIA, olvidarModeloDetectado, mejorModelo, aGemini, deGemini, proveedores } from '../server/worker';
+import { olvidarIntentos, identificar, manejar, validarCuerpo, vaciarCacheUsuarios, vaciarCacheIA, olvidarModeloDetectado, mejorModelo, aGemini, deGemini, proveedores } from '../server/worker';
 import { TOOL } from '../src/services/analyzer';
 
 jest.mock('../src/services/settings', () => ({ cargarAjustes: async () => ({}) }));
@@ -324,7 +324,7 @@ describe('usuarios por rol desde la pestaña _Usuarios', () => {
     const m = montar(); const h = m.usuarios();
     h.appendRow(['Ana', 'tecnico', '', 'si']); h.appendRow(['Beto', 'tecnico', 'fija', 'si']);
     expect(m.gs.gs.generarClavesFaltantes()).toBe(1);
-    expect(h.filas[2][2]).toMatch(/^[0-9a-f]{20}$/); expect(h.filas[3][2]).toBe('fija');
+    expect(h.filas[2][2]).toMatch(/^[a-hj-km-np-z2-9]{5}-[a-hj-km-np-z2-9]{5}$/); expect(h.filas[3][2]).toBe('fija');
     const r = await m.gs.llamar('', { body: JSON.stringify({ token: 'malo', accion: 'usuario', clave: 'fija' }) });
     expect((await r.json()).ok).toBe(false);
   });
@@ -440,9 +440,9 @@ describe('administración de usuarios desde la app (rol admin)', () => {
     const m = montar();
     const t = (await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'Ana Pérez', rol: 'tecnico' })).j.usuario;
     const s = (await m.llamar('/usuarios', 'claveJefe', { accion: 'guardar', nombre: 'Sofía Ruiz', rol: 'supervisor' })).j.usuario;
-    expect(t.clave).toMatch(/^[0-9a-f]{20}$/); expect(t.activo).toBe(true);
-    expect((await m.llamar('/yo', t.clave)).j).toEqual({ ok: true, nombre: 'Ana Pérez', rol: 'tecnico' });
-    expect((await m.llamar('/yo', s.clave)).j).toEqual({ ok: true, nombre: 'Sofía Ruiz', rol: 'supervisor' });
+    expect(t.clave).toMatch(/^[a-hj-km-np-z2-9]{5}-[a-hj-km-np-z2-9]{5}$/); expect(t.activo).toBe(true);
+    expect((await m.llamar('/yo', t.clave)).j).toMatchObject({ ok: true, nombre: 'Ana Pérez', rol: 'tecnico', terceros: false });
+    expect((await m.llamar('/yo', s.clave)).j).toMatchObject({ ok: true, nombre: 'Sofía Ruiz', rol: 'supervisor' });
     expect((await m.llamar('/yo', 'claveJefe')).j.rol).toBe('admin');
     // permisos: técnico no ve el panel ni administra; supervisor ve el panel pero no administra; ambos capturan/sincronizan
     expect((await m.llamar('/equipo', t.clave)).status).toBe(401);
@@ -731,5 +731,95 @@ describe('Gemini: modelo no disponible en la cuenta (404)', () => {
     const j = await m.ia({ accion: 'probar' });
     expect(j.resultados.gemini.ok).toBe(true);
     expect(j.resultados.gemini.mensaje).toContain('gemini-3.5-flash'); expect(j.resultados.gemini.mensaje).toContain('automáticamente');
+  });
+});
+
+describe('ingreso con usuario y clave (sin enlaces)', () => {
+  const { crearServidor } = require('./helpers/hoja');
+  const montar = (extra: any = {}) => {
+    const gs = crearServidor();
+    const env: any = { SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, ADMIN_TOKENS: 'Jefe:claveJefe99', ...extra };
+    const f = jest.fn((u: any, i: any) => gs.llamar(u, i));
+    const post = async (ruta: string, cuerpo: any, clave = '', ip = '1.1.1.1') => {
+      const r = await manejar(new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave, 'cf-connecting-ip': ip }, body: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo) }), env, f as any);
+      return { status: r.status, j: await r.json() };
+    };
+    const crear = (o: any) => post('/usuarios', { accion: 'guardar', ...o }, 'claveJefe99');
+    return { gs, env, f, post, crear };
+  };
+  beforeEach(() => { vaciarCacheUsuarios(); olvidarIntentos(); });
+
+  it('el administrador crea el usuario con una clave que él escribe y la persona entra con usuario + clave', async () => {
+    const m = montar();
+    const c = await m.crear({ nombre: 'Carla Gómez', rol: 'tecnico', clave: 'sol-2026-azul' });
+    expect(c.j.usuario).toMatchObject({ nombre: 'Carla Gómez', clave: 'sol-2026-azul', terceros: false });
+    const ok = await m.post('/ingresar', { usuario: 'carla gomez', clave: 'sol-2026-azul' });      // sin mayúsculas ni acentos
+    expect(ok.status).toBe(200);
+    expect(ok.j).toMatchObject({ ok: true, nombre: 'Carla Gómez', rol: 'tecnico', terceros: false });
+    expect((await m.post('/yo', {}, 'sol-2026-azul')).j.nombre).toBe('Carla Gómez');                // y esa clave sigue siendo la credencial de la app
+  });
+
+  it('si no escribe clave, se genera una fácil de teclear (xxxxx-xxxxx) que sirve para entrar', async () => {
+    const m = montar();
+    const u = (await m.crear({ nombre: 'Beto', rol: 'supervisor' })).j.usuario;
+    expect(u.clave).toMatch(/^[a-hj-km-np-z2-9]{5}-[a-hj-km-np-z2-9]{5}$/);
+    const r = await m.post('/ingresar', { usuario: ' BETO ', clave: u.clave });
+    expect(r.j).toMatchObject({ ok: true, nombre: 'Beto', rol: 'supervisor' });
+  });
+
+  it('usuario o clave equivocados, baja o clave de otra persona: el mismo mensaje genérico (no revela si el usuario existe)', async () => {
+    const m = montar();
+    await m.crear({ nombre: 'Ana', rol: 'tecnico', clave: 'clave-de-ana' });
+    await m.crear({ nombre: 'Luis', rol: 'tecnico', clave: 'clave-de-luis' });
+    const casos = [{ usuario: 'Ana', clave: 'mala-clave' }, { usuario: 'Nadie', clave: 'clave-de-ana' }, { usuario: 'Ana', clave: 'clave-de-luis' }, { usuario: 'Nadie', clave: 'x' }];
+    for (const c of casos) { const r = await m.post('/ingresar', c); expect(r.status).toBe(401); expect(r.j.error).toBe('Usuario o clave incorrectos.'); }
+    await m.crear({ nombre: 'Ana', rol: 'tecnico', activo: false });
+    expect((await m.post('/ingresar', { usuario: 'Ana', clave: 'clave-de-ana' })).status).toBe(401);
+  });
+
+  it('valida lo que se escribe: campos vacíos, tipos raros y tamaños', async () => {
+    const m = montar();
+    for (const c of [{}, { usuario: 'a' }, { usuario: '', clave: 'x' }, { usuario: 5, clave: 'x' }, { usuario: 'a'.repeat(81), clave: 'x' }, { usuario: 'a', clave: 'x'.repeat(101) }]) expect((await m.post('/ingresar', c)).status).toBe(400);
+    expect((await m.post('/ingresar', '{no json')).status).toBe(400);
+  });
+
+  it('frena la adivinanza de claves: tras 8 fallos seguidos bloquea ese usuario desde esa conexión, y otra conexión no se ve afectada', async () => {
+    const m = montar();
+    await m.crear({ nombre: 'Ana', rol: 'tecnico', clave: 'clave-de-ana' });
+    for (let i = 0; i < 8; i++) expect((await m.post('/ingresar', { usuario: 'Ana', clave: 'mala' + i })).status).toBe(401);
+    expect((await m.post('/ingresar', { usuario: 'Ana', clave: 'clave-de-ana' })).status).toBe(429);      // ni la correcta pasa mientras dure el bloqueo
+    expect((await m.post('/ingresar', { usuario: 'Ana', clave: 'clave-de-ana' }, '', '9.9.9.9')).status).toBe(200);
+  });
+
+  it('un acierto borra los fallos previos; los secretos nombre:clave también sirven para entrar', async () => {
+    const m = montar({ APP_TOKENS: 'Juan:tokJ123' });
+    for (let i = 0; i < 5; i++) await m.post('/ingresar', { usuario: 'Jefe', clave: 'mala' + i });
+    expect((await m.post('/ingresar', { usuario: 'jefe', clave: 'claveJefe99' })).j).toMatchObject({ ok: true, nombre: 'Jefe', rol: 'admin' });
+    for (let i = 0; i < 7; i++) await m.post('/ingresar', { usuario: 'Jefe', clave: 'mala' + i });
+    expect((await m.post('/ingresar', { usuario: 'Jefe', clave: 'claveJefe99' })).status).toBe(200);        // 7 fallos nuevos < 8: no hay bloqueo
+    expect((await m.post('/ingresar', { usuario: 'Juan', clave: 'tokJ123' })).j).toMatchObject({ ok: true, rol: 'tecnico' });
+  });
+
+  it('contratista (terceros) lo decide el administrador y viaja al entrar; también los proyectos que ya existen en la hoja', async () => {
+    const m = montar();
+    await m.crear({ nombre: 'Tercero Uno', rol: 'tecnico', clave: 'clave-tercero', terceros: true });
+    await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'listar', proyecto: { nombre: 'Barrio A' }, desde: '' }) });
+    await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'listar', proyecto: { nombre: 'Zona Norte' }, desde: '' }) });
+    const r = await m.post('/ingresar', { usuario: 'tercero uno', clave: 'clave-tercero' });
+    expect(r.j.terceros).toBe(true);
+    expect(r.j.proyectos.sort()).toEqual(['Barrio A', 'Zona Norte']);
+    expect((await m.post('/yo', {}, 'clave-tercero')).j).toMatchObject({ terceros: true });
+  });
+
+  it('claves manuales: mínimo 8, sin espacios, distintas del nombre y no repetidas entre personas', async () => {
+    const m = montar();
+    for (const clave of ['corta', 'con espacio 123', 'x'.repeat(65)]) expect((await m.crear({ nombre: 'Ana', rol: 'tecnico', clave })).status).toBe(400);
+    expect((await m.crear({ nombre: 'Ana Maria', rol: 'tecnico', clave: 'ana maria'.replace(' ', '') })).j.ok).toBe(true);
+    expect((await m.crear({ nombre: 'Luis Perez', rol: 'tecnico', clave: 'luis perez'.replace(' ', '') + '1' })).j.ok).toBe(true);
+    await m.crear({ nombre: 'Uno', rol: 'tecnico', clave: 'misma-clave-1' });
+    expect((await m.crear({ nombre: 'Dos', rol: 'tecnico', clave: 'misma-clave-1' })).j.ok).toBe(false);   // repetida
+    expect((await m.crear({ nombre: 'Maria  Lopez', rol: 'tecnico' })).j.ok).toBe(true);
+    expect((await m.crear({ nombre: 'maría lopez', rol: 'tecnico' })).j.usuario.nombre).toBe('maría lopez'); // mismo nombre normalizado = misma persona (se edita)
+    expect((await m.post('/usuarios', { accion: 'listar' }, 'claveJefe99')).j.usuarios.filter((u: any) => /lopez/i.test(u.nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '')))).toHaveLength(1);
   });
 });

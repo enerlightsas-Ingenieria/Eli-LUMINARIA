@@ -16,22 +16,31 @@ Para activar la administración:
 2. Publica el proxy: `npx wrangler deploy server/worker.ts --name eli-luminaria-proxy --compatibility-date 2026-01-01`.
 3. Publica la web: `cd web; npm run build; npx wrangler pages deploy dist --project-name eli-luminaria --branch main`.
 
+## Cómo entra la gente: usuario y clave
+Nada de enlaces: cada persona abre la dirección de la web (por ejemplo `https://eli-luminaria.pages.dev`), escribe su **usuario** y su **clave**, y entra.
+- El **usuario es su nombre** tal como lo creó el administrador. No importan mayúsculas, acentos ni espacios de más (`dario ruiz` = `Darío Ruiz`).
+- La app queda lista sola: servidor, cuenta, rol, modo contratista y los proyectos que ya existen en la hoja.
+- La primera vez necesita internet. Después trabaja sin conexión.
+- Tras 8 intentos fallidos seguidos desde la misma conexión, el ingreso se bloquea unos minutos.
+- El enlace directo sigue existiendo como alternativa (útil para dejar un teléfono listo con un toque).
+
 ## Día a día
-- **Nueva persona:** Ajustes → *Administración (usuarios e IA)* → *Usuarios* → **+** → nombre y rol → *Crear y ver enlace*. Pulsa **Compartir** (WhatsApp, correo) o *Copiar enlace*. La persona lo abre en su teléfono y queda lista; su nombre y su rol vienen del servidor.
-- **Contratista:** marca *Contratista (modo terceros)* al crearlo; su enlace exige jornada, cámara y GPS preciso.
-- **Cambiar de rol:** toca la persona, elige el rol y *Guardar*. Se aplica la próxima vez que abra la app con conexión.
-- **Baja:** desmarca *Con acceso*. Deja de poder sincronizar y usar la IA de inmediato (en un minuto como máximo).
-- **Clave filtrada o teléfono perdido:** toca la persona → *Generar clave nueva*. La anterior deja de servir.
+- **Nueva persona:** Ajustes → *Administración (usuarios e IA)* → *Usuarios* → **+** → nombre y rol. La clave puede escribirla el administrador (8 o más caracteres, sin espacios) o, si la deja vacía, el sistema genera una fácil de teclear (`k7mq2-xp9vl`). Pulsa **Crear y ver datos de acceso** y luego **Compartir** (WhatsApp o correo): el mensaje trae dirección, usuario y clave.
+- **Contratista:** marca *Contratista (modo terceros)*: exige jornada, cámara y GPS preciso. Lo decide el administrador; la persona no puede quitarlo.
+- **Cambiar de rol o clave:** toca la persona, cambia lo que necesites y guarda. El rol se aplica la próxima vez que abra la app con conexión; una clave nueva, al instante.
+- **Baja:** desmarca *Con acceso*. Deja de poder ingresar, sincronizar y usar la IA (en un minuto como máximo para quien ya tiene la sesión abierta).
+- **Clave olvidada o filtrada:** *Generar clave nueva*. La anterior deja de servir.
+- **Salir:** Ajustes → *Cerrar sesión* (los registros guardados en el teléfono se conservan).
 - No puedes quitarte a ti mismo el rol de administrador ni darte de baja.
 
 ## Inteligencia artificial
 En Administración → *Inteligencia artificial* (pantalla aparte) se elige qué IA va primero (Gemini o Claude) y se prueba que funcione. Ver `docs/ia.md`.
 
 ## Dónde se guarda
-En la pestaña `_Usuarios` de tu hoja de Google (nombre, rol, clave, activo). La IA elegida está en `_Config`. También puedes editarla a mano (menú **ELI-LUMINARIA → Generar claves faltantes**).
+En la pestaña `_Usuarios` de tu hoja de Google (nombre, rol, clave, activo, contratista). La IA elegida está en `_Config`. También puedes editarla a mano (menú **ELI-LUMINARIA → Generar claves faltantes**).
 
 ## Seguridad
-- El enlace de cada persona contiene su clave: envíalo en privado, nunca en un grupo.
+- Los datos de acceso (y el enlace directo) llevan la clave: envíalos en privado, nunca en un grupo.
 - Solo los administradores pueden ver la lista con las claves. La hoja debe compartirse solo con quien administre.
 - Los técnicos y supervisores nunca ven el token del script de Google ni la clave de la IA: viven en el servidor.
 - El proxy recuerda cada clave `USUARIOS_CACHE_SEG` segundos (60 por defecto).
@@ -49,3 +58,6 @@ Nunca toca `_Usuarios`, `_Config`, `_Equipo`, `_Jornadas` ni proyectos con regis
 ## Empezar de cero
 1. **Hoja de Google:** menú **ELI-LUMINARIA → Reiniciar TODO desde cero**. Pide tres confirmaciones (la última, escribir `BORRAR`). Borra todos los proyectos, el monitoreo de jornadas y manda la carpeta de fotos a la papelera de Drive (recuperable 30 días). Pregunta si borrar también la lista de usuarios.
 2. **Cada teléfono o navegador:** Ajustes → **Borrar todos los datos de este dispositivo**. Si no se hace, el teléfono conserva sus registros viejos. Después se abre de nuevo el enlace de acceso de esa persona.
+
+## Dirección del servidor en la web publicada
+La web trae el servidor de tu empresa en el archivo `web/public/servidor.json` (`{"proxy": "https://…workers.dev"}`). Si cambias de servidor, edítalo y vuelve a publicar la web. Si el archivo falta, la pantalla de ingreso pide la dirección a mano.

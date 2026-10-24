@@ -12,6 +12,7 @@ import { Ayuda } from './pantallas/Ayuda';
 import { Capturar } from './pantallas/Capturar';
 import { Editar } from './pantallas/Editar';
 import { Equipo } from './pantallas/Equipo';
+import { Ingreso } from './pantallas/Ingreso';
 import { Mapa } from './pantallas/Mapa';
 import { Proyectos } from './pantallas/Proyectos';
 import { Registros } from './pantallas/Registros';
@@ -62,10 +63,12 @@ function Cuerpo() {
   useEffect(() => { pedirAlmacenamientoPersistente(); }, []);
   if (!listo) return <Cargando texto="Abriendo…" />;
   const supervisor = veEquipo(rolDe(ajustes));
-  const conPestanas = !PANTALLAS_SIN_PESTANAS.includes(primero);
+  const sinCuenta = !ajustes.apiKey;                                   // sin clave guardada: primero se ingresa (los enlaces de configuración y la ayuda siguen disponibles)
+  const conPestanas = !PANTALLAS_SIN_PESTANAS.includes(primero) && !(sinCuenta && primero !== 'config');
 
   let pantalla;
-  switch (primero) {
+  if (sinCuenta && primero !== 'config' && primero !== 'ayuda') pantalla = <Ingreso />;
+  else switch (primero) {
     case '': pantalla = supervisor ? <Equipo /> : <Registros />; break;
     case 'registros': pantalla = <Registros />; break;
     case 'admin': pantalla = <Administracion seccion={segundo} />; break;
@@ -83,7 +86,7 @@ function Cuerpo() {
       <EstadoConexion />
       <main className={`pantalla${conPestanas ? '' : ' sin-pestanas'}`}>{pantalla}</main>
       {conPestanas && <Pestanas activa={primero} supervisor={supervisor} />}
-      <AutoSync />
+      {!sinCuenta && <AutoSync />}
     </div>
   );
 }

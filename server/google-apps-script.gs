@@ -9,6 +9,7 @@
  *   { token, proyecto:{...}, accion:'listar', desde:'ISO' }                → devuelve lo recibido desde esa marca
  *   { token, accion:'latido', dispositivo, tecnico, estado, ... }           → monitoreo de jornada (pestañas _Equipo y _Jornadas)
  *   { token: TOKEN_ADMIN, accion:'equipo' }                                 → datos del panel/mapa de supervisión (lo usa la web)
+ *   { token, accion:'ingresar', usuario, clave } / { token, accion:'proyectos' }          → ingreso con usuario y clave; nombres de los proyectos
  *   { token, accion:'usuario', clave }                                      → quién es esa clave según la pestaña _Usuarios (lo usa el proxy)
  *   { token: TOKEN_ADMIN, accion:'usuarios_listar' | 'usuarios_guardar' }   → menú de administración de la web (crear/editar usuarios)
  *   { token, accion:'config' } / { token: TOKEN_ADMIN, accion:'config_guardar', clave, valor } → ajustes del sistema (pestaña _Config), p. ej. qué IA va primero
@@ -64,6 +65,8 @@ function doPost(e) {
     if (d.accion === 'equipo') { var datos = datosEquipo(TOKEN_ADMIN); datos.ok = true; return salida(datos); }
     if (d.accion === 'latido') return salida(registrarLatido(d, ahora));
     if (d.accion === 'usuario') return salida({ ok: true, usuario: buscarUsuario(d.clave) });
+    if (d.accion === 'ingresar') return salida({ ok: true, usuario: ingresarUsuario(d.usuario, d.clave) });
+    if (d.accion === 'proyectos') return salida({ ok: true, proyectos: nombresProyectos() });
     if (d.accion === 'config') return salida({ ok: true, config: leerConfig() });
     if (d.accion === 'config_guardar') return salida(guardarConfig(d));
     if (d.accion === 'usuarios_listar') return salida({ ok: true, usuarios: listarUsuarios() });
@@ -499,13 +502,17 @@ function guardarConfig(d) {
 
 /* ---------------- Usuarios (pestaña _Usuarios: el administrador crea personas y roles aquí) ---------------- */
 
-var COLUMNAS_USUARIOS = [['nombre', 'Nombre'], ['rol', 'Rol (tecnico, supervisor o administrador)'], ['clave', 'Clave'], ['activo', 'Activo (si/no)']];
+var COLUMNAS_USUARIOS = [['nombre', 'Nombre'], ['rol', 'Rol (tecnico, supervisor o administrador)'], ['clave', 'Clave'], ['activo', 'Activo (si/no)'], ['terceros', 'Contratista (si/no)']];
 
 /** Crea la pestaña si no existe y la deja lista. También se puede ejecutar a mano. */
 function prepararUsuarios() {
   var nueva = !buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
-  var hoja = hojaSistema(HOJA_USUARIOS, COLUMNAS_USUARIOS, ['nombre', 'rol', 'clave', 'activo']);
-  if (nueva) hoja.appendRow(['Ejemplo Técnico', 'tecnico', '', 'no']);
+  var hoja = hojaSistema(HOJA_USUARIOS, COLUMNAS_USUARIOS, ['nombre', 'rol', 'clave', 'activo', 'terceros']);
+  if (nueva) hoja.appendRow(['Ejemplo Técnico', 'tecnico', '', 'no', 'no']);
+  else if (String(hoja.getRange(1, 5).getValue()) === '') { // pestaña creada antes de existir la columna de contratistas
+    hoja.getRange(1, 5).setValue(COLUMNAS_USUARIOS[4][1]);
+    hoja.getRange(1, 5, 1, 1).setFontWeight('bold').setBackground('#FFC53D');
+  }
   return hoja;
 }
 
@@ -526,7 +533,16 @@ function generarClavesFaltantes() {
 }
 
 /** Clave aleatoria de 20 caracteres (≈ 76 bits): se entrega dentro del enlace de cada persona. */
-function nuevaClave() { return Utilities.getUuid().replace(/-/g, '').substring(0, 20); }
+function nuevaClave() {
+  // 10 caracteres fáciles de dictar y teclear (sin i, l, o, 0, 1): 31^10 ≈ 8 × 10^14 combinaciones. Formato xxxxx-xxxxx.
+  var abc = 'abcdefghjkmnpqrstuvwxyz23456789', hex = Utilities.getUuid().replace(/-/g, ''), out = '';
+  for (var i = 0; i < 10; i++) out += abc.charAt(parseInt(hex.substr(i * 2, 2), 16) % abc.length);
+  return out.substring(0, 5) + '-' + out.substring(5);
+}
+
+/** Nombre comparable: sin acentos, mayúsculas ni espacios de más ("María  López" = "maria lopez"). */
+function normNombre(s) { return String(s === undefined || s === null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+function esAfirmativo(v) { var a = String(v === undefined || v === null ? '' : v).trim().toLowerCase(); return a === 'si' || a === 'sí' || a === 's' || a === 'true' || a === '1' || a === 'yes'; }
 
 function rolDe(texto) {
   var r = String(texto === undefined || texto === null ? '' : texto).trim().toLowerCase();
@@ -555,25 +571,42 @@ function buscarUsuario(clave) {
   if (!clave) return null;
   var hoja = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
   if (!hoja || hoja.getLastRow() < 2) return null;
-  var datos = hoja.getRange(2, 1, hoja.getLastRow() - 1, 4).getValues();
+  var datos = hoja.getRange(2, 1, hoja.getLastRow() - 1, 5).getValues();
   for (var i = 0; i < datos.length; i++) {
     var r = datos[i];
     if (String(r[2]).trim() !== clave) continue;
     if (usuarioInactivo(r[3])) return null;
     var nombre = String(r[0]).trim();
     if (!nombre) return null;
-    return { nombre: nombre, rol: rolDe(r[1]) };
+    return { nombre: nombre, rol: rolDe(r[1]), terceros: esAfirmativo(r[4]) };
   }
   return null;
+}
+
+/** Ingreso con usuario y clave: el usuario es el nombre (sin distinguir mayúsculas, acentos ni espacios de más). null si no coincide. */
+function ingresarUsuario(usuario, clave) {
+  var u = buscarUsuario(clave);
+  return u && normNombre(u.nombre) === normNombre(usuario) ? u : null;
+}
+
+/** Nombres de las pestañas de proyecto (las que tienen el diseño actual y no están archivadas), para que cada persona los vea al entrar. */
+function nombresProyectos() {
+  var res = [];
+  SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(function (h) {
+    var n = h.getName();
+    if (n.charAt(0) === '_' || / \(anterior( \d+)?\)$/.test(n) || res.length >= 100) return;
+    if (h.getLastRow() >= 1 && h.getRange(1, 1).getValue() === COLUMNAS[0][1]) res.push(n);
+  });
+  return res;
 }
 
 /** Todas las personas (con su clave: solo la ve el administrador a través del proxy). */
 function listarUsuarios() {
   var hoja = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
   if (!hoja || hoja.getLastRow() < 2) return [];
-  return hoja.getRange(2, 1, hoja.getLastRow() - 1, 4).getValues()
+  return hoja.getRange(2, 1, hoja.getLastRow() - 1, 5).getValues()
     .filter(function (r) { return String(r[0]).trim(); })
-    .map(function (r) { return { nombre: String(r[0]).trim(), rol: rolDe(r[1]), clave: String(r[2]).trim(), activo: !usuarioInactivo(r[3]) }; });
+    .map(function (r) { return { nombre: String(r[0]).trim(), rol: rolDe(r[1]), clave: String(r[2]).trim(), activo: !usuarioInactivo(r[3]), terceros: esAfirmativo(r[4]) }; });
 }
 
 /**
@@ -586,25 +619,34 @@ function guardarUsuario(d) {
   if (/^[=+\-@_]/.test(nombre)) return { ok: false, error: 'El nombre no puede empezar por = + - @ _' };
   var rol = rolDe(d.rol);
   var activo = d.activo !== false;
-  var propio = String(d.por || '').trim().toLowerCase() === nombre.toLowerCase();
+  var terceros = d.terceros === true;
+  var propio = normNombre(d.por) === normNombre(nombre);
   if (propio && (!activo || rol !== 'admin')) return { ok: false, error: 'No puedes quitarte el rol de administrador ni darte de baja a ti mismo.' };
+
+  var manual = d.clave === undefined || d.clave === null || d.clave === '' ? '' : String(d.clave);
+  if (manual && !/^\S{8,64}$/.test(manual)) return { ok: false, error: 'La clave debe tener entre 8 y 64 caracteres, sin espacios.' };
+  if (manual && normNombre(manual) === normNombre(nombre)) return { ok: false, error: 'La clave no puede ser igual al nombre.' };
 
   var hoja = prepararUsuarios();
   var n = hoja.getLastRow();
-  var datos = n > 1 ? hoja.getRange(2, 1, n - 1, 4).getValues() : [];
+  var datos = n > 1 ? hoja.getRange(2, 1, n - 1, 5).getValues() : [];
   var fila = 0;
-  datos.forEach(function (r, i) { if (!fila && String(r[0]).trim().toLowerCase() === nombre.toLowerCase()) fila = i + 2; });
+  datos.forEach(function (r, i) { if (!fila && normNombre(r[0]) === normNombre(nombre)) fila = i + 2; });
   // la fila de ejemplo que crea el sistema (inactiva y sin clave) se reutiliza en vez de dejarla ahí
   if (!fila) datos.forEach(function (r, i) { if (!fila && String(r[0]).trim() === 'Ejemplo Técnico' && !String(r[2]).trim()) fila = i + 2; });
 
+  var otras = datos.filter(function (r, i) { return i + 2 !== fila; }).map(function (r) { return String(r[2]).trim(); });
   var clave = fila ? String(hoja.getRange(fila, 3).getValue()).trim() : '';
-  if (!clave || d.claveNueva === true) {
-    do { clave = nuevaClave(); } while (datos.some(function (r) { return String(r[2]).trim() === clave; }));
+  if (manual) {
+    if (otras.indexOf(manual) >= 0) return { ok: false, error: 'Esa clave ya la usa otra persona. Elige otra.' };
+    clave = manual;
+  } else if (!clave || d.claveNueva === true) {
+    do { clave = nuevaClave(); } while (otras.indexOf(clave) >= 0);
   }
-  var valores = [textoSeguro(nombre), rol, clave, activo ? 'si' : 'no'];
-  if (fila) hoja.getRange(fila, 1, 1, 4).setValues([valores]);
+  var valores = [textoSeguro(nombre), rol, clave, activo ? 'si' : 'no', terceros ? 'si' : 'no'];
+  if (fila) hoja.getRange(fila, 1, 1, 5).setValues([valores]);
   else { hoja.appendRow(valores); }
-  return { ok: true, usuario: { nombre: nombre, rol: rol, clave: clave, activo: activo } };
+  return { ok: true, usuario: { nombre: nombre, rol: rol, clave: clave, activo: activo, terceros: terceros } };
 }
 
 /** Un latido por teléfono con jornada: sobrescribe SU fila (solo se guarda la última posición, sin historial de rutas). */
