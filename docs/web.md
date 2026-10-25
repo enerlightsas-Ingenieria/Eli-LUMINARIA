@@ -105,3 +105,9 @@ npm run dev            # servidor local (http://localhost:5173)
 npm test               # pruebas del almacén (IndexedDB simulada)
 npm run build && npm run e2e   # pruebas de navegador (PW_CHROMIUM=/ruta/chromium si no usas el de Playwright)
 ```
+
+## Zoom de la cámara
+Dentro de la cámara de la app, el pellizco con dos dedos (o la barra de zoom con − / +) acerca la **imagen de la cámara**, no la página.
+- Si el teléfono ofrece zoom real en la cámara (la mayoría de Android con Chrome), se usa ese zoom.
+- Si no (iPhone/Safari), el zoom es digital: se acerca la imagen y la foto sale recortada del centro con ese mismo zoom, así que lo que ves es lo que se guarda.
+- En computador, la rueda del ratón también acerca.

@@ -391,3 +391,47 @@ test('ingreso con usuario y clave (sin enlaces): el administrador crea la cuenta
   await dario.page.getByRole('button', { name: 'Entrar' }).click();
   await expect(dario.page.getByRole('alert')).toContainText('Usuario o clave incorrectos');
 });
+
+test('cámara: pellizcar o usar la barra acerca la IMAGEN (no la página) y la foto sale recortada con ese zoom', async ({ browser }) => {
+  const b = crearBackend();
+  const { page } = await telefono(browser, b);
+  await configurar(page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A'] }));
+  await usarProyecto(page, 'Barrio A');
+  await page.getByRole('button', { name: 'Nueva luminaria' }).click();
+  await page.getByTestId('ranura-0').click();
+  const camara = page.getByRole('dialog', { name: /Cámara/ });
+  await expect(page.getByRole('button', { name: 'Tomar foto' })).toBeEnabled({ timeout: 15_000 });
+
+  // el gesto de pellizco pertenece a la cámara: la página no puede hacer zoom por su cuenta
+  expect(await camara.evaluate((el) => getComputedStyle(el).touchAction)).toBe('none');
+  expect(await page.getByTestId('visor').evaluate((el) => getComputedStyle(el).touchAction)).toBe('none');
+
+  // pellizco con dos dedos: se separan al doble de distancia → zoom ×2
+  await page.getByTestId('visor').evaluate((el) => {
+    const r = el.getBoundingClientRect(), y = r.top + r.height / 2;
+    const ev = (tipo: string, id: number, x: number) => el.dispatchEvent(new PointerEvent(tipo, { pointerId: id, clientX: x, clientY: y, bubbles: true, pointerType: 'touch' }));
+    ev('pointerdown', 1, r.left + 100); ev('pointerdown', 2, r.left + 200);
+    ev('pointermove', 2, r.left + 300);
+    ev('pointerup', 2, r.left + 300); ev('pointerup', 1, r.left + 100);
+  });
+  await expect(page.getByTestId('zoom-valor')).toHaveText('2.0×');
+  expect(await page.locator('.camara video').evaluate((v) => getComputedStyle(v).transform)).toMatch(/matrix\(2,/);   // se acerca la imagen de la cámara
+
+  // barra de zoom: acerca y aleja
+  await page.getByRole('slider', { name: 'Zoom' }).fill('4');
+  await expect(page.getByTestId('zoom-valor')).toHaveText('4.0×');
+  await page.getByRole('button', { name: 'Alejar' }).click();
+  await expect(page.getByTestId('zoom-valor')).toHaveText('3.5×');
+  await page.getByRole('slider', { name: 'Zoom' }).fill('1');
+  await expect(page.getByTestId('zoom-valor')).toHaveCount(0);                              // en 1× no hay indicador
+
+  // la foto sale con el zoom elegido: más pequeña (recortada del centro), no la imagen completa
+  const anchoVideo = await page.locator('.camara video').evaluate((v: HTMLVideoElement) => v.videoWidth);
+  await page.getByRole('slider', { name: 'Zoom' }).fill('4');
+  await page.getByRole('button', { name: 'Tomar foto' }).click();
+  const img = page.getByTestId('ranura-0').locator('img');
+  await expect(img).toBeVisible();
+  const ancho = await img.evaluate(async (i: HTMLImageElement) => (await createImageBitmap(await (await fetch(i.src)).blob())).width);
+  expect(ancho).toBeLessThanOrEqual(Math.ceil(anchoVideo / 4) + 1);
+  expect(ancho).toBeGreaterThan(anchoVideo / 8);
+});

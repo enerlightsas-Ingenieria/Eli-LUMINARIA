@@ -10,11 +10,23 @@ export function blobABase64(blob: Blob): Promise<string> {
 }
 
 /** Dibuja la imagen reducida (lado mayor 1280 px) y la devuelve como JPEG. */
-export function aJpegReducido(fuente: CanvasImageSource, ancho: number, alto: number, maxLado = 1280, calidad = 0.8): Promise<Blob> {
+export interface Recorte { sx: number; sy: number; sw: number; sh: number }
+
+/** Zona central de la imagen que queda visible con un zoom digital (zoom 2 = la mitad del ancho y del alto). */
+export function recorteParaZoom(ancho: number, alto: number, zoom: number): Recorte {
+  const z = Math.max(1, zoom || 1);
+  const sw = ancho / z, sh = alto / z;
+  return { sx: (ancho - sw) / 2, sy: (alto - sh) / 2, sw, sh };
+}
+
+/** `recorte` (opcional): solo esa parte de la fuente; `ancho` y `alto` son entonces las medidas de ese recorte. */
+export function aJpegReducido(fuente: CanvasImageSource, ancho: number, alto: number, maxLado = 1280, calidad = 0.8, recorte?: Recorte): Promise<Blob> {
   const k = Math.min(1, maxLado / Math.max(ancho, alto));
   const c = document.createElement('canvas');
   c.width = Math.round(ancho * k); c.height = Math.round(alto * k);
-  c.getContext('2d')!.drawImage(fuente, 0, 0, c.width, c.height);
+  const ctx = c.getContext('2d')!;
+  if (recorte) ctx.drawImage(fuente, recorte.sx, recorte.sy, recorte.sw, recorte.sh, 0, 0, c.width, c.height);
+  else ctx.drawImage(fuente, 0, 0, c.width, c.height);
   return new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej(new Error('No se pudo procesar la foto.'))), 'image/jpeg', calidad));
 }
 

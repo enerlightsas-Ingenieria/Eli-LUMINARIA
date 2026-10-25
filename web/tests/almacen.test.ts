@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { normalizarRemota } from '@compartido/lib/fusion';
 import { caracteristicasVacias, Luminaria } from '@compartido/types';
 import * as db from '../src/servicios/almacen';
+import { recorteParaZoom } from '../src/servicios/fotos';
 
 const borrador = (proyectoId: number, o: any = {}) => ({
   ...caracteristicasVacias(), uuid: crypto.randomUUID(), proyectoId, creadoEn: '2026-01-01T00:00:00Z', actualizadoEn: '', fotos: ['f1'],
@@ -147,5 +148,19 @@ describe('almacén web (IndexedDB)', () => {
     expect(await (await db.obtenerFoto(id))!.text()).toBe('hola');
     await db.borrarFotos([id]);
     expect(await db.obtenerFoto(id)).toBeUndefined();
+  });
+});
+
+describe('zoom digital de la cámara', () => {
+  it('el recorte es la zona central: zoom 1 = todo, zoom 2 = la mitad del ancho y del alto', () => {
+    expect(recorteParaZoom(1920, 1080, 1)).toEqual({ sx: 0, sy: 0, sw: 1920, sh: 1080 });
+    expect(recorteParaZoom(1920, 1080, 2)).toEqual({ sx: 480, sy: 270, sw: 960, sh: 540 });
+    const r = recorteParaZoom(640, 480, 4);
+    expect(r).toEqual({ sx: 240, sy: 180, sw: 160, sh: 120 });
+    expect(r.sx + r.sw / 2).toBe(320); expect(r.sy + r.sh / 2).toBe(240);       // siempre centrado
+  });
+  it('un zoom menor que 1 o inválido no recorta', () => {
+    expect(recorteParaZoom(100, 100, 0.5)).toEqual({ sx: 0, sy: 0, sw: 100, sh: 100 });
+    expect(recorteParaZoom(100, 100, NaN)).toEqual({ sx: 0, sy: 0, sw: 100, sh: 100 });
   });
 });
