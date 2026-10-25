@@ -1,9 +1,10 @@
 import { rolDe, type Rol } from '@compartido/core/ajustes';
 import { codificar, type ConfigFlota } from '@compartido/lib/config';
-import { ajustesPorDefecto, cargarAjustes, guardarAjustes } from './ajustes';
+import { cargarAjustes, guardarAjustes } from './ajustes';
+import { dejarAviso, fijarClaveDeSesion, guardarVerificador, olvidarVerificador, verificarLocal } from './sesion';
 import { asegurarProyectos } from './configuracion';
 
-export interface Usuario { nombre: string; rol: Rol; clave: string; activo: boolean; terceros?: boolean }
+export interface Usuario { nombre: string; usuario: string; rol: Rol; clave: string; activo: boolean; terceros?: boolean }
 
 const ANTHROPIC = 'api.anthropic.com';
 
@@ -29,18 +30,30 @@ async function llamarProxy(ruta: string, cuerpo: object, timeoutMs = 15000): Pro
 }
 
 /**
- * Pregunta al servidor quién es esta clave y guarda su rol y su nombre (el nombre lo manda el servidor: lo escribe el administrador,
- * no la persona). Sin conexión o con el servidor caído no cambia nada. Devuelve true si cambió algo.
+ * Pregunta al servidor quién es esta clave y guarda su rol, nombre, usuario, modo contratista y política de fotos (los decide el
+ * administrador, no la persona). Sin conexión o con el servidor caído no cambia nada. Si el servidor dice que la clave ya no vale
+ * (baja o clave cambiada), se cierra la sesión. Devuelve true si cambió algo.
  */
 export async function verificarIdentidad(): Promise<boolean> {
   if (!(await baseProxy())) return false;
   let j: any;
-  try { j = await llamarProxy('/yo', {}, 8000); } catch { return false; }
+  try { j = await llamarProxy('/yo', {}, 8000); }
+  catch (e: any) {
+    if (e?.estado === 401) {   // dado de baja o clave cambiada
+      await cerrarSesion(); olvidarVerificador();
+      dejarAviso('Tu acceso ya no está activo o tu clave cambió. Pide ayuda a tu administrador.');
+      return true;
+    }
+    return false;
+  }
   const a = await cargarAjustes();
   const terceros = typeof j.terceros === 'boolean' ? j.terceros : a.modoTerceros;   // lo decide el administrador (si el servidor lo informa)
+  const fotos = typeof j.fotos === 'boolean' ? j.fotos : a.syncFotos;
+  const usuario = typeof j.usuario === 'string' && j.usuario ? j.usuario : a.usuario;
   const creados = Array.isArray(j.proyectos) ? await asegurarProyectos(j.proyectos) : 0;
-  if (rolDe(a) === j.rol && a.rol === j.rol && a.tecnico === j.nombre && !a.supervisor && a.modoTerceros === terceros) return creados > 0;
-  await guardarAjustes({ ...a, rol: j.rol, supervisor: false, tecnico: j.nombre, modoTerceros: terceros });
+  if (rolDe(a) === j.rol && a.rol === j.rol && a.tecnico === j.nombre && !a.supervisor && a.modoTerceros === terceros && a.syncFotos === fotos && a.usuario === usuario) return creados > 0;
+  await guardarAjustes({ ...a, rol: j.rol, supervisor: false, tecnico: j.nombre, usuario, modoTerceros: terceros, syncFotos: fotos });
+  if (usuario && usuario !== a.usuario) await guardarVerificador(usuario, a.apiKey).catch(() => {});   // el usuario correcto para entrar sin conexión
   return true;
 }
 
@@ -53,40 +66,72 @@ export async function servidorPorDefecto(): Promise<string> {
   } catch { return ''; }
 }
 
-export class ErrorIngreso extends Error {}
+export class ErrorIngreso extends Error {
+  /** No se pudo hablar con el servidor (sin internet o servidor caído): no es lo mismo que "clave incorrecta". */
+  constructor(mensaje: string, public sinRed = false) { super(mensaje); }
+}
 
 /** Entrar con usuario y clave: el servidor confirma quién es y la app queda lista (servidor, cuenta, rol y proyectos). */
 export async function ingresar(servidor: string, usuario: string, clave: string): Promise<{ nombre: string; rol: Rol }> {
   const base = servidor.trim().replace(/\/+$/, '');
   if (!/^https:\/\/[^\s/]+/i.test(base)) throw new ErrorIngreso('La dirección del servidor debe empezar por https://');
-  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new ErrorIngreso('No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.', true);   // sin red: no se espera a que falle
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 15000);
   let r: Response;
   try { r = await fetch(`${base}/ingresar`, { method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ usuario: usuario.trim(), clave: clave.trim() }), signal: ctl.signal }); }
-  catch { throw new ErrorIngreso('No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.'); }
+  catch { throw new ErrorIngreso('No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.', true); }
   finally { clearTimeout(t); }
   const j = await r.json().catch(() => null);
-  if (!r.ok || !j?.ok) throw new ErrorIngreso(j?.error ?? `El servidor respondió ${r.status}.`);
+  if (!r.ok || !j?.ok) throw new ErrorIngreso(j?.error ?? `El servidor respondió ${r.status}.`, r.status >= 500);
   const a = await cargarAjustes();
+  const login = typeof j.usuario === 'string' && j.usuario ? j.usuario : usuario.trim();
   await guardarAjustes({
-    ...a, endpoint: base, syncUrl: `${base}/sync`, apiKey: clave.trim(), tecnico: j.nombre, rol: j.rol, supervisor: false,
+    ...a, endpoint: base, syncUrl: `${base}/sync`, apiKey: clave.trim(), tecnico: j.nombre, usuario: login, rol: j.rol, supervisor: false,
     modoTerceros: typeof j.terceros === 'boolean' ? j.terceros : a.modoTerceros,
+    syncFotos: typeof j.fotos === 'boolean' ? j.fotos : a.syncFotos,
   });
+  await guardarVerificador(login, clave);
   if (Array.isArray(j.proyectos)) await asegurarProyectos(j.proyectos);
   return { nombre: j.nombre, rol: j.rol };
 }
 
-/** Sale de la cuenta: borra la clave y el rol de este dispositivo. Los registros guardados se conservan. */
-export async function cerrarSesion(): Promise<void> {
+/**
+ * Volver a entrar en un dispositivo que ya tuvo una cuenta. Con internet lo decide el servidor (así se notan las bajas y los cambios
+ * de rol); sin internet se comprueba contra el verificador guardado la última vez, para poder trabajar en campo.
+ */
+export async function reingresar(usuario: string, clave: string): Promise<{ sinConexion: boolean }> {
   const a = await cargarAjustes();
-  const base = ajustesPorDefecto();
-  await guardarAjustes({ ...a, apiKey: '', rol: undefined, supervisor: false, tecnico: '', endpoint: base.endpoint, syncUrl: '', modoTerceros: false });
+  const base = /^https:\/\//i.test(a.endpoint) && !a.endpoint.includes(ANTHROPIC) ? a.endpoint.replace(/\/+$/, '') : await servidorPorDefecto();
+  try { await ingresar(base, usuario, clave); return { sinConexion: false }; }
+  catch (e) {
+    if (!(e instanceof ErrorIngreso) || !e.sinRed) throw e;
+    if (await verificarLocal(usuario, clave)) { fijarClaveDeSesion(clave); return { sinConexion: true }; }
+    throw new ErrorIngreso('Sin conexión no se pudo comprobar. Revisa el usuario y la clave (la primera vez en un teléfono necesitas internet).');
+  }
 }
 
-export async function listarUsuarios(): Promise<Usuario[]> {
-  return (await llamarProxy('/usuarios', { accion: 'listar' })).usuarios as Usuario[];
+/** Salir: la clave se olvida (queda solo el usuario para facilitar el próximo ingreso). Los registros guardados se conservan. */
+export async function cerrarSesion(): Promise<void> {
+  fijarClaveDeSesion('');
 }
 
-export async function guardarUsuario(u: { nombre: string; rol: Rol; activo: boolean; claveNueva?: boolean; clave?: string; terceros?: boolean }): Promise<Usuario> {
+/** Dejar este dispositivo sin cuenta (otra persona va a usarlo). Los registros guardados NO se borran. */
+export async function cambiarDeUsuario(): Promise<void> {
+  fijarClaveDeSesion(''); olvidarVerificador();
+  const a = await cargarAjustes();
+  await guardarAjustes({ ...a, apiKey: '', rol: undefined, supervisor: false, tecnico: '', usuario: '', modoTerceros: false, syncFotos: false });
+}
+
+export async function listarUsuarios(): Promise<{ usuarios: Usuario[]; superusuarios: string[] }> {
+  const j = await llamarProxy('/usuarios', { accion: 'listar' });
+  return { usuarios: j.usuarios as Usuario[], superusuarios: Array.isArray(j.superusuarios) ? j.superusuarios : [] };
+}
+
+/** ¿Se guarda la primera foto de cada luminaria en Drive? (lo decide el administrador). */
+export const estadoSistema = (): Promise<{ fotos: boolean }> => llamarProxy('/sistema', { accion: 'estado' });
+export const guardarFotosEnDrive = (fotos: boolean): Promise<{ fotos: boolean }> => llamarProxy('/sistema', { accion: 'guardar', fotos });
+
+export async function guardarUsuario(u: { nombre: string; usuario?: string; rol: Rol; activo: boolean; claveNueva?: boolean; clave?: string; terceros?: boolean }): Promise<Usuario> {
   return (await llamarProxy('/usuarios', { accion: 'guardar', ...u })).usuario as Usuario;
 }
 
@@ -94,7 +139,7 @@ export async function guardarUsuario(u: { nombre: string; rol: Rol; activo: bool
 export async function enlaceDeAcceso(u: Usuario, opciones: { proyectos?: string[]; terceros?: boolean; precision?: number } = {}): Promise<string> {
   const p = await baseProxy();
   if (!p) throw new Error('La app aún no está configurada con el servidor de tu empresa.');
-  const cfg: ConfigFlota = { endpoint: p.base, syncUrl: `${p.base}/sync`, apiKey: u.clave, tecnico: u.nombre };
+  const cfg: ConfigFlota = { endpoint: p.base, syncUrl: `${p.base}/sync`, apiKey: u.clave, tecnico: u.nombre, usuario: u.usuario };
   if (opciones.proyectos?.length) cfg.proyectos = opciones.proyectos;
   if (opciones.terceros) { cfg.modoTerceros = true; cfg.precisionMaxM = opciones.precision ?? 20; }
   return `${location.origin}${location.pathname}#/config?c=${codificar(cfg)}`;

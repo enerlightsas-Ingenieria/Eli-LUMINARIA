@@ -150,7 +150,7 @@ export function Editar({ id }: { id: string }) {
         {l.fotos.length < 3 && <button type="button" className="anadir" aria-label="Añadir foto" onClick={() => setCamara(true)}><Icono nombre="mas" tam={32} /></button>}
       </div>
 
-      {!!l.tecnico && <p className="muted" style={{ marginBottom: 6 }}>Registrada por {l.tecnico}</p>}
+      {!!l.tecnico && <p className="muted" style={{ marginBottom: 6 }}>Registrada por {l.tecnico}{l.usuario ? ` (${l.usuario})` : ''}</p>}
       {!!aviso && <p className="aviso" role="status">{aviso}</p>}
       {!!l.confianza && <div style={{ marginBottom: 8 }}><Ficha texto={`Confianza IA: ${l.confianza} — verifica los datos`} color={l.confianza === 'alta' ? 'ok' : l.confianza === 'media' ? 'aviso' : 'peligro'} /></div>}
       <div className="pila">

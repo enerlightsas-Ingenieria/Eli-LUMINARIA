@@ -20,7 +20,7 @@ const hace = (iso: string, ahora: string) => {
 
 /** Panel de supervisión: quién trabaja, quién está sin señal y dónde, con la calidad de lo capturado. Requiere cuenta de supervisor. */
 export function Equipo() {
-  const { ajustes } = useApp();
+  const { ajustes, salir } = useApp();
   const [d, setD] = useState<any>(null);
   const [error, setError] = useState('');
   const [verLuminarias, setVerLuminarias] = useState(false);
@@ -58,7 +58,7 @@ export function Equipo() {
   return (
     <>
       <Cabecera titulo="Equipo" subtitulo={d ? `${cuenta('En jornada')} en jornada · ${cuenta('Sin señal')} sin señal · ${cuenta('Pausada')} en pausa` : 'Cargando…'}
-        acciones={[...(rolDe(ajustes) === 'admin' ? [{ icono: 'usuarios', etiqueta: 'Administración', onClick: () => ir('/admin') }] : []), { icono: 'actualizar', etiqueta: 'Actualizar', onClick: cargar }, { icono: 'mapa', etiqueta: 'Ajustar a todos', onClick: () => setAjustar((n) => n + 1) }]} />
+        acciones={[...(rolDe(ajustes) === 'admin' ? [{ icono: 'usuarios', etiqueta: 'Administración', onClick: () => ir('/admin') }] : []), { icono: 'actualizar', etiqueta: 'Actualizar', onClick: cargar }, { icono: 'mapa', etiqueta: 'Ajustar a todos', onClick: () => setAjustar((n) => n + 1) }, { icono: 'salir', etiqueta: 'Salir', onClick: salir }]} />
       {error && <p className="aviso" role="alert">{error}</p>}
       {!d && !error && <Cargando />}
       {d && (

@@ -17,15 +17,29 @@ Para activar la administración:
 3. Publica la web: `cd web; npm run build; npx wrangler pages deploy dist --project-name eli-luminaria --branch main`.
 
 ## Cómo entra la gente: usuario y clave
-Nada de enlaces: cada persona abre la dirección de la web (por ejemplo `https://eli-luminaria.pages.dev`), escribe su **usuario** y su **clave**, y entra.
-- El **usuario es su nombre** tal como lo creó el administrador. No importan mayúsculas, acentos ni espacios de más (`dario ruiz` = `Darío Ruiz`).
-- La app queda lista sola: servidor, cuenta, rol, modo contratista y los proyectos que ya existen en la hoja.
-- La primera vez necesita internet. Después trabaja sin conexión.
+Cada persona abre la dirección de la web (por ejemplo `https://eli-luminaria.pages.dev`), escribe su **usuario** y su **clave**, y entra.
+
+**Siempre se pide ingresar al abrir la app.** La clave no se guarda en el teléfono: vive solo en la memoria de la página y se pierde al cerrarla.
+- **Salir:** botón *Salir* arriba en la pantalla principal (y en Ajustes). Los registros guardados en el teléfono se conservan y se envían cuando la persona vuelve a entrar.
+- **Bloqueo por inactividad:** tras **15 minutos sin tocar la app** (o al volver a ella pasado ese tiempo) se pide la clave otra vez. La sesión sigue abierta por detrás, así que el envío de registros y el reporte de ubicación de una jornada activa continúan; lo único que se exige es la clave para volver a ver o usar la app. No se puede esquivar cambiando la dirección.
+- **Trabajo sin internet:** la primera vez en un teléfono se necesita internet. Después, aunque no haya señal, la persona escribe su usuario y clave y entra: se comprueban contra un resumen irreversible que quedó guardado en el teléfono (no contra la clave). Cuando vuelve la señal el servidor vuelve a confirmar la cuenta.
+- **Baja o clave cambiada:** al reconectarse, la app lo detecta, cierra la sesión y avisa.
 - Tras 8 intentos fallidos seguidos desde la misma conexión, el ingreso se bloquea unos minutos.
-- El enlace directo sigue existiendo como alternativa (útil para dejar un teléfono listo con un toque).
+- Si un teléfono lo va a usar otra persona: pantalla de ingreso → *Entrar con otro usuario* (los registros que ya estaban guardados no se borran; para borrarlos, Ajustes → *Borrar todos los datos de este dispositivo*).
+- La app queda lista sola: servidor, cuenta, rol, modo contratista, política de fotos y los proyectos que ya existen en la hoja.
+- El enlace directo sigue existiendo como alternativa, pero igualmente se pedirá usuario y clave cuando se vuelva a abrir la app.
+
+## Quién es el administrador "superusuario"
+Los administradores definidos en Cloudflare (`ADMIN_TOKENS`) son **superusuarios**: la llave de emergencia de la plataforma. Aparecen arriba en la lista de usuarios (solo el nombre, nunca la clave) y no se editan desde la app. Para el día a día conviene crear **tu propia cuenta de administrador** en la lista (rol Administrador) y usar esa; el superusuario queda de respaldo.
+
+## Quién registró cada luminaria
+La hoja tiene las columnas **Técnico** (nombre) y **Usuario**. Las llena el servidor con la cuenta con la que se ingresó, no el teléfono: nadie puede declarar que registró otra persona. Si alguien edita después un registro, el autor original se conserva.
+
+## Fotos
+En Administración → **Fotos**: *Guardar la primera foto de cada luminaria en Google Drive* (activado por defecto). Al sincronizar se sube la primera foto de cada luminaria a la carpeta **ELI-LUMINARIA Fotos** de Drive y su enlace queda en la columna **Foto**. Vale para todas las personas sin que configuren nada.
 
 ## Día a día
-- **Nueva persona:** Ajustes → *Administración (usuarios e IA)* → *Usuarios* → **+** → nombre y rol. La clave puede escribirla el administrador (8 o más caracteres, sin espacios) o, si la deja vacía, el sistema genera una fácil de teclear (`k7mq2-xp9vl`). Pulsa **Crear y ver datos de acceso** y luego **Compartir** (WhatsApp o correo): el mensaje trae dirección, usuario y clave.
+- **Nueva persona:** Ajustes → *Administración* → *Usuarios* → **+** → nombre completo, usuario (se propone solo: inicial + apellido) y rol. La clave puede escribirla el administrador (8 o más caracteres, sin espacios) o, si la deja vacía, el sistema genera una fácil de teclear (`k7mq2-xp9vl`). Pulsa **Crear y ver datos de acceso** y luego **Compartir** (WhatsApp o correo): el mensaje trae dirección, usuario y clave.
 - **Contratista:** marca *Contratista (modo terceros)*: exige jornada, cámara y GPS preciso. Lo decide el administrador; la persona no puede quitarlo.
 - **Cambiar de rol o clave:** toca la persona, cambia lo que necesites y guarda. El rol se aplica la próxima vez que abra la app con conexión; una clave nueva, al instante.
 - **Baja:** desmarca *Con acceso*. Deja de poder ingresar, sincronizar y usar la IA (en un minuto como máximo para quien ya tiene la sesión abierta).

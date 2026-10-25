@@ -5,23 +5,32 @@ import { Boton, Cabecera, Campo, Cargando, Ficha, Hoja, Seccion, Segmentado } fr
 import { useApp } from '../contexto/App';
 import { ir } from '../router';
 import { enlaceDeAcceso, guardarUsuario, listarUsuarios, type Usuario } from '../servicios/identidad';
+import { normalizar } from '../servicios/sesion';
 
 const ROLES: { valor: Rol; texto: string }[] = [{ valor: 'tecnico', texto: 'Técnico' }, { valor: 'supervisor', texto: 'Supervisor' }, { valor: 'admin', texto: 'Administrador' }];
 const TEXTO_ROL: Record<Rol, string> = { tecnico: 'Técnico', supervisor: 'Supervisor', admin: 'Administrador' };
 
-interface Edicion { original?: Usuario; nombre: string; rol: Rol; activo: boolean; terceros: boolean; clave: string }
+interface Edicion { original?: Usuario; nombre: string; usuario: string; usuarioTocado: boolean; rol: Rol; activo: boolean; terceros: boolean; clave: string }
+
+/** Propuesta de usuario a partir del nombre: inicial del primer nombre + último apellido, en minúsculas y sin tildes (Juan Pérez → jperez). */
+export const sugerirUsuario = (nombre: string) => {
+  const p = normalizar(nombre).split(' ').filter(Boolean);
+  if (!p.length) return '';
+  return (p.length === 1 ? p[0] : p[0][0] + p[p.length - 1]).replace(/[^a-z0-9]/g, '');
+};
 
 /** Administración de usuarios: crea personas con usuario y clave, define su rol, da de baja y entrega sus datos de acceso. Solo administradores. */
 export function AdminUsuarios() {
   const { ajustes, proyectos } = useApp();
   const [lista, setLista] = useState<Usuario[] | null>(null);
+  const [superusuarios, setSuperusuarios] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [edicion, setEdicion] = useState<Edicion | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [acceso, setAcceso] = useState<{ usuario: Usuario; url: string } | null>(null);
 
   const cargar = useCallback(async () => {
-    try { setLista(await listarUsuarios()); setError(''); } catch (e: any) { setError(e.message ?? String(e)); }
+    try { const r = await listarUsuarios(); setLista(r.usuarios); setSuperusuarios(r.superusuarios); setError(''); } catch (e: any) { setError(e.message ?? String(e)); }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
 
@@ -29,18 +38,20 @@ export function AdminUsuarios() {
 
   const direccion = `${location.origin}${location.pathname}`;
   const mostrarAcceso = async (u: Usuario) => setAcceso({ usuario: u, url: await enlaceDeAcceso(u, { proyectos: proyectos.map((p) => p.nombre), terceros: !!u.terceros && u.rol === 'tecnico' }) });
-  const mensajeDeAcceso = (u: Usuario) => `ELI-LUMINARIA\nEntra aquí: ${direccion}\nUsuario: ${u.nombre}\nClave: ${u.clave}\n(Es personal: no la compartas.)`;
+  const mensajeDeAcceso = (u: Usuario) => `ELI-LUMINARIA\nEntra aquí: ${direccion}\nUsuario: ${u.usuario}\nClave: ${u.clave}\n(Es personal: no la compartas.)`;
 
   const guardar = async (claveNueva = false) => {
     if (!edicion) return;
     const nombre = edicion.nombre.trim();
     if (!nombre) { await avisar('Falta el nombre', 'Escribe el nombre completo de la persona.'); return; }
+    const usuario = edicion.usuario.trim();
+    if (usuario.length < 2) { await avisar('Falta el usuario', 'Escribe el usuario con el que va a entrar (por ejemplo jperez).'); return; }
     const clave = edicion.clave.trim();
     if (clave && (clave.length < 8 || /\s/.test(clave))) { await avisar('Clave no válida', 'La clave debe tener al menos 8 caracteres y no puede llevar espacios. Déjala vacía para que el sistema genere una.'); return; }
     if (claveNueva && !(await confirmar('Generar clave nueva', 'La clave anterior dejará de funcionar y tendrás que entregarle la nueva.', 'Generar'))) return;
     setOcupado(true);
     try {
-      const u = await guardarUsuario({ nombre, rol: edicion.rol, activo: edicion.activo, terceros: edicion.rol === 'tecnico' && edicion.terceros, claveNueva: claveNueva && !clave, ...(clave ? { clave } : {}) });
+      const u = await guardarUsuario({ nombre, usuario, rol: edicion.rol, activo: edicion.activo, terceros: edicion.rol === 'tecnico' && edicion.terceros, claveNueva: claveNueva && !clave, ...(clave ? { clave } : {}) });
       setEdicion(null);
       await cargar();
       if (u.activo) await mostrarAcceso(u);
@@ -62,19 +73,32 @@ export function AdminUsuarios() {
   return (
     <>
       <Cabecera titulo="Usuarios" subtitulo="Personas con acceso y su rol" atras={() => ir('/admin')}
-        acciones={[{ icono: 'mas', etiqueta: 'Nuevo usuario', onClick: () => setEdicion({ nombre: '', rol: 'tecnico', activo: true, terceros: false, clave: '' }) }]} />
+        acciones={[{ icono: 'mas', etiqueta: 'Nuevo usuario', onClick: () => setEdicion({ nombre: '', usuario: '', usuarioTocado: false, rol: 'tecnico', activo: true, terceros: false, clave: '' }) }]} />
       <p className="muted" style={{ marginBottom: 12 }}>
         Cada persona entra a la web con su <b>usuario</b> (su nombre) y su <b>clave</b>. <b>Técnico:</b> captura y ve sus registros. <b>Supervisor:</b> además ve el panel del equipo. <b>Administrador:</b> además crea y da de baja usuarios.
       </p>
       {!!error && <p className="aviso" role="alert">{error}</p>}
       {!lista && !error && <Cargando texto="Cargando usuarios…" />}
       {lista && !lista.length && <p className="muted">Aún no hay usuarios. Toca + para crear el primero.</p>}
+      {superusuarios.length > 0 && (
+        <div className="pila" style={{ marginBottom: 10 }} data-testid="superusuarios">
+          {superusuarios.map((n) => (
+            <div key={n} className="tarjeta" aria-label={`${n}, superusuario`}>
+              <div className="t" style={{ fontWeight: 700 }}>{n}</div>
+              <div className="s muted">Usuario: {n}</div>
+              <div className="etq" style={{ marginTop: 6 }}><Ficha texto="Superusuario" color="primario" /></div>
+              <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>Administrador de la plataforma (definido en el servidor). No se edita desde aquí; es la llave de emergencia.</p>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="pila">
         {lista?.map((u) => (
           <button key={u.nombre} type="button" className="tarjeta item" style={{ opacity: u.activo ? 1 : 0.6 }} aria-label={`${u.nombre}, ${TEXTO_ROL[u.rol]}${u.activo ? '' : ', de baja'}`}
-            onClick={() => setEdicion({ original: u, nombre: u.nombre, rol: u.rol, activo: u.activo, terceros: !!u.terceros, clave: '' })}>
+            onClick={() => setEdicion({ original: u, nombre: u.nombre, usuario: u.usuario, usuarioTocado: true, rol: u.rol, activo: u.activo, terceros: !!u.terceros, clave: '' })}>
             <div style={{ flex: 1 }}>
               <div className="t">{u.nombre}</div>
+              <div className="s">Usuario: {u.usuario}</div>
               <div className="etq"><Ficha texto={TEXTO_ROL[u.rol]} color={u.rol === 'admin' ? 'primario' : u.rol === 'supervisor' ? 'aviso' : undefined} />{!!u.terceros && <Ficha texto="Contratista" color="aviso" />}{!u.activo && <Ficha texto="De baja" color="peligro" />}</div>
             </div>
           </button>
@@ -82,7 +106,8 @@ export function AdminUsuarios() {
       </div>
 
       <Hoja abierta={!!edicion} alCerrar={() => setEdicion(null)} titulo={edicion?.original ? 'Editar usuario' : 'Nuevo usuario'}>
-        <Campo etiqueta="Nombre (es su usuario)" valor={edicion?.nombre ?? ''} alCambiar={(t) => setEdicion((e) => e && { ...e, nombre: t })} pista="Ej. Juan Pérez" soloLectura={!!edicion?.original} />
+        <Campo etiqueta="Nombre completo" valor={edicion?.nombre ?? ''} alCambiar={(t) => setEdicion((e) => e && { ...e, nombre: t, usuario: e.original || e.usuarioTocado ? e.usuario : sugerirUsuario(t) })} pista="Ej. Juan Pérez" />
+        <Campo etiqueta="Usuario (para entrar)" valor={edicion?.usuario ?? ''} alCambiar={(t) => setEdicion((e) => e && { ...e, usuario: t, usuarioTocado: true })} pista="Ej. jperez" soloLectura={!!edicion?.original} />
         <Campo etiqueta={edicion?.original ? 'Clave nueva (opcional)' : 'Clave (opcional)'} valor={edicion?.clave ?? ''} alCambiar={(t) => setEdicion((e) => e && { ...e, clave: t })} pista={edicion?.original ? 'Déjala vacía para conservar la actual' : 'Vacía = el sistema genera una fácil de teclear'} />
         <p className="muted" style={{ margin: '4px 0' }}>Rol</p>
         <Segmentado valor={edicion?.rol ?? 'tecnico'} alCambiar={(rol) => setEdicion((e) => e && { ...e, rol })} opciones={ROLES} />
@@ -98,7 +123,8 @@ export function AdminUsuarios() {
         <p className="muted">Entrega estos datos en privado. La persona abre la dirección, escribe su usuario y su clave, y listo.</p>
         <dl className="acceso">
           <dt>Dirección</dt><dd data-testid="acceso-direccion">{direccion}</dd>
-          <dt>Usuario</dt><dd data-testid="acceso-usuario">{acceso?.usuario.nombre}</dd>
+          <dt>Nombre</dt><dd>{acceso?.usuario.nombre}</dd>
+          <dt>Usuario</dt><dd data-testid="acceso-usuario">{acceso?.usuario.usuario}</dd>
           <dt>Clave</dt><dd data-testid="acceso-clave">{acceso?.usuario.clave}</dd>
         </dl>
         <div className="pila">

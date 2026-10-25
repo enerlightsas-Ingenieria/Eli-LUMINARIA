@@ -16,7 +16,7 @@ import { useEnLinea } from '../servicios/red';
 type Filtro = 'todas' | 'pendientes' | 'sinGps';
 
 export function Registros() {
-  const { items, proyecto, pendientes, ajustes, refrescar } = useApp();
+  const { items, proyecto, pendientes, ajustes, refrescar, salir } = useApp();
   const [q, setQ] = useState('');
   const [filtro, setFiltro] = useState<Filtro>('todas');
   const [menuExportar, setMenuExportar] = useState(false);
@@ -69,6 +69,7 @@ export function Registros() {
         acciones={[
           { icono: sincronizando ? 'actualizar' : 'nube', etiqueta: 'Sincronizar', onClick: sync, insignia: pendientes },
           { icono: 'compartir', etiqueta: 'Exportar', onClick: () => setMenuExportar(true) },
+          { icono: 'salir', etiqueta: 'Salir', onClick: salir },
         ]} />
       {!ajustes.syncUrl && !ajustes.apiKey && (
         <div className="tarjeta" style={{ marginBottom: 10 }}>

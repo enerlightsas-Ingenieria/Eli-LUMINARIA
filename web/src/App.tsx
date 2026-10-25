@@ -57,17 +57,19 @@ function useEnlaceDeConfiguracion(listo: boolean) {
 
 function Cuerpo() {
   const ruta = useRuta();
-  const { listo, ajustes } = useApp();
+  const { listo, ajustes, bloqueada } = useApp();
   useEnlaceDeConfiguracion(listo);
   const [primero = '', segundo] = ruta.camino;
   useEffect(() => { pedirAlmacenamientoPersistente(); }, []);
   if (!listo) return <Cargando texto="Abriendo…" />;
   const supervisor = veEquipo(rolDe(ajustes));
   const sinCuenta = !ajustes.apiKey;                                   // sin clave guardada: primero se ingresa (los enlaces de configuración y la ayuda siguen disponibles)
-  const conPestanas = !PANTALLAS_SIN_PESTANAS.includes(primero) && !(sinCuenta && primero !== 'config');
+  // bloqueada = nada se ve (ni por #/ayuda ni por #/config); sin cuenta = se puede importar un enlace o leer la ayuda
+  const pideIngreso = bloqueada || (sinCuenta && primero !== 'config' && primero !== 'ayuda');
+  const conPestanas = !PANTALLAS_SIN_PESTANAS.includes(primero) && !pideIngreso && !(sinCuenta && primero !== 'config');
 
   let pantalla;
-  if (sinCuenta && primero !== 'config' && primero !== 'ayuda') pantalla = <Ingreso />;
+  if (pideIngreso) pantalla = <Ingreso />;
   else switch (primero) {
     case '': pantalla = supervisor ? <Equipo /> : <Registros />; break;
     case 'registros': pantalla = <Registros />; break;

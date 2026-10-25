@@ -8,6 +8,7 @@ const COLUMNAS: [string, (l: Luminaria, p?: Proyecto) => string | number | null]
   ['Código de la luminaria', (l) => l.codigo],
   ['Fecha', (l) => l.creadoEn],
   ['Técnico', (l) => l.tecnico],
+  ['Usuario', (l) => l.usuario ?? ''],
   ['Latitud', (l) => l.latitud],
   ['Longitud', (l) => l.longitud],
   ['Precisión (m)', (l) => (l.precisionM != null ? Math.round(l.precisionM) : null)],
@@ -52,7 +53,7 @@ export function aGeoJson(items: Luminaria[], proyecto?: Proyecto): string {
       type: 'Feature',
       geometry: { type: 'Point', coordinates: [l.longitud, l.latitud] },
       properties: {
-        id: l.id, proyecto: proyecto?.nombre ?? '', codigo_poste: l.codigoPoste, codigo_luminaria: l.codigo, tecnico: l.tecnico, fabricante: l.fabricante,
+        id: l.id, proyecto: proyecto?.nombre ?? '', codigo_poste: l.codigoPoste, codigo_luminaria: l.codigo, tecnico: l.tecnico, usuario: l.usuario ?? '', fabricante: l.fabricante,
         modelo: l.modelo, tecnologia: l.tecnologia, potencia_w: l.potenciaW,
         tension_v: l.tensionV, fotocelda: l.fotocelda, pines_fotocelda: l.pinesFotocelda,
         temperatura_color_k: l.temperaturaColorK, ip: l.ip, montaje: l.montaje,

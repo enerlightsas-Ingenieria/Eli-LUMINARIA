@@ -15,6 +15,8 @@ export interface Ajustes {
   autoSync: boolean;
   /** Nombre del técnico; se registra en cada luminaria. */
   tecnico: string;
+  /** Solo web: usuario con el que se ingresa (distinto del nombre). */
+  usuario?: string;
   tema: PreferenciaTema;
   /** Modo terceros: capturas solo con jornada activa, solo cámara, GPS preciso y coordenadas no editables. */
   modoTerceros: boolean;

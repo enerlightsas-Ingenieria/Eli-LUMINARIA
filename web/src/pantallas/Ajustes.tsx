@@ -12,13 +12,12 @@ import { cargarAjustes, guardarAjustes } from '../servicios/ajustes';
 import { sincronizacion } from '../servicios/nucleo';
 import { pedirAlmacenamientoPersistente } from '../servicios/pwa';
 import { borrarTodoLocal } from '../servicios/almacen';
-import { cerrarSesion } from '../servicios/identidad';
 import { useEstadoSinConexion } from '../servicios/usoSinConexion';
 
 declare const __VERSION__: string;
 
 export function AjustesPantalla() {
-  const { pendientes, proyecto, refrescar, recargarAjustes, versionConfig, configCambiada } = useApp();
+  const { pendientes, proyecto, refrescar, recargarAjustes, versionConfig, configCambiada, salir } = useApp();
   const [a, setA] = useState<TipoAjustes | null>(null);
   const [codigo, setCodigo] = useState('');
   const [sync, setSync] = useState(false);
@@ -38,10 +37,6 @@ export function AjustesPantalla() {
     location.replace(location.pathname);
     location.reload();
   };
-  const salir = async () => {
-    if (!(await confirmar('Cerrar sesión', 'Saldrás de tu cuenta en este dispositivo. Los registros guardados aquí se conservan, pero lo que no esté sincronizado no se enviará hasta que vuelvas a entrar.', 'Cerrar sesión'))) return;
-    await cerrarSesion(); configCambiada(); ir('/', true);
-  };
   const guardar = async () => { await guardarAjustes(a); await recargarAjustes(); await avisar('Listo', 'Ajustes guardados.'); };
 
   const sincronizarYa = async () => {
@@ -56,6 +51,7 @@ export function AjustesPantalla() {
   return (
     <>
       <Cabecera titulo="Ajustes" />
+      {!!a.apiKey && <div style={{ margin: '4px 0 12px' }}><Boton texto="Salir de mi cuenta" icono="salir" variante="secundario" onClick={salir} /></div>}
       <Seccion>Técnico y configuración</Seccion>
       <p className="muted" style={{ marginBottom: 12 }}>Tu nombre se registra en cada luminaria. Si tu empresa te dio un enlace o código de configuración, ábrelo o pégalo aquí: deja la app lista sin escribir claves.</p>
       {a.rol && <p data-testid="cuenta" style={{ marginBottom: 8 }}>Cuenta: <b>{a.tecnico}</b> · {{ tecnico: 'Técnico', supervisor: 'Supervisor', admin: 'Administrador' }[rolDe(a)]}</p>}
@@ -63,8 +59,6 @@ export function AjustesPantalla() {
       {rolDe(a) === 'admin' && <Boton texto="Administración (usuarios e IA)" icono="usuarios" onClick={() => ir('/admin')} />}
       <Campo etiqueta="Código de configuración" valor={codigo} alCambiar={setCodigo} pista="ELI1.…  o el enlace completo" tipo="url" />
       <Boton texto="Importar configuración" variante="secundario" deshabilitado={!codigo.trim()} onClick={() => pedirYAplicar(codigo, () => { setCodigo(''); configCambiada(); refrescar(); })} />
-
-      {!!a.apiKey && <Boton texto="Cerrar sesión" variante="secundario" onClick={salir} />}
 
       <Seccion>Apariencia</Seccion>
       <Segmentado valor={a.tema} alCambiar={(tema) => { cambiar({ tema }); document.documentElement.dataset.tema = tema; }} opciones={[{ valor: 'auto', texto: 'Automático' }, { valor: 'claro', texto: 'Claro' }, { valor: 'oscuro', texto: 'Oscuro' }]} />

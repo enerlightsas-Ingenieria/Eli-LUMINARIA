@@ -212,25 +212,22 @@ test('PWA: desde la PRIMERA visita queda lista y abre sin conexión (sin recarga
   await expect(page.getByRole('form', { name: 'Ingreso' })).toBeVisible();              // sin cuenta, lo primero es ingresar (la pantalla ya está en el teléfono)
   await page.getByLabel('Usuario', { exact: true }).fill('ana');
   await page.getByLabel('Clave', { exact: true }).fill('lo-que-sea-123');
-  await page.getByRole('button', { name: 'Entrar' }).click();
+  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('No hay conexión con el servidor');   // y sin internet lo explica en vez de fallar mudo
 });
 
-test('errores: token de IA inválido → aviso y sigue a mano; enlace de configuración dañado → mensaje claro', async ({ browser }) => {
+test('errores: clave que el servidor no reconoce → vuelve al ingreso con aviso; enlace de configuración dañado → mensaje claro', async ({ browser }) => {
   const b = crearBackend();
   const { page } = await telefono(browser, b);
   await page.goto(`${WEB}/#/config?c=ELI1.@@@`);
   await expect(dialogo(page)).toContainText(/inválido|dañado/i);
   await boton(page, 'Entendido');
 
+  // un enlace con una clave que el servidor no reconoce: la app no se queda a medias, vuelve al ingreso y lo explica
   await configurar(page, enlace({ tecnico: 'Ana', token: 'token-que-no-existe', proyectos: ['Barrio A'] }));
-  await usarProyecto(page, 'Barrio A');
-  await capturar(page, 'ia');
-  await expect(page.getByRole('status').filter({ hasText: '401' })).toBeVisible();   // avisa del token inválido…
-  await page.getByLabel('Fabricante', { exact: true }).fill('Manual');                     // …y se puede seguir a mano
-  await guardar(page);
-  await expect(page.getByText('Manual')).toBeVisible();
-  expect(b.estado.llamadasIA).toBe(0);                                                // el proxy rechazó antes de llegar a la IA
+  await expect(page.getByRole('form', { name: 'Ingreso' })).toBeVisible();
+  await expect(page.getByRole('status').filter({ hasText: 'ya no está activo' })).toBeVisible();
+  expect(b.estado.llamadasIA).toBe(0);
 });
 
 test('administración: el administrador crea un técnico en la app, le entrega su enlace y esa persona entra con su rol y trabaja', async ({ browser }) => {
@@ -258,12 +255,15 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await admin.page.getByRole('button', { name: 'Administrar usuarios' }).click();
   await expect(admin.page.getByText('Elegir el modelo de Gemini')).toHaveCount(0);            // aquí no hay IA
   await admin.page.getByRole('button', { name: 'Nuevo usuario' }).click();
-  await admin.page.getByLabel('Nombre (es su usuario)').fill('Carla Gómez');
+  await admin.page.getByLabel('Nombre completo').fill('Carla Gómez');
+  await expect(admin.page.getByLabel('Usuario (para entrar)')).toHaveValue('cgomez');           // propuesta: inicial + apellido
   await admin.page.getByRole('button', { name: 'Crear y ver datos de acceso' }).click();
+  await expect(admin.page.getByTestId('acceso-usuario')).toHaveText('cgomez');
+  const claveCarla = (await admin.page.getByTestId('acceso-clave').textContent())!;
   const url = await admin.page.getByLabel('Enlace de acceso').inputValue();
   expect(url).toContain('#/config?c=ELI1.');
   expect(url).not.toContain('tokSup');                                  // el enlace lleva la clave de Carla, no la del administrador
-  expect(b.gs.hoja('_Usuarios')!.filas.some((f: any[]) => f[0] === 'Carla Gómez' && f[1] === 'tecnico' && /^[a-hj-km-np-z2-9]{5}-[a-hj-km-np-z2-9]{5}$/.test(f[2]))).toBe(true);
+  expect(b.gs.hoja('_Usuarios')!.filas.some((f: any[]) => f[0] === 'Carla Gómez' && f[5] === 'cgomez' && f[1] === 'tecnico' && /^[a-hj-km-np-z2-9]{5}-[a-hj-km-np-z2-9]{5}$/.test(f[2]))).toBe(true);
 
   // Carla abre su enlace en su teléfono: queda como técnico, sin panel ni administración, y captura
   const carla = await telefono(browser, b);
@@ -281,7 +281,7 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await carla.page.getByLabel('Tecnología', { exact: true }).fill('Otra: Plasma');
   await guardar(carla.page);
   await expect.poll(() => filas(b, 'General').length, { timeout: 20_000 }).toBe(1);
-  expect(filas(b, 'General')[0]).toMatchObject({ Técnico: 'Carla Gómez', Fabricante: 'Schréder', Tecnología: 'Otra: Plasma' });
+  expect(filas(b, 'General')[0]).toMatchObject({ Técnico: 'Carla Gómez', Usuario: 'cgomez', Fabricante: 'Schréder', Tecnología: 'Otra: Plasma' });
   expect(Object.keys(filas(b, 'General')[0])).not.toContain('Marca');
 
   // el administrador la hace supervisora: ahora ve el panel y también puede capturar
@@ -290,7 +290,11 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await admin.page.getByRole('tab', { name: 'Supervisor' }).click();
   await admin.page.getByRole('button', { name: 'Guardar y ver datos de acceso' }).click();
   await expect(admin.page.getByRole('dialog', { name: 'Acceso de Carla Gómez' })).toBeVisible();
-  await carla.page.reload();
+  await carla.page.reload();                                                  // al abrir de nuevo siempre se pide ingresar
+  await expect(carla.page.getByRole('form', { name: 'Ingreso' })).toBeVisible();
+  await expect(carla.page.getByLabel('Usuario', { exact: true })).toHaveValue('cgomez');
+  await carla.page.getByLabel('Clave', { exact: true }).fill(claveCarla);
+  await carla.page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(carla.page.getByRole('link', { name: 'Panel' })).toBeVisible({ timeout: 15_000 });
   await expect(carla.page.getByRole('link', { name: 'Registros' })).toBeVisible();
 });
@@ -344,11 +348,11 @@ test('ingreso con usuario y clave (sin enlaces): el administrador crea la cuenta
   await admin.page.getByRole('button', { name: 'Administración (usuarios e IA)' }).click();
   await admin.page.getByRole('button', { name: 'Administrar usuarios' }).click();
   await admin.page.getByRole('button', { name: 'Nuevo usuario' }).click();
-  await admin.page.getByLabel('Nombre (es su usuario)').fill('Darío Ruiz');
+  await admin.page.getByLabel('Nombre completo').fill('Darío Ruiz');
   await admin.page.getByLabel('Clave (opcional)').fill('clave-dario-1');
   await admin.page.getByLabel(/Contratista/).check();
   await admin.page.getByRole('button', { name: 'Crear y ver datos de acceso' }).click();
-  await expect(admin.page.getByTestId('acceso-usuario')).toHaveText('Darío Ruiz');
+  await expect(admin.page.getByTestId('acceso-usuario')).toHaveText('druiz');
   await expect(admin.page.getByTestId('acceso-clave')).toHaveText('clave-dario-1');
   await expect(admin.page.getByTestId('acceso-direccion')).toContainText(WEB);
 
@@ -359,13 +363,13 @@ test('ingreso con usuario y clave (sin enlaces): el administrador crea la cuenta
   await expect(dario.page.getByRole('form', { name: 'Ingreso' })).toBeVisible();
   await expect(dario.page.getByRole('link', { name: 'Registros' })).toHaveCount(0);       // sin cuenta no hay menú ni datos
 
-  await dario.page.getByLabel('Usuario', { exact: true }).fill('dario ruiz');             // sin mayúsculas ni acento
+  await dario.page.getByLabel('Usuario', { exact: true }).fill('DRuiz');                  // sin distinguir mayúsculas
   await dario.page.getByLabel('Clave', { exact: true }).fill('clave-equivocada');
-  await dario.page.getByRole('button', { name: 'Entrar' }).click();
+  await dario.page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(dario.page.getByRole('alert')).toContainText('Usuario o clave incorrectos');
 
   await dario.page.getByLabel('Clave', { exact: true }).fill('clave-dario-1');
-  await dario.page.getByRole('button', { name: 'Entrar' }).click();
+  await dario.page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(dario.page.getByRole('link', { name: 'Registros' })).toBeVisible({ timeout: 15_000 });
   await dario.page.getByRole('link', { name: 'Ajustes' }).click();
   await expect(dario.page.getByTestId('cuenta')).toContainText('Darío Ruiz · Técnico');
@@ -376,8 +380,8 @@ test('ingreso con usuario y clave (sin enlaces): el administrador crea la cuenta
 
   // Salir devuelve al ingreso; los datos de la cuenta se borran de este teléfono
   await dario.page.getByRole('link', { name: 'Ajustes' }).click();
-  await dario.page.getByRole('button', { name: 'Cerrar sesión' }).click();
-  await dialogo(dario.page).getByRole('button', { name: 'Cerrar sesión', exact: true }).click();
+  await dario.page.getByRole('button', { name: 'Salir de mi cuenta' }).click();
+  await dialogo(dario.page).getByRole('button', { name: 'Salir', exact: true }).click();
   await expect(dario.page.getByRole('form', { name: 'Ingreso' })).toBeVisible();
 
   // el administrador lo da de baja: con la misma clave ya no puede entrar
@@ -386,9 +390,8 @@ test('ingreso con usuario y clave (sin enlaces): el administrador crea la cuenta
   await admin.page.getByLabel(/Con acceso/).uncheck();
   await admin.page.getByRole('button', { name: 'Guardar y ver datos de acceso' }).click();
   await expect(admin.page.getByRole('button', { name: /Darío Ruiz, Técnico, de baja/ })).toBeVisible();
-  await dario.page.getByLabel('Usuario', { exact: true }).fill('Darío Ruiz');
-  await dario.page.getByLabel('Clave', { exact: true }).fill('clave-dario-1');
-  await dario.page.getByRole('button', { name: 'Entrar' }).click();
+  await dario.page.getByLabel('Clave', { exact: true }).fill('clave-dario-1');            // el usuario ya viene escrito (se acuerda del último)
+  await dario.page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(dario.page.getByRole('alert')).toContainText('Usuario o clave incorrectos');
 });
 
@@ -434,4 +437,98 @@ test('cámara: pellizcar o usar la barra acerca la IMAGEN (no la página) y la f
   const ancho = await img.evaluate(async (i: HTMLImageElement) => (await createImageBitmap(await (await fetch(i.src)).blob())).width);
   expect(ancho).toBeLessThanOrEqual(Math.ceil(anchoVideo / 4) + 1);
   expect(ancho).toBeGreaterThan(anchoVideo / 8);
+});
+
+test('seguridad: a los 15 minutos sin usar la app se bloquea y pide la clave; usarla reinicia el conteo; no se puede esquivar con la dirección', async ({ browser }) => {
+  const b = crearBackend();
+  const { page } = await telefono(browser, b);
+  await page.clock.install();
+  await configurar(page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A'] }));
+  await expect(page.getByRole('button', { name: 'Nueva luminaria' })).toBeVisible();
+
+  // usar la app reinicia el conteo: 14 min + toque + 14 min = no se bloquea
+  await page.clock.runFor('14:00');
+  await page.evaluate(() => window.dispatchEvent(new Event('pointerdown')));
+  await page.clock.runFor('14:00');
+  await expect(page.getByRole('form', { name: 'Pantalla bloqueada' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Nueva luminaria' })).toBeVisible();
+
+  // 16 minutos sin tocar nada → bloqueada
+  await page.clock.runFor('16:00');
+  const bloqueo = page.getByRole('form', { name: 'Pantalla bloqueada' });
+  await expect(bloqueo).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Nueva luminaria' })).toHaveCount(0);        // no se ve nada de la app
+  await expect(page.getByRole('link', { name: 'Registros' })).toHaveCount(0);
+  await page.evaluate(() => { location.hash = '#/ajustes'; });                                // intentar saltarse el bloqueo con la dirección
+  await expect(bloqueo).toBeVisible();
+  await page.evaluate(() => { location.hash = '#/ayuda'; });
+  await expect(bloqueo).toBeVisible();
+  await page.evaluate(() => { location.hash = '#/'; });
+
+  await page.getByLabel('Clave', { exact: true }).fill('mala-clave');
+  await page.getByRole('button', { name: 'Desbloquear' }).click();
+  await expect(page.getByRole('alert')).toContainText('Clave incorrecta');
+  await expect(bloqueo).toBeVisible();
+
+  await page.getByLabel('Clave', { exact: true }).fill('tokAna');
+  await page.getByRole('button', { name: 'Desbloquear' }).click();
+  await expect(bloqueo).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Nueva luminaria' })).toBeVisible();          // vuelve donde estaba
+});
+
+test('seguridad: el botón Salir cierra la sesión, la clave no queda guardada en el teléfono y al volver se pide ingresar', async ({ browser }) => {
+  const b = crearBackend();
+  const { page } = await telefono(browser, b);
+  await configurar(page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A'] }));
+  await usarProyecto(page, 'Barrio A');
+
+  // la clave nunca se escribe en el almacenamiento del navegador
+  const guardado = await page.evaluate(() => JSON.stringify({ ...localStorage }));
+  expect(guardado).not.toContain('tokAna');
+
+  await page.getByRole('button', { name: 'Salir', exact: true }).click();                     // botón visible en la pantalla principal
+  await dialogo(page).getByRole('button', { name: 'Salir', exact: true }).click();
+  const ingreso = page.getByRole('form', { name: 'Ingreso' });
+  await expect(ingreso).toBeVisible();
+  await expect(page.getByLabel('Usuario', { exact: true })).toHaveValue('Ana');               // recuerda el usuario, nunca la clave
+  await expect(page.getByLabel('Clave', { exact: true })).toHaveValue('');
+  await page.evaluate(() => { location.hash = '#/ajustes'; });
+  await expect(ingreso).toBeVisible();                                                         // sin sesión no hay otra pantalla
+
+  await page.getByLabel('Clave', { exact: true }).fill('tokAna');
+  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Nueva luminaria' })).toBeVisible({ timeout: 15_000 });
+});
+
+test('el administrador se ve como superusuario, la primera foto se guarda en Drive con el usuario sellado por el servidor, y se puede desactivar', async ({ browser }) => {
+  const b = crearBackend();
+  const admin = await telefono(browser, b);
+  await configurar(admin.page, enlace({ token: 'tokSup' }));
+  await admin.page.getByRole('link', { name: 'Ajustes' }).click();
+  await admin.page.getByRole('button', { name: 'Administración (usuarios e IA)' }).click();
+  await admin.page.getByRole('button', { name: 'Administrar usuarios' }).click();
+  await expect(admin.page.getByTestId('superusuarios')).toContainText('Sup');
+  await expect(admin.page.getByTestId('superusuarios')).toContainText('Superusuario');
+  expect(await admin.page.getByTestId('superusuarios').textContent()).not.toContain('tokSup');   // nunca la clave
+
+  await admin.page.getByRole('button', { name: 'Volver' }).click();
+  await admin.page.getByRole('button', { name: 'Administrar las fotos' }).click();
+  const interruptor = admin.page.getByLabel(/Guardar la primera foto/);
+  await expect(interruptor).toBeChecked();                                                      // activado por defecto
+  await interruptor.uncheck();
+  await expect.poll(() => b.gs.hoja('_Config')?.filas.map((f: any[]) => f.join('=')).join('|')).toContain('fotos=no');
+  await interruptor.check();
+  await expect.poll(() => b.gs.hoja('_Config')?.filas.map((f: any[]) => f.join('=')).join('|')).toContain('fotos=si');
+
+  // un técnico captura con foto y no hizo nada especial: la foto queda en Drive y la fila lleva su usuario
+  const ana = await telefono(browser, b);
+  await configurar(ana.page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A'] }));
+  await usarProyecto(ana.page, 'Barrio A');
+  await capturar(ana.page, 'manual');
+  await ana.page.getByLabel('Fabricante', { exact: true }).fill('Philips');
+  await guardar(ana.page);
+  await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);
+  expect(filas(b, 'Barrio A')[0]).toMatchObject({ Técnico: 'Ana', Usuario: 'Ana' });
+  expect(String(filas(b, 'Barrio A')[0].Foto)).toMatch(/^https:\/\/drive\.test\/.+\.jpg$/);
+  expect(b.gs.fotosGuardadas).toHaveLength(1);
 });

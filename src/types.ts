@@ -42,6 +42,8 @@ export interface Luminaria extends Caracteristicas {
   codigo: string;
   /** Técnico que hizo el registro (para flotas). */
   tecnico: string;
+  /** Usuario (cuenta) con el que se registró; lo sella el servidor. */
+  usuario?: string;
   confianza: Confianza | '';
   /** Cómo se obtuvo la foto: con la cámara de la app o desde la galería. */
   origen: 'camara' | 'galeria' | '';

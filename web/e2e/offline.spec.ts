@@ -54,7 +54,13 @@ test.describe('uso sin conexión (web)', () => {
     await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
     await expect(page.getByTestId('banda-sin-conexion')).toContainText('1 pendiente');
 
-    await page.reload();                                                                        // los datos viven en el dispositivo
+    await page.reload();                                                                        // los datos viven en el dispositivo… pero la clave no: al abrir se pide ingresar
+    await expect(page.getByRole('form', { name: 'Ingreso' })).toBeVisible();
+    await page.getByLabel('Clave', { exact: true }).fill('clave-equivocada');
+    await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('Sin conexión no se pudo comprobar');   // sin internet se comprueba contra lo guardado en el teléfono
+    await page.getByLabel('Clave', { exact: true }).fill('tokAna');
+    await page.getByRole('button', { name: 'Entrar', exact: true }).click();                                 // ¡y SIN internet entra!
     await expect(page.getByText('Schréder')).toBeVisible();
     await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
     expect(filas(b, 'Barrio A')).toHaveLength(0);                                               // nada salió sin conexión

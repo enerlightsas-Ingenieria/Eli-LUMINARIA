@@ -157,8 +157,8 @@ describe('proxy: CORS, puerta de sincronización y panel de supervisión (para l
   };
   const req = (ruta: string, cuerpo: any, token = 'tokJ', extra: any = {}) =>
     new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': token, ...(extra.headers ?? {}) }, body: typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo) });
-  const hojas = (respuesta: any = { ok: true }) => jest.fn().mockResolvedValue(new Response(JSON.stringify(respuesta), { status: 200 }));
-  const cuerpoEnviado = (f: jest.Mock) => JSON.parse((f.mock.calls[0] as any)[1].body);
+  const hojas = (respuesta: any = { ok: true }) => jest.fn().mockImplementation(async () => new Response(JSON.stringify(respuesta), { status: 200 }));
+  const cuerpoEnviado = (f: jest.Mock) => JSON.parse((f.mock.calls[f.mock.calls.length - 1] as any)[1].body);   // la última: antes puede haber consultas internas (política de fotos)
 
   it('responde el preflight de CORS (el navegador lo exige por la cabecera x-api-key)', async () => {
     const r = await manejar(new Request('https://p.example/sync', { method: 'OPTIONS', headers: { origin: 'https://app.example' } }), env, hojas());
@@ -821,5 +821,99 @@ describe('ingreso con usuario y clave (sin enlaces)', () => {
     expect((await m.crear({ nombre: 'Maria  Lopez', rol: 'tecnico' })).j.ok).toBe(true);
     expect((await m.crear({ nombre: 'maría lopez', rol: 'tecnico' })).j.usuario.nombre).toBe('maría lopez'); // mismo nombre normalizado = misma persona (se edita)
     expect((await m.post('/usuarios', { accion: 'listar' }, 'claveJefe99')).j.usuarios.filter((u: any) => /lopez/i.test(u.nombre.normalize('NFD').replace(/[\u0300-\u036f]/g, '')))).toHaveLength(1);
+  });
+});
+
+describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () => {
+  const { crearServidor } = require('./helpers/hoja');
+  const montar = (extra: any = {}) => {
+    const gs = crearServidor();
+    const env: any = { SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, ADMIN_TOKENS: 'Jefe:claveJefe99', ...extra };
+    const f = jest.fn((u: any, i: any) => gs.llamar(u, i));
+    const post = async (ruta: string, cuerpo: any, clave = '') => {
+      const r = await manejar(new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave, 'cf-connecting-ip': '2.2.2.2' }, body: JSON.stringify(cuerpo) }), env, f as any);
+      return { status: r.status, j: await r.json() };
+    };
+    const crear = (o: any) => post('/usuarios', { accion: 'guardar', ...o }, 'claveJefe99');
+    return { gs, env, f, post, crear };
+  };
+  beforeEach(() => { vaciarCacheUsuarios(); vaciarCacheIA(); olvidarIntentos(); });
+  const subida = (l: any = {}) => ({ proyecto: { nombre: 'Barrio A' }, luminarias: [{ uuid: 'u1', fabricante: 'F', tecnico: 'Falso', usuario: 'falso', foto: 'FOTO64', ...l }], por: { usuario: 'falso', nombre: 'Falso' } });
+  const fila = (m: any, uuid: string) => { const h = m.gs.hoja('Barrio A'); const cab = h.filas[0]; const f = h.filas.find((x: any[]) => x[0] === uuid); return Object.fromEntries(cab.map((c: string, i: number) => [c, f[i]])); };
+
+  it('el usuario para entrar es distinto del nombre: se entra con el usuario, no con el nombre', async () => {
+    const m = montar();
+    const u = (await m.crear({ nombre: 'Juan Pérez', usuario: 'jperez', rol: 'tecnico', clave: 'clave-de-juan' })).j.usuario;
+    expect(u).toMatchObject({ nombre: 'Juan Pérez', usuario: 'jperez' });
+    expect((await m.post('/ingresar', { usuario: 'JPerez', clave: 'clave-de-juan' })).j).toMatchObject({ ok: true, nombre: 'Juan Pérez', usuario: 'jperez' });
+    expect((await m.post('/ingresar', { usuario: 'Juan Pérez', clave: 'clave-de-juan' })).status).toBe(401);
+    expect((await m.post('/yo', {}, 'clave-de-juan')).j).toMatchObject({ nombre: 'Juan Pérez', usuario: 'jperez' });
+  });
+
+  it('cuentas antiguas sin usuario siguen entrando con el nombre; el usuario no se repite y se valida', async () => {
+    const m = montar();
+    m.gs.gs.prepararUsuarios(); m.gs.hoja('_Usuarios').appendRow(['Ana Vieja', 'tecnico', 'clave-vieja-1', 'si', 'no']);
+    expect((await m.post('/ingresar', { usuario: 'ana vieja', clave: 'clave-vieja-1' })).status).toBe(200);
+    await m.crear({ nombre: 'Beto Uno', usuario: 'beto', rol: 'tecnico' });
+    const otra = await m.crear({ nombre: 'Beto Dos', usuario: 'BETO', rol: 'tecnico' });            // mismo usuario = misma cuenta (se edita), no una nueva
+    expect((await m.post('/usuarios', { accion: 'listar' }, 'claveJefe99')).j.usuarios.filter((x: any) => x.usuario.toLowerCase() === 'beto')).toHaveLength(1);
+    expect(otra.j.usuario.nombre).toBe('Beto Dos');
+    for (const usuario of ['a', '=cmd', '_x', 'x'.repeat(41)]) expect((await m.crear({ nombre: 'Cualquiera', usuario, rol: 'tecnico' })).status).toBe(400);
+  });
+
+  it('los administradores de Cloudflare aparecen como superusuarios (solo el nombre, nunca la clave)', async () => {
+    const m = montar({ ADMIN_TOKENS: 'Jefe:claveJefe99,Dueña:otraClave77' });
+    const l = (await m.post('/usuarios', { accion: 'listar' }, 'claveJefe99')).j;
+    expect(l.superusuarios).toEqual(['Jefe', 'Dueña']);
+    expect(JSON.stringify(l)).not.toMatch(/claveJefe99|otraClave77/);
+  });
+
+  it('el autor lo sella el servidor: el teléfono no puede declarar otro técnico ni otro usuario', async () => {
+    const m = montar();
+    const clave = (await m.crear({ nombre: 'Carla Gómez', usuario: 'cgomez', rol: 'tecnico' })).j.usuario.clave;
+    expect((await m.post('/sync', subida(), clave)).j.ok).toBe(true);
+    expect(fila(m, 'u1')).toMatchObject({ Técnico: 'Carla Gómez', Usuario: 'cgomez' });
+  });
+
+  it('al editar, el autor original se conserva aunque edite otra persona', async () => {
+    const m = montar();
+    const a = (await m.crear({ nombre: 'Carla Gómez', usuario: 'cgomez', rol: 'tecnico' })).j.usuario.clave;
+    const b = (await m.crear({ nombre: 'Sofía Ruiz', usuario: 'sruiz', rol: 'supervisor' })).j.usuario.clave;
+    await m.post('/sync', subida(), a);
+    await m.post('/sync', subida({ fabricante: 'Editado por Sofía', tecnico: 'Sofía Ruiz', usuario: 'sruiz' }), b);
+    expect(fila(m, 'u1')).toMatchObject({ Fabricante: 'Editado por Sofía', Técnico: 'Carla Gómez', Usuario: 'cgomez' });
+  });
+
+  it('quien usa un secreto nombre:clave queda registrado con ese nombre como usuario', async () => {
+    const m = montar({ APP_TOKENS: 'Juan:tokJ123' });
+    await m.post('/sync', subida({ tecnico: 'Otro' }), 'tokJ123');
+    expect(fila(m, 'u1')).toMatchObject({ Técnico: 'Juan', Usuario: 'Juan' });
+  });
+
+  it('fotos: por defecto la primera foto se guarda en Drive; el administrador puede desactivarlo para todos y reactivarlo', async () => {
+    const m = montar();
+    const clave = (await m.crear({ nombre: 'Carla', usuario: 'carla', rol: 'tecnico' })).j.usuario.clave;
+    expect((await m.post('/yo', {}, clave)).j.fotos).toBe(true);
+    await m.post('/sync', subida({ uuid: 'f1' }), clave);
+    expect(m.gs.fotosGuardadas).toEqual(['f1.jpg']);
+    expect(fila(m, 'f1').Foto).toBe('https://drive.test/f1.jpg');
+
+    expect((await m.post('/sistema', { accion: 'guardar', fotos: false }, 'claveJefe99')).j).toEqual({ ok: true, fotos: false });
+    expect((await m.post('/yo', {}, clave)).j.fotos).toBe(false);
+    await m.post('/sync', subida({ uuid: 'f2' }), clave);
+    expect(m.gs.fotosGuardadas).toEqual(['f1.jpg']);                                                  // no se guardó ninguna más
+    expect(fila(m, 'f2').Foto).toBe('');
+
+    await m.post('/sistema', { accion: 'guardar', fotos: true }, 'claveJefe99');
+    await m.post('/sync', subida({ uuid: 'f3' }), clave);
+    expect(m.gs.fotosGuardadas).toEqual(['f1.jpg', 'f3.jpg']);
+  });
+
+  it('/sistema solo para administradores y con valores válidos', async () => {
+    const m = montar();
+    const tec = (await m.crear({ nombre: 'Carla', usuario: 'carla', rol: 'tecnico' })).j.usuario.clave;
+    expect((await m.post('/sistema', { accion: 'estado' }, tec)).status).toBe(401);
+    expect((await m.post('/sistema', { accion: 'estado' }, 'claveJefe99')).j).toEqual({ ok: true, fotos: true });
+    for (const c of [{ accion: 'guardar', fotos: 'no' }, { accion: 'guardar' }, { accion: 'otra' }]) expect((await m.post('/sistema', c, 'claveJefe99')).status).toBe(400);
   });
 });

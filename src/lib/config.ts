@@ -12,6 +12,8 @@ export interface ConfigFlota {
   syncToken?: string;
   syncFotos?: boolean;
   tecnico?: string;
+  /** Usuario para entrar (web). Si falta se usa el nombre. */
+  usuario?: string;
   proyectos?: string[];
   /** Capturas solo con jornada activa, solo cámara, GPS preciso y coordenadas no editables. */
   modoTerceros?: boolean;
@@ -73,6 +75,7 @@ export function decodificar(entrada: string): ConfigFlota {
   const mo = txt(bruto.modelo, 80); if (mo) cfg.modelo = mo;
   const st = txt(bruto.syncToken, 300); if (st) cfg.syncToken = st;
   const tc = txt(bruto.tecnico, 80); if (tc) cfg.tecnico = tc;
+  const us = txt(bruto.usuario, 80); if (us) cfg.usuario = us;
   if (typeof bruto.syncFotos === 'boolean') cfg.syncFotos = bruto.syncFotos;
   if (typeof bruto.modoTerceros === 'boolean') cfg.modoTerceros = bruto.modoTerceros;
   if (typeof bruto.supervisor === 'boolean') cfg.supervisor = bruto.supervisor;

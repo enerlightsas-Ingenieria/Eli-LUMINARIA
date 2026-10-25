@@ -14,6 +14,7 @@
  *   /equipo         → datos del mapa/panel de supervisión (supervisores y administradores)
  *   /ingresar       → entrar con usuario y clave (sin cabecera): devuelve nombre, rol y proyectos
  *   /yo             → quién soy (nombre y rol según la clave)
+ *   /sistema        → ajustes del sistema (guardar la primera foto en Drive): solo administradores
  *   /ia             → administración de la IA: estado, elegir principal (Gemini/Claude), probar (solo administradores)
  *   /usuarios       → menú de administración: listar/crear/editar personas (solo administradores)
  *
@@ -73,7 +74,13 @@ export function identificar(token: string, tokens: string | undefined): string |
 }
 
 export type Rol = 'tecnico' | 'supervisor' | 'admin';
-export type Identidad = { nombre: string; rol: Rol; terceros?: boolean };
+export type Identidad = { nombre: string; usuario: string; rol: Rol; terceros?: boolean };
+
+/** Identidad que devuelve la hoja (nombre completo + usuario para entrar). Si no hay usuario aparte, es el nombre. */
+function deLaHoja(u: any): Identidad | null {
+  if (!u || typeof u.nombre !== 'string' || !u.nombre) return null;
+  return { nombre: u.nombre, usuario: typeof u.usuario === 'string' && u.usuario ? u.usuario : u.nombre, rol: ROLES.includes(u.rol) ? u.rol : 'tecnico', ...(typeof u.terceros === 'boolean' ? { terceros: u.terceros } : {}) };
+}
 const ROLES: Rol[] = ['tecnico', 'supervisor', 'admin'];
 
 const cacheUsuarios = new Map<string, { v: Identidad | null; hasta: number }>();
@@ -87,9 +94,9 @@ export const vaciarCacheUsuarios = () => cacheUsuarios.clear();
 export async function autenticar(clave: string, env: any, llamar: typeof fetch): Promise<Identidad | null> {
   if (!clave) return null;
   const sup = identificar(clave, env.ADMIN_TOKENS);
-  if (sup) return { nombre: sup, rol: 'admin' };   // los de ADMIN_TOKENS son los administradores iniciales
+  if (sup) return { nombre: sup, usuario: sup, rol: 'admin' };   // los de ADMIN_TOKENS son los administradores iniciales
   const tec = identificar(clave, env.APP_TOKENS);
-  if (tec) return { nombre: tec, rol: 'tecnico' };
+  if (tec) return { nombre: tec, usuario: tec, rol: 'tecnico' };
   if (!env.SYNC_URL || !env.SYNC_TOKEN) return null;
 
   const llave = env.SYNC_URL + '\n' + clave;
@@ -101,7 +108,7 @@ export async function autenticar(clave: string, env: any, llamar: typeof fetch):
   const c: any = await r.json().catch(() => null);
   if (!c?.ok) throw new Error('hoja');
   const u = c.usuario;
-  const v: Identidad | null = u && typeof u.nombre === 'string' && u.nombre ? { nombre: u.nombre, rol: ROLES.includes(u.rol) ? u.rol : 'tecnico', ...(typeof u.terceros === 'boolean' ? { terceros: u.terceros } : {}) } : null;
+  const v: Identidad | null = deLaHoja(u);
   if (ttl > 0) {
     if (cacheUsuarios.size > 500) cacheUsuarios.clear();
     cacheUsuarios.set(llave, { v, hasta: Date.now() + ttl });
@@ -347,11 +354,11 @@ async function analizar(request: Request, env: any, llamar: typeof fetch, tecnic
   return json(ultimo === 429 ? 429 : ultimo === 401 || ultimo === 403 ? 502 : ultimo, { error: `El servicio de IA no respondió (${detalle.join('; ')}).` });
 }
 
-const cacheIA = new Map<string, { v: { ia?: Proveedor; modelo?: string }; hasta: number }>();
+const cacheIA = new Map<string, { v: { ia?: Proveedor; modelo?: string; fotos?: boolean }; hasta: number }>();
 export const vaciarCacheIA = () => cacheIA.clear();
 
 /** Ajustes que eligió el administrador (pestaña _Config: IA principal y modelo de Gemini), con memoria corta. Sin hoja → vacío. */
-async function configIA(env: any, llamar: typeof fetch): Promise<{ ia?: Proveedor; modelo?: string }> {
+async function configIA(env: any, llamar: typeof fetch): Promise<{ ia?: Proveedor; modelo?: string; fotos?: boolean }> {
   if (!env.SYNC_URL || !env.SYNC_TOKEN) return {};
   const ttl = Math.max(0, Number(env.USUARIOS_CACHE_SEG ?? 60)) * 1000;
   const g = cacheIA.get(env.SYNC_URL);
@@ -362,12 +369,15 @@ async function configIA(env: any, llamar: typeof fetch): Promise<{ ia?: Proveedo
     const k = c?.ok ? c.config ?? {} : {};
     const v = {
       ia: k.ia === 'claude' || k.ia === 'gemini' ? (k.ia as Proveedor) : undefined,
+      fotos: k.fotos === 'no' ? false : k.fotos === 'si' ? true : undefined,
       modelo: typeof k.gemini_modelo === 'string' && MODELO_GEMINI_RE.test(k.gemini_modelo) && esModeloUtil(k.gemini_modelo) ? (k.gemini_modelo as string) : undefined,   // un modelo de voz/imagen ya guardado se ignora
     };
     if (ttl > 0) cacheIA.set(env.SYNC_URL, { v, hasta: Date.now() + ttl });
     return v;
   } catch { return {}; }
 }
+/** ¿Se guarda la primera foto de cada luminaria en Drive? Lo decide el administrador (por defecto, sí). */
+const guardarFotos = async (env: any, llamar: typeof fetch) => (await configIA(env, llamar)).fotos !== false;
 const iaPrincipal = async (env: any, llamar: typeof fetch) => (await configIA(env, llamar)).ia;
 
 const SIN_CLAVES = (txt: string, env: any) => [env.ANTHROPIC_API_KEY, env.GEMINI_API_KEY].filter(Boolean).reduce((t: string, k: string) => t.split(k).join('***'), txt);
@@ -440,6 +450,22 @@ async function administrarIA(request: Request, env: any, llamar: typeof fetch): 
   return json(400, { ok: false, error: 'Acción no permitida' });
 }
 
+/** Ajustes del sistema que decide el administrador (por ahora: guardar la primera foto en Drive). */
+async function administrarSistema(request: Request, env: any, llamar: typeof fetch): Promise<Response> {
+  const texto = await request.text();
+  if (texto.length > 1000) return json(413, { ok: false, error: 'Payload too large' });
+  let c: any;
+  try { c = JSON.parse(texto); } catch { return json(400, { ok: false, error: 'JSON inválido' }); }
+  if (c?.accion === 'estado') { cacheIA.clear(); return json(200, { ok: true, fotos: await guardarFotos(env, llamar) }); }
+  if (c?.accion === 'guardar' && typeof c.fotos === 'boolean') {
+    const r = await haciaHojas({ accion: 'config_guardar', clave: 'fotos', valor: c.fotos ? 'si' : 'no' }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    cacheIA.clear();
+    const j: any = await r.clone().json().catch(() => null);
+    return j?.ok ? json(200, { ok: true, fotos: c.fotos }) : r;
+  }
+  return json(400, { ok: false, error: 'Acción no permitida' });
+}
+
 const ACCIONES_SYNC = [undefined, 'listar', 'latido'];
 
 /** Reenvía al script de Google poniendo AQUÍ el token del script (el navegador nunca lo conoce). */
@@ -454,7 +480,7 @@ async function haciaHojas(cuerpo: any, token: string, env: any, llamar: typeof f
   return new Response(texto, { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
-async function sincronizar(request: Request, env: any, llamar: typeof fetch, tecnico: string): Promise<Response> {
+async function sincronizar(request: Request, env: any, llamar: typeof fetch, quien: Identidad): Promise<Response> {
   const texto = await request.text();
   if (texto.length > MAX_BYTES) return json(413, { ok: false, error: 'Payload too large' });
   let c: any;
@@ -462,7 +488,12 @@ async function sincronizar(request: Request, env: any, llamar: typeof fetch, tec
   if (!c || typeof c !== 'object' || Array.isArray(c)) return json(400, { ok: false, error: 'Cuerpo inválido' });
   if (!ACCIONES_SYNC.includes(c.accion)) return json(400, { ok: false, error: 'Acción no permitida' });
   delete c.token;                                  // el cliente no puede imponer el token del script
-  if (c.accion === 'latido') c.tecnico = tecnico;  // la presencia se atribuye al dueño del token, no a lo que diga el cliente
+  delete c.por;                                    // ni declarar quién es: el autor lo sella el servidor
+  if (c.accion === 'latido') c.tecnico = quien.nombre;   // la presencia se atribuye al dueño de la clave, no a lo que diga el cliente
+  if (c.accion === undefined) {
+    c.por = { usuario: quien.usuario, nombre: quien.nombre };
+    if (Array.isArray(c.luminarias) && !(await guardarFotos(env, llamar))) for (const l of c.luminarias) if (l && typeof l === 'object') delete l.foto;   // el administrador desactivó guardar fotos
+  }
   return haciaHojas(c, env.SYNC_TOKEN, env, llamar);
 }
 
@@ -478,14 +509,14 @@ async function verificarIngreso(usuario: string, clave: string, env: any, llamar
   if (!usuario || !clave) return null;
   for (const [lista, rol] of [[env.ADMIN_TOKENS, 'admin'], [env.APP_TOKENS, 'tecnico']] as const) {
     const nombre = identificar(clave, lista);
-    if (nombre && norm(nombre) === norm(usuario)) return { nombre, rol };
+    if (nombre && norm(nombre) === norm(usuario)) return { nombre, usuario: nombre, rol };
   }
   if (!env.SYNC_URL || !env.SYNC_TOKEN) return null;
   const r = await haciaHojas({ accion: 'ingresar', usuario, clave }, env.SYNC_TOKEN, env, llamar);
   const c: any = await r.json().catch(() => null);
   if (!c?.ok) throw new Error('hoja');
   const u = c.usuario;
-  return u && typeof u.nombre === 'string' && u.nombre ? { nombre: u.nombre, rol: ROLES.includes(u.rol) ? u.rol : 'tecnico', ...(typeof u.terceros === 'boolean' ? { terceros: u.terceros } : {}) } : null;
+  return deLaHoja(u);
 }
 
 /** Nombres de los proyectos que ya existen en la hoja (para que cada persona los vea al entrar). Si la hoja no responde, vacío. */
@@ -520,7 +551,7 @@ async function ingresar(request: Request, env: any, llamar: typeof fetch): Promi
     return json(401, { ok: false, error: 'Usuario o clave incorrectos.' });
   }
   intentos.delete(llave);
-  return json(200, { ok: true, nombre: quien.nombre, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), proyectos: await proyectosDeLaHoja(env, llamar) });
+  return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), proyectos: await proyectosDeLaHoja(env, llamar) });
 }
 
 /** Menú de administración: listar y crear/editar personas. El token del administrador del script se pone AQUÍ. */
@@ -530,12 +561,20 @@ async function administrarUsuarios(request: Request, env: any, llamar: typeof fe
   let c: any;
   try { c = JSON.parse(texto); } catch { return json(400, { ok: false, error: 'JSON inválido' }); }
   if (!c || typeof c !== 'object' || Array.isArray(c)) return json(400, { ok: false, error: 'Cuerpo inválido' });
-  if (c.accion === 'listar') return haciaHojas({ accion: 'usuarios_listar' }, env.SYNC_TOKEN_ADMIN, env, llamar);
+  if (c.accion === 'listar') {
+    const r = await haciaHojas({ accion: 'usuarios_listar' }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    const j: any = await r.clone().json().catch(() => null);
+    if (!j?.ok) return r;
+    // Los administradores de Cloudflare (ADMIN_TOKENS) son "superusuarios": se muestran (solo el nombre, nunca la clave) y no se editan desde la app.
+    const superusuarios = String(env.ADMIN_TOKENS ?? '').split(',').map((t: string) => t.trim()).filter(Boolean).map((t: string) => (t.indexOf(':') > 0 ? t.slice(0, t.indexOf(':')) : 'equipo'));
+    return json(200, { ...j, superusuarios });
+  }
   if (c.accion === 'guardar') {
     if (typeof c.nombre !== 'string' || !c.nombre.trim() || c.nombre.length > 60) return json(400, { ok: false, error: 'Nombre inválido' });
     if (!ROLES.includes(c.rol)) return json(400, { ok: false, error: 'Rol inválido' });
     if (c.clave !== undefined && c.clave !== '' && (typeof c.clave !== 'string' || !/^\S{8,64}$/.test(c.clave))) return json(400, { ok: false, error: 'La clave debe tener entre 8 y 64 caracteres, sin espacios.' });
-    const r = await haciaHojas({ accion: 'usuarios_guardar', nombre: c.nombre, rol: c.rol, activo: c.activo !== false, claveNueva: c.claveNueva === true, terceros: c.terceros === true, ...(c.clave ? { clave: c.clave } : {}), por: quien.nombre }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    if (c.usuario !== undefined && (typeof c.usuario !== 'string' || c.usuario.trim().length < 2 || c.usuario.length > 40 || /^[=+\-@_]/.test(c.usuario.trim()))) return json(400, { ok: false, error: 'Usuario inválido' });
+    const r = await haciaHojas({ accion: 'usuarios_guardar', nombre: c.nombre, ...(typeof c.usuario === 'string' ? { usuario: c.usuario.trim() } : {}), rol: c.rol, activo: c.activo !== false, claveNueva: c.claveNueva === true, terceros: c.terceros === true, ...(c.clave ? { clave: c.clave } : {}), por: quien.usuario }, env.SYNC_TOKEN_ADMIN, env, llamar);
     vaciarCacheUsuarios();   // los cambios se notan al instante en este servidor (en otros, tras USUARIOS_CACHE_SEG)
     return r;
   }
@@ -547,7 +586,7 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   const ruta = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
   const clave = request.headers.get('x-api-key') ?? '';
 
-  if (!['/', '/analizar', '/sync', '/equipo', '/yo', '/usuarios', '/ia', '/ingresar'].includes(ruta)) return json(404, { error: 'Not found' });
+  if (!['/', '/analizar', '/sync', '/equipo', '/yo', '/usuarios', '/ia', '/ingresar', '/sistema'].includes(ruta)) return json(404, { error: 'Not found' });
 
   if (ruta === '/ingresar') return ingresar(request, env, llamar);
 
@@ -556,10 +595,14 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   catch { return json(502, { error: 'No se pudo verificar el usuario (la hoja de Google no respondió).' }); }
   if (!quien) return json(401, { error: 'Unauthorized' });
 
-  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), proyectos: await proyectosDeLaHoja(env, llamar) });
+  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), proyectos: await proyectosDeLaHoja(env, llamar) });
   if (ruta === '/equipo') {
     if (quien.rol === 'tecnico') return json(401, { error: 'Unauthorized' });
     return haciaHojas({ accion: 'equipo' }, env.SYNC_TOKEN_ADMIN, env, llamar);
+  }
+  if (ruta === '/sistema') {
+    if (quien.rol !== 'admin') return json(401, { error: 'Unauthorized' });
+    return administrarSistema(request, env, llamar);
   }
   if (ruta === '/ia') {
     if (quien.rol !== 'admin') return json(401, { error: 'Unauthorized' });
@@ -571,7 +614,7 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   }
   if (env.LIMITADOR && !(await env.LIMITADOR.limit({ key: quien.nombre })).success) return json(429, { error: 'Demasiadas solicitudes' });
 
-  return ruta === '/sync' ? sincronizar(request, env, llamar, quien.nombre) : analizar(request, env, llamar, quien.nombre);
+  return ruta === '/sync' ? sincronizar(request, env, llamar, quien) : analizar(request, env, llamar, quien.nombre);
 }
 
 export async function manejar(request: Request, env: any, llamar: typeof fetch = fetch): Promise<Response> {

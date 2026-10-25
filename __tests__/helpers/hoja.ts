@@ -42,6 +42,8 @@ export class Hoja {
 
 export function crearServidor(rutaScript?: string) {
   const hojas: Hoja[] = [];
+  const fotosGuardadas: string[] = [];                            // archivos que el script mandó a Drive
+  const carpetaApi = (_c: any) => ({ getFilesByName: () => ({ hasNext: () => false }), createFile: (b: { nombre: string }) => { fotosGuardadas.push(b.nombre); return { getUrl: () => 'https://drive.test/' + b.nombre }; } });
   const carpetas: { nombre: string; papelera: boolean }[] = [];   // carpetas de Drive simuladas (las de fotos)
   const libro = { getSheets: () => hojas, insertSheet: (n: string) => { const h = new Hoja(n); hojas.push(h); return h; }, deleteSheet: (h: Hoja) => { hojas.splice(hojas.indexOf(h), 1); } };
   const fuente = fs.readFileSync(rutaScript ?? path.join(__dirname, '../../server/google-apps-script.gs'), 'utf8');
@@ -51,13 +53,16 @@ export function crearServidor(rutaScript?: string) {
     { getActiveSpreadsheet: () => libro },
     { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     { createTextOutput: (t: string) => ({ t, setMimeType() { return this; } }), MimeType: { JSON: 'json' } },
-    { getFoldersByName: (n: string) => { const l = carpetas.filter((c) => c.nombre === n); let i = 0; return { hasNext: () => i < l.length, next: () => { const c = l[i++]; return { setTrashed: () => { c.papelera = true; } }; } }; } },
-    { getUuid: () => crypto.randomUUID() }, html,
+    {
+      getFoldersByName: (n: string) => { const l = carpetas.filter((c) => c.nombre === n); let i = 0; return { hasNext: () => i < l.length, next: () => { const c = l[i++]; return { setTrashed: () => { c.papelera = true; }, ...carpetaApi(c) }; } }; },
+      createFolder: (n: string) => { const c = { nombre: n, papelera: false }; carpetas.push(c); return carpetaApi(c); },
+    },
+    { getUuid: () => crypto.randomUUID(), newBlob: (_d: any, _t: string, nombre: string) => ({ nombre }), base64Decode: (x: string) => x }, html,
   );
   const llamar = async (_url: string, init: any) => {
     const salida = gs.doPost({ postData: { contents: init.body } });
     return new Response(salida.t, { status: 200, headers: { 'content-type': 'application/json' } });
   };
   const hoja = (nombre: string) => hojas.find((h) => h.nombre === nombre);
-  return { hojas, llamar, hoja, gs, carpetas };
+  return { hojas, llamar, hoja, gs, carpetas, fotosGuardadas };
 }

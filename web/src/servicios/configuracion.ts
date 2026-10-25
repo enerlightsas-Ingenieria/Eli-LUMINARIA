@@ -1,5 +1,6 @@
 import type { ConfigFlota } from '@compartido/lib/config';
 import { cargarAjustes, guardarAjustes } from './ajustes';
+import { guardarVerificador } from './sesion';
 import { crearProyecto, listarProyectos } from './almacen';
 
 /** Aplica la configuración: solo toca lo que el código trae y crea los proyectos que falten. */
@@ -14,11 +15,14 @@ export async function aplicarConfig(cfg: ConfigFlota): Promise<{ proyectosNuevos
     syncToken: cfg.syncToken ?? a.syncToken,
     syncFotos: cfg.syncFotos ?? a.syncFotos,
     tecnico: cfg.tecnico ?? a.tecnico,
+    usuario: cfg.usuario ?? (cfg.apiKey && cfg.tecnico ? cfg.tecnico : a.usuario),
     modoTerceros: cfg.modoTerceros ?? a.modoTerceros,
     precisionMaxM: cfg.precisionMaxM ?? a.precisionMaxM,
     supervisor: cfg.supervisor ?? a.supervisor,
     rol: cfg.apiKey && cfg.apiKey !== a.apiKey ? undefined : a.rol,   // otra cuenta en este teléfono: el rol se vuelve a pedir al servidor
   });
+  // el enlace también deja a la persona lista para volver a entrar escribiendo su usuario y clave (incluso sin internet)
+  if (cfg.apiKey && (cfg.usuario ?? cfg.tecnico)) await guardarVerificador((cfg.usuario ?? cfg.tecnico)!, cfg.apiKey).catch(() => {});
   return { proyectosNuevos: await asegurarProyectos(cfg.proyectos ?? []) };
 }
 

@@ -42,6 +42,7 @@ export function normalizarRemota(fila: Record<string, unknown>): Remota | null {
       codigoPoste: texto(fila.codigoPoste),
       codigo: texto(fila.codigo),
       tecnico: texto(fila.tecnico),
+      usuario: texto(fila.usuario),
       origen: (['camara', 'galeria'].includes(texto(fila.origen)) ? texto(fila.origen) : '') as 'camara' | 'galeria' | '',
       ubicacionSimulada: fila.ubicacionSimulada === true || texto(fila.ubicacionSimulada).toUpperCase().startsWith('S'),
       jornadaId: texto(fila.jornadaId),
