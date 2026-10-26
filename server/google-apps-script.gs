@@ -58,7 +58,7 @@ function doPost(e) {
     lock.waitLock(30000);
     var d = JSON.parse(e.postData.contents);
     // 'equipo' y la administración de usuarios exigen TOKEN_ADMIN; todo lo demás, el token del equipo
-    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'config_guardar'].indexOf(d.accion) >= 0;
+    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'config_guardar'].indexOf(d.accion) >= 0;
     var esAdmin = soloAdmin && d.token === TOKEN_ADMIN;
     if (soloAdmin ? !esAdmin : d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' }); // las acciones de administración NO sirven con el token del equipo
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
@@ -67,10 +67,12 @@ function doPost(e) {
     if (d.accion === 'usuario') return salida({ ok: true, usuario: buscarUsuario(d.clave) });
     if (d.accion === 'ingresar') return salida({ ok: true, usuario: ingresarUsuario(d.usuario, d.clave) });
     if (d.accion === 'proyectos') return salida({ ok: true, proyectos: nombresProyectos() });
+    if (d.accion === 'contactos') return salida({ ok: true, contactos: contactosUsuarios() });
     if (d.accion === 'config') return salida({ ok: true, config: leerConfig() });
     if (d.accion === 'config_guardar') return salida(guardarConfig(d));
     if (d.accion === 'usuarios_listar') return salida({ ok: true, usuarios: listarUsuarios() });
     if (d.accion === 'usuarios_guardar') return salida(guardarUsuario(d));
+    if (d.accion === 'usuarios_borrar') return salida(borrarUsuario(d));
     var hoja = obtenerHoja(d.proyecto && d.proyecto.nombre);
 
     if (d.accion === 'listar') return salida({ ok: true, ahora: ahora, luminarias: listar(hoja, d.desde || '') });
@@ -512,20 +514,19 @@ function guardarConfig(d) {
 
 /* ---------------- Usuarios (pestaña _Usuarios: el administrador crea personas y roles aquí) ---------------- */
 
-var COLUMNAS_USUARIOS = [['nombre', 'Nombre'], ['rol', 'Rol (tecnico, supervisor o administrador)'], ['clave', 'Clave'], ['activo', 'Activo (si/no)'], ['terceros', 'Contratista (si/no)'], ['usuario', 'Usuario (para entrar)']];
+var COLUMNAS_USUARIOS = [['nombre', 'Nombre'], ['rol', 'Rol (tecnico, supervisor o administrador)'], ['clave', 'Clave'], ['activo', 'Activo (si/no)'], ['terceros', 'Contratista (si/no)'], ['usuario', 'Usuario (para entrar)'], ['telefono', 'Teléfono (WhatsApp)']];
 
 /** Crea la pestaña si no existe y la deja lista. También se puede ejecutar a mano. */
 function prepararUsuarios() {
   var nueva = !buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
-  var hoja = hojaSistema(HOJA_USUARIOS, COLUMNAS_USUARIOS, ['nombre', 'rol', 'clave', 'activo', 'terceros', 'usuario']);
-  if (nueva) hoja.appendRow(['Ejemplo Técnico', 'tecnico', '', 'no', 'no', 'ejemplo']);
-  else if (String(hoja.getRange(1, 6).getValue()) === '') { // pestaña creada antes de existir la columna Usuario
-    hoja.getRange(1, 6).setValue(COLUMNAS_USUARIOS[5][1]);
-    hoja.getRange(1, 6, 1, 1).setFontWeight('bold').setBackground('#FFC53D');
-  }
-  if (!nueva && String(hoja.getRange(1, 5).getValue()) === '') { // pestaña creada antes de existir la columna de contratistas
-    hoja.getRange(1, 5).setValue(COLUMNAS_USUARIOS[4][1]);
-    hoja.getRange(1, 5, 1, 1).setFontWeight('bold').setBackground('#FFC53D');
+  var hoja = hojaSistema(HOJA_USUARIOS, COLUMNAS_USUARIOS, ['nombre', 'rol', 'clave', 'activo', 'terceros', 'usuario', 'telefono']);
+  if (nueva) { hoja.appendRow(['Ejemplo Técnico', 'tecnico', '', 'no', 'no', 'ejemplo', '']); return hoja; }
+  // pestañas creadas con una versión anterior: se completan los encabezados de las columnas que faltan (contratista, usuario, teléfono)
+  for (var i = 4; i < COLUMNAS_USUARIOS.length; i++) {
+    if (String(hoja.getRange(1, i + 1).getValue()) === '') {
+      hoja.getRange(1, i + 1).setValue(COLUMNAS_USUARIOS[i][1]);
+      hoja.getRange(1, i + 1, 1, 1).setFontWeight('bold').setBackground('#FFC53D');
+    }
   }
   return hoja;
 }
@@ -597,6 +598,12 @@ function buscarUsuario(clave) {
   return null;
 }
 
+/** Personas activas con teléfono, para que quien las necesite les escriba por WhatsApp. Sin claves. */
+function contactosUsuarios() {
+  return listarUsuarios().filter(function (u) { return u.activo && u.telefono; })
+    .map(function (u) { return { nombre: u.nombre, usuario: u.usuario, rol: u.rol, telefono: u.telefono }; });
+}
+
 /** Con qué se entra: la columna Usuario; si está vacía (cuentas antiguas), el nombre. */
 function loginDe(r) { return String(r[5] === undefined || r[5] === null ? '' : r[5]).trim() || String(r[0]).trim(); }
 
@@ -621,9 +628,26 @@ function nombresProyectos() {
 function listarUsuarios() {
   var hoja = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
   if (!hoja || hoja.getLastRow() < 2) return [];
-  return hoja.getRange(2, 1, hoja.getLastRow() - 1, 6).getValues()
+  return hoja.getRange(2, 1, hoja.getLastRow() - 1, 7).getValues()
     .filter(function (r) { return String(r[0]).trim(); })
-    .map(function (r) { return { nombre: String(r[0]).trim(), usuario: loginDe(r), rol: rolDe(r[1]), clave: String(r[2]).trim(), activo: !usuarioInactivo(r[3]), terceros: esAfirmativo(r[4]) }; });
+    .map(function (r) { return { nombre: String(r[0]).trim(), usuario: loginDe(r), rol: rolDe(r[1]), clave: String(r[2]).trim(), activo: !usuarioInactivo(r[3]), terceros: esAfirmativo(r[4]), telefono: String(r[6] === undefined ? '' : r[6]).trim() }; });
+}
+
+/** Elimina una cuenta por su usuario. Los registros que hizo se conservan en la hoja (llevan su nombre y usuario). No puedes eliminarte a ti mismo. */
+function borrarUsuario(d) {
+  var login = String(d.usuario === undefined || d.usuario === null ? '' : d.usuario).trim();
+  if (!login) return { ok: false, error: 'Falta el usuario a eliminar.' };
+  if (normNombre(d.por) === normNombre(login)) return { ok: false, error: 'No puedes eliminarte a ti mismo.' };
+  var hoja = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
+  if (!hoja || hoja.getLastRow() < 2) return { ok: false, error: 'No existe ese usuario.' };
+  var datos = hoja.getRange(2, 1, hoja.getLastRow() - 1, 6).getValues();
+  for (var i = 0; i < datos.length; i++) {
+    if (String(datos[i][0]).trim() && normNombre(loginDe(datos[i])) === normNombre(login)) {
+      hoja.deleteRow(i + 2);
+      return { ok: true, eliminado: loginDe(datos[i]) };
+    }
+  }
+  return { ok: false, error: 'No existe ese usuario.' };
 }
 
 /**
@@ -648,7 +672,7 @@ function guardarUsuario(d) {
 
   var hoja = prepararUsuarios();
   var n = hoja.getLastRow();
-  var datos = n > 1 ? hoja.getRange(2, 1, n - 1, 6).getValues() : [];
+  var datos = n > 1 ? hoja.getRange(2, 1, n - 1, 7).getValues() : [];
   var fila = 0;
   datos.forEach(function (r, i) { if (!fila && normNombre(loginDe(r)) === normNombre(login)) fila = i + 2; });
   // la fila de ejemplo que crea el sistema (inactiva y sin clave) se reutiliza en vez de dejarla ahí
@@ -662,10 +686,13 @@ function guardarUsuario(d) {
   } else if (!clave || d.claveNueva === true) {
     do { clave = nuevaClave(); } while (otras.indexOf(clave) >= 0);
   }
-  var valores = [textoSeguro(nombre), rol, clave, activo ? 'si' : 'no', terceros ? 'si' : 'no', textoSeguro(login)];
-  if (fila) hoja.getRange(fila, 1, 1, 6).setValues([valores]);
+  // teléfono (WhatsApp): si no se envía, se conserva el que ya tenía
+  var telefono = fila ? String(hoja.getRange(fila, 7).getValue()).trim() : '';
+  if (d.telefono !== undefined && d.telefono !== null) telefono = String(d.telefono).trim();
+  var valores = [textoSeguro(nombre), rol, clave, activo ? 'si' : 'no', terceros ? 'si' : 'no', textoSeguro(login), telefono ? textoSeguro(telefono) : ''];
+  if (fila) hoja.getRange(fila, 1, 1, 7).setValues([valores]);
   else { hoja.appendRow(valores); }
-  return { ok: true, usuario: { nombre: nombre, usuario: login, rol: rol, clave: clave, activo: activo, terceros: terceros } };
+  return { ok: true, usuario: { nombre: nombre, usuario: login, rol: rol, clave: clave, activo: activo, terceros: terceros, telefono: telefono } };
 }
 
 /** Un latido por teléfono con jornada: sobrescribe SU fila (solo se guarda la última posición, sin historial de rutas). */

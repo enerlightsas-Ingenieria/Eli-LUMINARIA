@@ -14,6 +14,7 @@
  *   /equipo         → datos del mapa/panel de supervisión (supervisores y administradores)
  *   /ingresar       → entrar con usuario y clave (sin cabecera): devuelve nombre, rol y proyectos
  *   /yo             → quién soy (nombre y rol según la clave)
+ *   /contactos      → personas con teléfono para WhatsApp (el técnico ve a sus supervisores; supervisores y administradores, a todos)
  *   /sistema        → ajustes del sistema (guardar la primera foto en Drive): solo administradores
  *   /ia             → administración de la IA: estado, elegir principal (Gemini/Claude), probar (solo administradores)
  *   /usuarios       → menú de administración: listar/crear/editar personas (solo administradores)
@@ -569,12 +570,19 @@ async function administrarUsuarios(request: Request, env: any, llamar: typeof fe
     const superusuarios = String(env.ADMIN_TOKENS ?? '').split(',').map((t: string) => t.trim()).filter(Boolean).map((t: string) => (t.indexOf(':') > 0 ? t.slice(0, t.indexOf(':')) : 'equipo'));
     return json(200, { ...j, superusuarios });
   }
+  if (c.accion === 'borrar') {
+    if (typeof c.usuario !== 'string' || !c.usuario.trim() || c.usuario.length > 40) return json(400, { ok: false, error: 'Usuario inválido' });
+    const r = await haciaHojas({ accion: 'usuarios_borrar', usuario: c.usuario.trim(), por: quien.usuario }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    vaciarCacheUsuarios();   // la persona deja de poder usar la app de inmediato (en este servidor)
+    return r;
+  }
   if (c.accion === 'guardar') {
     if (typeof c.nombre !== 'string' || !c.nombre.trim() || c.nombre.length > 60) return json(400, { ok: false, error: 'Nombre inválido' });
     if (!ROLES.includes(c.rol)) return json(400, { ok: false, error: 'Rol inválido' });
     if (c.clave !== undefined && c.clave !== '' && (typeof c.clave !== 'string' || !/^\S{8,64}$/.test(c.clave))) return json(400, { ok: false, error: 'La clave debe tener entre 8 y 64 caracteres, sin espacios.' });
     if (c.usuario !== undefined && (typeof c.usuario !== 'string' || c.usuario.trim().length < 2 || c.usuario.length > 40 || /^[=+\-@_]/.test(c.usuario.trim()))) return json(400, { ok: false, error: 'Usuario inválido' });
-    const r = await haciaHojas({ accion: 'usuarios_guardar', nombre: c.nombre, ...(typeof c.usuario === 'string' ? { usuario: c.usuario.trim() } : {}), rol: c.rol, activo: c.activo !== false, claveNueva: c.claveNueva === true, terceros: c.terceros === true, ...(c.clave ? { clave: c.clave } : {}), por: quien.usuario }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    if (c.telefono !== undefined && (typeof c.telefono !== 'string' || !/^[0-9 +()\-]{0,25}$/.test(c.telefono))) return json(400, { ok: false, error: 'Teléfono inválido (solo números, espacios, + - y paréntesis).' });
+    const r = await haciaHojas({ accion: 'usuarios_guardar', nombre: c.nombre, ...(typeof c.telefono === 'string' ? { telefono: c.telefono.trim() } : {}), ...(typeof c.usuario === 'string' ? { usuario: c.usuario.trim() } : {}), rol: c.rol, activo: c.activo !== false, claveNueva: c.claveNueva === true, terceros: c.terceros === true, ...(c.clave ? { clave: c.clave } : {}), por: quien.usuario }, env.SYNC_TOKEN_ADMIN, env, llamar);
     vaciarCacheUsuarios();   // los cambios se notan al instante en este servidor (en otros, tras USUARIOS_CACHE_SEG)
     return r;
   }
@@ -586,7 +594,7 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   const ruta = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
   const clave = request.headers.get('x-api-key') ?? '';
 
-  if (!['/', '/analizar', '/sync', '/equipo', '/yo', '/usuarios', '/ia', '/ingresar', '/sistema'].includes(ruta)) return json(404, { error: 'Not found' });
+  if (!['/', '/analizar', '/sync', '/equipo', '/yo', '/usuarios', '/ia', '/ingresar', '/sistema', '/contactos'].includes(ruta)) return json(404, { error: 'Not found' });
 
   if (ruta === '/ingresar') return ingresar(request, env, llamar);
 
@@ -599,6 +607,14 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   if (ruta === '/equipo') {
     if (quien.rol === 'tecnico') return json(401, { error: 'Unauthorized' });
     return haciaHojas({ accion: 'equipo' }, env.SYNC_TOKEN_ADMIN, env, llamar);
+  }
+  if (ruta === '/contactos') {
+    // Un técnico solo ve a quienes lo supervisan; supervisores y administradores ven a todos. Nunca claves.
+    const r = await haciaHojas({ accion: 'contactos' }, env.SYNC_TOKEN, env, llamar);
+    const j: any = await r.json().catch(() => null);
+    if (!j?.ok) return json(502, { ok: false, error: 'No se pudieron leer los contactos.' });
+    const mios = (j.contactos as any[]).filter((u) => norm(u.usuario) !== norm(quien.usuario) && (quien.rol !== 'tecnico' || u.rol !== 'tecnico'));
+    return json(200, { ok: true, contactos: mios.map((u) => ({ nombre: u.nombre, usuario: u.usuario, rol: u.rol, telefono: u.telefono })) });
   }
   if (ruta === '/sistema') {
     if (quien.rol !== 'admin') return json(401, { error: 'Unauthorized' });

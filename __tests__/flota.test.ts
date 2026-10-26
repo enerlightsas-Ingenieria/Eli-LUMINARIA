@@ -890,6 +890,60 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
     expect(fila(m, 'u1')).toMatchObject({ Técnico: 'Juan', Usuario: 'Juan' });
   });
 
+  it('el administrador elimina usuarios: desaparecen de la lista y pierden el acceso al instante; sus registros se conservan', async () => {
+    const m = montar();
+    const clave = (await m.crear({ nombre: 'Carla Gómez', usuario: 'cgomez', rol: 'tecnico' })).j.usuario.clave;
+    await m.crear({ nombre: 'Beto', usuario: 'beto', rol: 'tecnico' });
+    await m.post('/sync', subida({ uuid: 'r1' }), clave);
+    expect((await m.post('/usuarios', { accion: 'borrar', usuario: 'CGomez' }, 'claveJefe99')).j).toMatchObject({ ok: true, eliminado: 'cgomez' });
+    const lista = (await m.post('/usuarios', { accion: 'listar' }, 'claveJefe99')).j.usuarios;
+    expect(lista.map((u: any) => u.usuario)).toEqual(['beto']);
+    expect((await m.post('/yo', {}, clave)).status).toBe(401);
+    expect((await m.post('/ingresar', { usuario: 'cgomez', clave })).status).toBe(401);
+    expect(fila(m, 'r1')).toMatchObject({ Técnico: 'Carla Gómez', Usuario: 'cgomez' });             // lo que registró se conserva
+    expect((await m.post('/usuarios', { accion: 'borrar', usuario: 'cgomez' }, 'claveJefe99')).j.ok).toBe(false);   // ya no existe
+  });
+
+  it('no se puede eliminar a uno mismo; solo administradores; usuario inválido; el token del equipo no sirve en el script', async () => {
+    const m = montar();
+    const admin = (await m.crear({ nombre: 'Luz Admin', usuario: 'luz', rol: 'admin' })).j.usuario.clave;
+    const tec = (await m.crear({ nombre: 'Ana', usuario: 'ana', rol: 'tecnico' })).j.usuario.clave;
+    expect((await m.post('/usuarios', { accion: 'borrar', usuario: 'luz' }, admin)).j.ok).toBe(false);          // a sí misma
+    expect((await m.post('/usuarios', { accion: 'borrar', usuario: 'ana' }, tec)).status).toBe(401);            // un técnico no
+    for (const usuario of ['', 5, 'x'.repeat(41)]) expect((await m.post('/usuarios', { accion: 'borrar', usuario }, 'claveJefe99')).status).toBe(400);
+    const r = await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'usuarios_borrar', usuario: 'ana' }) });
+    expect((await r.json()).ok).toBe(false);
+    expect((await m.post('/usuarios', { accion: 'listar' }, 'claveJefe99')).j.usuarios.map((u: any) => u.usuario).sort()).toEqual(['ana', 'luz']);
+  });
+
+  it('teléfono (WhatsApp): se guarda, se conserva al editar sin enviarlo, se puede cambiar o quitar, y se valida', async () => {
+    const m = montar();
+    const u = (await m.crear({ nombre: 'Ana', usuario: 'ana', rol: 'tecnico', telefono: '+57 300 123 4567' })).j.usuario;
+    expect(u.telefono).toBe('+57 300 123 4567');
+    expect((await m.crear({ nombre: 'Ana Pérez', usuario: 'ana', rol: 'tecnico' })).j.usuario.telefono).toBe('+57 300 123 4567');   // sin enviar → se conserva
+    expect((await m.crear({ nombre: 'Ana Pérez', usuario: 'ana', rol: 'tecnico', telefono: '3009998888' })).j.usuario.telefono).toBe('3009998888');
+    expect((await m.crear({ nombre: 'Ana Pérez', usuario: 'ana', rol: 'tecnico', telefono: '' })).j.usuario.telefono).toBe('');         // vacío → se quita
+    for (const telefono of ['abc', '300; DROP', '1'.repeat(26), 5 as any]) expect((await m.crear({ nombre: 'X', usuario: 'xx', rol: 'tecnico', telefono })).status).toBe(400);
+  });
+
+  it('contactos: el técnico solo ve a quienes lo supervisan; supervisor y administrador ven a todos; nunca claves, bajas ni gente sin teléfono', async () => {
+    const m = montar();
+    const tec1 = (await m.crear({ nombre: 'Ana', usuario: 'ana', rol: 'tecnico', telefono: '3001111111' })).j.usuario.clave;
+    await m.crear({ nombre: 'Beto', usuario: 'beto', rol: 'tecnico', telefono: '3002222222' });
+    const sup = (await m.crear({ nombre: 'Sofía', usuario: 'sofia', rol: 'supervisor', telefono: '3003333333' })).j.usuario.clave;
+    await m.crear({ nombre: 'Luz', usuario: 'luz', rol: 'admin', telefono: '3004444444' });
+    await m.crear({ nombre: 'SinTel', usuario: 'sintel', rol: 'supervisor' });
+    await m.crear({ nombre: 'Baja', usuario: 'baja', rol: 'supervisor', telefono: '3005555555', activo: false });
+
+    const deAna = (await m.post('/contactos', {}, tec1)).j;
+    expect(deAna.contactos.map((c: any) => c.usuario).sort()).toEqual(['luz', 'sofia']);          // supervisor y admin; no Beto, ni ella, ni sin teléfono, ni de baja
+    const deSofia = (await m.post('/contactos', {}, sup)).j;
+    expect(deSofia.contactos.map((c: any) => c.usuario).sort()).toEqual(['ana', 'beto', 'luz']);  // todos menos ella misma
+    expect(JSON.stringify([deAna, deSofia])).not.toMatch(/clave/i);
+    expect(deAna.contactos[0]).toEqual({ nombre: expect.any(String), usuario: expect.any(String), rol: expect.any(String), telefono: expect.any(String) });
+    expect((await m.post('/contactos', {}, 'clave-que-no-existe')).status).toBe(401);
+  });
+
   it('fotos: por defecto la primera foto se guarda en Drive; el administrador puede desactivarlo para todos y reactivarlo', async () => {
     const m = montar();
     const clave = (await m.crear({ nombre: 'Carla', usuario: 'carla', rol: 'tecnico' })).j.usuario.clave;

@@ -5,6 +5,8 @@ import { rolDe } from '@compartido/core/ajustes';
 import { useApp } from '../contexto/App';
 import { ir } from '../router';
 import { datosEquipo } from '../servicios/nucleo';
+import { listarContactos, type Contacto } from '../servicios/identidad';
+import { codigoPaisDeLaEmpresa, enlaceWa } from '../servicios/whatsapp';
 
 const COLORES: Record<string, string> = { 'En jornada': '#16a34a', 'Sin señal': '#ea580c', Pausada: '#2563eb', Terminada: '#6b7280' };
 const ORDEN: Record<string, number> = { 'En jornada': 0, 'Sin señal': 1, Pausada: 2, Terminada: 3 };
@@ -22,6 +24,9 @@ const hace = (iso: string, ahora: string) => {
 export function Equipo() {
   const { ajustes, salir } = useApp();
   const [d, setD] = useState<any>(null);
+  const [contactos, setContactos] = useState<Contacto[]>([]);
+  const [pais, setPais] = useState('57');
+  useEffect(() => { codigoPaisDeLaEmpresa().then(setPais); listarContactos().then(setContactos).catch(() => {}); }, []);
   const [error, setError] = useState('');
   const [verLuminarias, setVerLuminarias] = useState(false);
   const [ajustar, setAjustar] = useState(1);
@@ -72,6 +77,12 @@ export function Equipo() {
                 <div key={t.dispositivo} className="tarjeta">
                   <div><span className="punto" style={{ background: COLORES[t.estado] }} /><b>{t.tecnico || 'Sin nombre'}</b></div>
                   <div className="muted" style={{ fontSize: 13 }}>{t.estado} · {hace(t.senal, d.ahora)}</div>
+                  {(() => {
+                    const c = contactos.find((x) => norm(x.nombre) === norm(t.tecnico) || norm(x.usuario) === norm(t.tecnico));
+                    const msg = t.estado === 'Sin señal' ? `Hola ${String(t.tecnico).split(' ')[0]}, no recibimos tu ubicación desde hace un rato. ¿Todo bien? Abre ELI-LUMINARIA para reanudar.` : `Hola ${String(t.tecnico).split(' ')[0]}, `;
+                    const wa = c ? enlaceWa(c.telefono, msg, pais) : '';
+                    return wa ? <a className="boton secundario" style={{ textDecoration: 'none', marginTop: 6, minHeight: 36 }} href={wa} target="_blank" rel="noopener noreferrer" aria-label={`WhatsApp a ${t.tecnico}`}>WhatsApp</a> : null;
+                  })()}
                   <div className="muted" style={{ fontSize: 13 }}>{t.luminarias || 0} luminarias · {t.proyecto || '—'} · {t.plataforma}</div>
                   {q && <div style={{ fontSize: 13, color: q.conAlertas ? 'var(--aviso)' : 'var(--muted)' }}>{q.total} capturas · {q.conAlertas} con alertas{codigos ? ` (${codigos})` : ''}</div>}
                 </div>

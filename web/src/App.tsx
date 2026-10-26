@@ -10,6 +10,7 @@ import { AjustesPantalla as Ajustes } from './pantallas/Ajustes';
 import { Administracion } from './pantallas/Administracion';
 import { Ayuda } from './pantallas/Ayuda';
 import { Capturar } from './pantallas/Capturar';
+import { Contactos } from './pantallas/Contactos';
 import { Editar } from './pantallas/Editar';
 import { Equipo } from './pantallas/Equipo';
 import { Ingreso } from './pantallas/Ingreso';
@@ -27,7 +28,7 @@ function Pestanas({ activa, supervisor }: { activa: string; supervisor: boolean 
   // El supervisor (y el administrador) tienen además el Panel; todos pueden capturar como técnico.
   const base = [{ ruta: supervisor ? 'registros' : '', icono: 'lista', texto: 'Registros' }, { ruta: 'mapa', icono: 'mapa', texto: 'Mapa' }, { ruta: 'proyectos', icono: 'carpeta', texto: 'Proyectos' }, { ruta: 'ajustes', icono: 'ajustes', texto: 'Ajustes' }];
   const tabs = supervisor ? [{ ruta: '', icono: 'usuarios', texto: 'Panel' }, ...base] : base;
-  if (supervisor && activa === 'admin') activa = 'ajustes';
+  if (activa === 'admin' || activa === 'contactos') activa = 'ajustes';
   return (
     <div className="pestanas"><nav aria-label="Secciones">
       {tabs.map((t) => <a key={t.ruta} href={`#/${t.ruta}`} className={activa === t.ruta ? 'activa' : ''} aria-current={activa === t.ruta ? 'page' : undefined}><Icono nombre={t.icono} /><span>{t.texto}</span></a>)}
@@ -73,6 +74,7 @@ function Cuerpo() {
   else switch (primero) {
     case '': pantalla = supervisor ? <Equipo /> : <Registros />; break;
     case 'registros': pantalla = <Registros />; break;
+    case 'contactos': pantalla = <Contactos />; break;
     case 'admin': pantalla = <Administracion seccion={segundo} />; break;
     case 'mapa': pantalla = <Mapa />; break;
     case 'proyectos': pantalla = <Proyectos />; break;

@@ -4,13 +4,14 @@ import { avisar, confirmar } from '../componentes/dialogos';
 import { Boton, Cabecera, Campo, Cargando, Ficha, Hoja, Seccion, Segmentado } from '../componentes/ui';
 import { useApp } from '../contexto/App';
 import { ir } from '../router';
-import { enlaceDeAcceso, guardarUsuario, listarUsuarios, type Usuario } from '../servicios/identidad';
+import { eliminarUsuario, enlaceDeAcceso, guardarUsuario, listarUsuarios, type Usuario } from '../servicios/identidad';
 import { normalizar } from '../servicios/sesion';
+import { codigoPaisDeLaEmpresa, enlaceWa } from '../servicios/whatsapp';
 
 const ROLES: { valor: Rol; texto: string }[] = [{ valor: 'tecnico', texto: 'Técnico' }, { valor: 'supervisor', texto: 'Supervisor' }, { valor: 'admin', texto: 'Administrador' }];
 const TEXTO_ROL: Record<Rol, string> = { tecnico: 'Técnico', supervisor: 'Supervisor', admin: 'Administrador' };
 
-interface Edicion { original?: Usuario; nombre: string; usuario: string; usuarioTocado: boolean; rol: Rol; activo: boolean; terceros: boolean; clave: string }
+interface Edicion { original?: Usuario; nombre: string; usuario: string; telefono: string; usuarioTocado: boolean; rol: Rol; activo: boolean; terceros: boolean; clave: string }
 
 /** Propuesta de usuario a partir del nombre: inicial del primer nombre + último apellido, en minúsculas y sin tildes (Juan Pérez → jperez). */
 export const sugerirUsuario = (nombre: string) => {
@@ -28,6 +29,8 @@ export function AdminUsuarios() {
   const [edicion, setEdicion] = useState<Edicion | null>(null);
   const [ocupado, setOcupado] = useState(false);
   const [acceso, setAcceso] = useState<{ usuario: Usuario; url: string } | null>(null);
+  const [pais, setPais] = useState('57');
+  useEffect(() => { codigoPaisDeLaEmpresa().then(setPais); }, []);
 
   const cargar = useCallback(async () => {
     try { const r = await listarUsuarios(); setLista(r.usuarios); setSuperusuarios(r.superusuarios); setError(''); } catch (e: any) { setError(e.message ?? String(e)); }
@@ -51,11 +54,21 @@ export function AdminUsuarios() {
     if (claveNueva && !(await confirmar('Generar clave nueva', 'La clave anterior dejará de funcionar y tendrás que entregarle la nueva.', 'Generar'))) return;
     setOcupado(true);
     try {
-      const u = await guardarUsuario({ nombre, usuario, rol: edicion.rol, activo: edicion.activo, terceros: edicion.rol === 'tecnico' && edicion.terceros, claveNueva: claveNueva && !clave, ...(clave ? { clave } : {}) });
+      const u = await guardarUsuario({ nombre, usuario, telefono: edicion.telefono.trim(), rol: edicion.rol, activo: edicion.activo, terceros: edicion.rol === 'tecnico' && edicion.terceros, claveNueva: claveNueva && !clave, ...(clave ? { clave } : {}) });
       setEdicion(null);
       await cargar();
       if (u.activo) await mostrarAcceso(u);
     } catch (e: any) { await avisar('No se pudo guardar', e.message ?? String(e)); }
+    finally { setOcupado(false); }
+  };
+
+  const eliminar = async () => {
+    const u = edicion?.original;
+    if (!u) return;
+    if (!(await confirmar('Eliminar usuario', `Se eliminará la cuenta de ${u.nombre} (${u.usuario}) y ya no podrá entrar. Sus registros se conservan en la hoja con su nombre. Esta acción no se puede deshacer.\n\nSi solo quieres que no entre por ahora, es mejor darle de baja.`, 'Eliminar', true))) return;
+    setOcupado(true);
+    try { await eliminarUsuario(u.usuario); setEdicion(null); await cargar(); }
+    catch (e: any) { await avisar('No se pudo eliminar', e.message ?? String(e)); }
     finally { setOcupado(false); }
   };
 
@@ -73,7 +86,7 @@ export function AdminUsuarios() {
   return (
     <>
       <Cabecera titulo="Usuarios" subtitulo="Personas con acceso y su rol" atras={() => ir('/admin')}
-        acciones={[{ icono: 'mas', etiqueta: 'Nuevo usuario', onClick: () => setEdicion({ nombre: '', usuario: '', usuarioTocado: false, rol: 'tecnico', activo: true, terceros: false, clave: '' }) }]} />
+        acciones={[{ icono: 'mas', etiqueta: 'Nuevo usuario', onClick: () => setEdicion({ nombre: '', usuario: '', telefono: '', usuarioTocado: false, rol: 'tecnico', activo: true, terceros: false, clave: '' }) }]} />
       <p className="muted" style={{ marginBottom: 12 }}>
         Cada persona entra a la web con su <b>usuario</b> (su nombre) y su <b>clave</b>. <b>Técnico:</b> captura y ve sus registros. <b>Supervisor:</b> además ve el panel del equipo. <b>Administrador:</b> además crea y da de baja usuarios.
       </p>
@@ -95,10 +108,10 @@ export function AdminUsuarios() {
       <div className="pila">
         {lista?.map((u) => (
           <button key={u.nombre} type="button" className="tarjeta item" style={{ opacity: u.activo ? 1 : 0.6 }} aria-label={`${u.nombre}, ${TEXTO_ROL[u.rol]}${u.activo ? '' : ', de baja'}`}
-            onClick={() => setEdicion({ original: u, nombre: u.nombre, usuario: u.usuario, usuarioTocado: true, rol: u.rol, activo: u.activo, terceros: !!u.terceros, clave: '' })}>
+            onClick={() => setEdicion({ original: u, nombre: u.nombre, usuario: u.usuario, telefono: u.telefono ?? '', usuarioTocado: true, rol: u.rol, activo: u.activo, terceros: !!u.terceros, clave: '' })}>
             <div style={{ flex: 1 }}>
               <div className="t">{u.nombre}</div>
-              <div className="s">Usuario: {u.usuario}</div>
+              <div className="s">Usuario: {u.usuario}{u.telefono ? ` · ${u.telefono}` : ''}</div>
               <div className="etq"><Ficha texto={TEXTO_ROL[u.rol]} color={u.rol === 'admin' ? 'primario' : u.rol === 'supervisor' ? 'aviso' : undefined} />{!!u.terceros && <Ficha texto="Contratista" color="aviso" />}{!u.activo && <Ficha texto="De baja" color="peligro" />}</div>
             </div>
           </button>
@@ -107,6 +120,7 @@ export function AdminUsuarios() {
 
       <Hoja abierta={!!edicion} alCerrar={() => setEdicion(null)} titulo={edicion?.original ? 'Editar usuario' : 'Nuevo usuario'}>
         <Campo etiqueta="Nombre completo" valor={edicion?.nombre ?? ''} alCambiar={(t) => setEdicion((e) => e && { ...e, nombre: t, usuario: e.original || e.usuarioTocado ? e.usuario : sugerirUsuario(t) })} pista="Ej. Juan Pérez" />
+        <Campo etiqueta="Teléfono (WhatsApp)" valor={edicion?.telefono ?? ''} alCambiar={(t) => setEdicion((e) => e && { ...e, telefono: t })} pista="Ej. 300 123 4567 (opcional)" />
         <Campo etiqueta="Usuario (para entrar)" valor={edicion?.usuario ?? ''} alCambiar={(t) => setEdicion((e) => e && { ...e, usuario: t, usuarioTocado: true })} pista="Ej. jperez" soloLectura={!!edicion?.original} />
         <Campo etiqueta={edicion?.original ? 'Clave nueva (opcional)' : 'Clave (opcional)'} valor={edicion?.clave ?? ''} alCambiar={(t) => setEdicion((e) => e && { ...e, clave: t })} pista={edicion?.original ? 'Déjala vacía para conservar la actual' : 'Vacía = el sistema genera una fácil de teclear'} />
         <p className="muted" style={{ margin: '4px 0' }}>Rol</p>
@@ -116,6 +130,7 @@ export function AdminUsuarios() {
         <div className="pila">
           <Boton texto={edicion?.original ? 'Guardar y ver datos de acceso' : 'Crear y ver datos de acceso'} cargando={ocupado} onClick={() => guardar(false)} />
           {!!edicion?.original && <Boton texto="Generar clave nueva" variante="secundario" deshabilitado={ocupado} onClick={() => guardar(true)} />}
+          {!!edicion?.original && <Boton texto="Eliminar usuario" variante="peligro" deshabilitado={ocupado} onClick={eliminar} />}
         </div>
       </Hoja>
 
@@ -129,6 +144,9 @@ export function AdminUsuarios() {
         </dl>
         <div className="pila">
           <Boton texto="Compartir datos de acceso" icono="copiar" onClick={compartir} />
+          {acceso && enlaceWa(acceso.usuario.telefono ?? '', mensajeDeAcceso(acceso.usuario), pais)
+            ? <a className="boton primario bloque" style={{ textDecoration: 'none' }} href={enlaceWa(acceso.usuario.telefono ?? '', mensajeDeAcceso(acceso.usuario), pais)} target="_blank" rel="noopener noreferrer">Enviar por WhatsApp a {acceso.usuario.nombre}</a>
+            : <p className="muted" style={{ fontSize: 13 }}>Agrega su teléfono al usuario para enviarle estos datos directo por WhatsApp.</p>}
           <Boton texto="Copiar datos" variante="secundario" onClick={() => acceso && copiar(mensajeDeAcceso(acceso.usuario), 'Datos copiados')} />
         </div>
         <Seccion>Enlace directo (alternativa)</Seccion>

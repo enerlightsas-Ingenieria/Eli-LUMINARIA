@@ -13,6 +13,7 @@ export class Hoja {
   formulas: Record<string, string> = {};
   constructor(public nombre: string) {}
   getName() { return this.nombre; }
+  deleteRow(n: number) { this.filas.splice(n - 1, 1); }
   setName(n: string) { this.nombre = n; }
   getLastRow() { return this.filas.length; }
   getMaxRows() { return 1000; }

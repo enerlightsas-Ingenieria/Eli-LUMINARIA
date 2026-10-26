@@ -1,3 +1,4 @@
 {
-  "proxy": "https://eli-luminaria-proxy.enerlight.workers.dev"
+  "proxy": "https://eli-luminaria-proxy.enerlight.workers.dev",
+  "codigoPais": "57"
 }

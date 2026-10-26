@@ -4,7 +4,8 @@ import { cargarAjustes, guardarAjustes } from './ajustes';
 import { dejarAviso, fijarClaveDeSesion, guardarVerificador, olvidarVerificador, verificarLocal } from './sesion';
 import { asegurarProyectos } from './configuracion';
 
-export interface Usuario { nombre: string; usuario: string; rol: Rol; clave: string; activo: boolean; terceros?: boolean }
+export interface Usuario { nombre: string; usuario: string; rol: Rol; clave: string; activo: boolean; terceros?: boolean; telefono?: string }
+export interface Contacto { nombre: string; usuario: string; rol: Rol; telefono: string }
 
 const ANTHROPIC = 'api.anthropic.com';
 
@@ -127,11 +128,16 @@ export async function listarUsuarios(): Promise<{ usuarios: Usuario[]; superusua
   return { usuarios: j.usuarios as Usuario[], superusuarios: Array.isArray(j.superusuarios) ? j.superusuarios : [] };
 }
 
+/** Personas con teléfono a las que esta cuenta puede escribir (técnico: sus supervisores; supervisor y administrador: todos). */
+export async function listarContactos(): Promise<Contacto[]> { return (await llamarProxy('/contactos', {})).contactos as Contacto[]; }
+
+export async function eliminarUsuario(usuario: string): Promise<void> { await llamarProxy('/usuarios', { accion: 'borrar', usuario }); }
+
 /** ¿Se guarda la primera foto de cada luminaria en Drive? (lo decide el administrador). */
 export const estadoSistema = (): Promise<{ fotos: boolean }> => llamarProxy('/sistema', { accion: 'estado' });
 export const guardarFotosEnDrive = (fotos: boolean): Promise<{ fotos: boolean }> => llamarProxy('/sistema', { accion: 'guardar', fotos });
 
-export async function guardarUsuario(u: { nombre: string; usuario?: string; rol: Rol; activo: boolean; claveNueva?: boolean; clave?: string; terceros?: boolean }): Promise<Usuario> {
+export async function guardarUsuario(u: { nombre: string; usuario?: string; telefono?: string; rol: Rol; activo: boolean; claveNueva?: boolean; clave?: string; terceros?: boolean }): Promise<Usuario> {
   return (await llamarProxy('/usuarios', { accion: 'guardar', ...u })).usuario as Usuario;
 }
 

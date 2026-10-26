@@ -532,3 +532,54 @@ test('el administrador se ve como superusuario, la primera foto se guarda en Dri
   expect(String(filas(b, 'Barrio A')[0].Foto)).toMatch(/^https:\/\/drive\.test\/.+\.jpg$/);
   expect(b.gs.fotosGuardadas).toHaveLength(1);
 });
+
+test('WhatsApp: el administrador envía los datos de acceso al teléfono de la persona; el técnico contacta a su supervisor con el mensaje escrito', async ({ browser }) => {
+  const b = crearBackend();
+  const admin = await telefono(browser, b);
+  await configurar(admin.page, enlace({ token: 'tokSup' }));
+  await admin.page.getByRole('link', { name: 'Ajustes' }).click();
+  await admin.page.getByRole('button', { name: 'Administración (usuarios e IA)' }).click();
+  await admin.page.getByRole('button', { name: 'Administrar usuarios' }).click();
+
+  const crear = async (nombre: string, rolNombre: string | null, tel: string) => {
+    await admin.page.getByRole('button', { name: 'Nuevo usuario' }).click();
+    await admin.page.getByLabel('Nombre completo').fill(nombre);
+    await admin.page.getByLabel('Teléfono (WhatsApp)').fill(tel);
+    if (rolNombre) await admin.page.getByRole('tab', { name: rolNombre }).click();
+    await admin.page.getByRole('button', { name: 'Crear y ver datos de acceso' }).click();
+  };
+
+  await crear('Sara Mejía', 'Supervisor', '+57 311 222 3344');
+  await admin.page.getByRole('dialog').getByRole('button', { name: 'Cancelar' }).click();
+  await crear('Dina Torres', null, '300 123 4567');                                    // técnica, con celular sin código de país
+  const claveDina = (await admin.page.getByTestId('acceso-clave').textContent())!;
+  const wa = await admin.page.getByRole('link', { name: /Enviar por WhatsApp a Dina Torres/ }).getAttribute('href');
+  expect(wa).toMatch(/^https:\/\/wa\.me\/573001234567\?text=/);                         // el 57 se agrega solo
+  const texto = decodeURIComponent(wa!.split('?text=')[1]);
+  expect(texto).toContain('Usuario: dtorres'); expect(texto).toContain(`Clave: ${claveDina}`);
+  expect(await admin.page.getByRole('link', { name: /Enviar por WhatsApp a Dina Torres/ }).getAttribute('target')).toBe('_blank');
+
+  // el teléfono quedó guardado en la hoja (columna 7) y en la lista
+  expect(b.gs.hoja('_Usuarios')!.filas.some((f: any[]) => f[5] === 'dtorres' && f[6] === '300 123 4567')).toBe(true);
+
+  // Dina (técnica) abre Contactos: ve a su supervisora, no a otras personas, y el mensaje sale con su nombre
+  const dina = await telefono(browser, b);
+  await dina.ctx.route(`${WEB}/servidor.json`, (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ proxy: WORKER, codigoPais: '57' }) }));
+  await dina.page.goto(WEB + '/');
+  await dina.page.getByLabel('Usuario', { exact: true }).fill('dtorres');
+  await dina.page.getByLabel('Clave', { exact: true }).fill(claveDina);
+  await dina.page.getByRole('button', { name: 'Entrar', exact: true }).click();
+  await expect(dina.page.getByRole('link', { name: 'Ajustes' })).toBeVisible({ timeout: 15_000 });
+  await dina.page.getByRole('link', { name: 'Ajustes' }).click();
+  await dina.page.getByRole('button', { name: 'Contactos y WhatsApp' }).click();
+  await expect(dina.page.getByRole('region', { name: /Sara Mejía/ }).or(dina.page.locator('[aria-label^="Sara Mejía"]'))).toBeVisible();
+  await expect(dina.page.locator('[aria-label^="Dina Torres"]')).toHaveCount(0);
+  const hrefSara = await dina.page.locator('[aria-label^="Sara Mejía"]').getByRole('link', { name: 'WhatsApp' }).getAttribute('href');
+  expect(hrefSara).toMatch(/^https:\/\/wa\.me\/573112223344\?text=/);
+  expect(decodeURIComponent(hrefSara!.split('?text=')[1])).toContain('Hola, soy Dina Torres (ELI-LUMINARIA');
+  await expect(dina.page.locator('[aria-label^="Sara Mejía"]').getByRole('link', { name: 'Llamar' })).toHaveAttribute('href', 'tel:+573112223344');
+
+  // el mensaje se puede editar antes de enviar
+  await dina.page.getByLabel('Mensaje').fill('Necesito ayuda con una luminaria');
+  expect(decodeURIComponent((await dina.page.locator('[aria-label^="Sara Mejía"]').getByRole('link', { name: 'WhatsApp' }).getAttribute('href'))!.split('?text=')[1])).toBe('Necesito ayuda con una luminaria');
+});
