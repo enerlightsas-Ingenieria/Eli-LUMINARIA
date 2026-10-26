@@ -151,14 +151,20 @@ export async function enlaceDeAcceso(u: Usuario, opciones: { proyectos?: string[
   return `${location.origin}${location.pathname}#/config?c=${codificar(cfg)}`;
 }
 
-export type Proveedor = 'gemini' | 'claude';
-export interface EstadoIA { ok: true; principal: Proveedor; disponibles: Record<Proveedor, boolean>; modeloGemini: string }
+export type Proveedor = string;
+export interface InfoIA { id: Proveedor; nombre: string; gratis: boolean; nota: string; donde: string; configurado: boolean; origenClave: 'servidor' | 'app' | null; modelo: string; base?: string }
+export interface EstadoIA { ok: true; principal: Proveedor; disponibles: Record<Proveedor, boolean>; modeloGemini: string; proveedores: InfoIA[]; prueba?: ResultadoPrueba }
 export interface ResultadoPrueba { ok: boolean; estado: number; mensaje: string }
+export interface ModelosIA { modelos: string[]; actual: string; sugerido?: string; mensaje?: string }
 
 export const estadoIA = (): Promise<EstadoIA> => llamarProxy('/ia', { accion: 'estado' });
 export const elegirIA = (proveedor: Proveedor): Promise<EstadoIA> => llamarProxy('/ia', { accion: 'guardar', proveedor });
-export async function probarIA(): Promise<Record<Proveedor, ResultadoPrueba>> {
-  return (await llamarProxy('/ia', { accion: 'probar' }, 40000)).resultados;
+/** Prueba real (imagen + herramienta). Sin proveedor, prueba todos los que tienen clave. */
+export async function probarIA(proveedor?: Proveedor): Promise<Record<Proveedor, ResultadoPrueba>> {
+  return (await llamarProxy('/ia', { accion: 'probar', ...(proveedor ? { proveedor } : {}) }, 60000)).resultados;
 }
-export const modelosGemini = (): Promise<{ modelos: string[]; actual: string; sugerido: string; mensaje?: string }> => llamarProxy('/ia', { accion: 'modelos' });
-export const elegirModeloGemini = (modelo: string): Promise<EstadoIA> => llamarProxy('/ia', { accion: 'modelo', modelo });
+export const modelosIA = (proveedor: Proveedor): Promise<ModelosIA> => llamarProxy('/ia', { accion: 'modelos', proveedor }, 30000);
+export const elegirModeloIA = (proveedor: Proveedor, modelo: string): Promise<EstadoIA> => llamarProxy('/ia', { accion: 'modelo', proveedor, modelo }, 40000);
+/** Pega (o, con '', quita) la clave de un proveedor. El servidor la prueba antes de guardarla y nunca la devuelve. */
+export const guardarClaveIA = (proveedor: Proveedor, clave: string): Promise<EstadoIA> => llamarProxy('/ia', { accion: 'clave', proveedor, clave }, 40000);
+export const guardarBaseIA = (base: string): Promise<EstadoIA> => llamarProxy('/ia', { accion: 'base', base });

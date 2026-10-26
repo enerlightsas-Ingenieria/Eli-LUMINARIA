@@ -58,7 +58,7 @@ function doPost(e) {
     lock.waitLock(30000);
     var d = JSON.parse(e.postData.contents);
     // 'equipo' y la administración de usuarios exigen TOKEN_ADMIN; todo lo demás, el token del equipo
-    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'config_guardar'].indexOf(d.accion) >= 0;
+    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'config_guardar', 'ia_clave_guardar', 'ia_claves'].indexOf(d.accion) >= 0;
     var esAdmin = soloAdmin && d.token === TOKEN_ADMIN;
     if (soloAdmin ? !esAdmin : d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' }); // las acciones de administración NO sirven con el token del equipo
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
@@ -70,6 +70,8 @@ function doPost(e) {
     if (d.accion === 'contactos') return salida({ ok: true, contactos: contactosUsuarios() });
     if (d.accion === 'config') return salida({ ok: true, config: leerConfig() });
     if (d.accion === 'config_guardar') return salida(guardarConfig(d));
+    if (d.accion === 'ia_clave_guardar') return salida(guardarClaveIA(d));
+    if (d.accion === 'ia_claves') return salida({ ok: true, claves: clavesIA() });
     if (d.accion === 'usuarios_listar') return salida({ ok: true, usuarios: listarUsuarios() });
     if (d.accion === 'usuarios_guardar') return salida(guardarUsuario(d));
     if (d.accion === 'usuarios_borrar') return salida(borrarUsuario(d));
@@ -484,8 +486,14 @@ function reiniciarDesdeCero() {
 /* ---------------- Ajustes del sistema (pestaña _Config) ---------------- */
 
 var COLUMNAS_CONFIG = [['clave', 'Clave'], ['valor', 'Valor']];
-var CONFIG_PERMITIDA = { ia: ['gemini', 'claude'], fotos: ['si', 'no'], gemini_modelo: /^gemini-[a-z0-9.\-]{1,60}$/ }; // qué IA va primero y qué modelo de Gemini usar
+var PROVEEDORES_IA = ['gemini', 'claude', 'groq', 'openrouter', 'mistral', 'qwen', 'kimi', 'openai', 'otra'];
+// ia = qué IA va primero; fotos = guardar la 1.ª foto en Drive; gemini_modelo = modelo de Gemini; modelo_<proveedor> y base_otra = ver configValida
+var CONFIG_PERMITIDA = { ia: PROVEEDORES_IA, fotos: ['si', 'no'], gemini_modelo: /^gemini-[a-z0-9.\-]{1,60}$/ };
+/** ¿Es un ajuste que se guarda tal cual (modelos y direcciones distinguen mayúsculas)? Los de lista cerrada se pasan a minúsculas. */
+function configLibre(k) { return k === 'base_otra' || /^modelo_[a-z]{3,12}$/.test(k) || (CONFIG_PERMITIDA[k] instanceof RegExp); }
 function configValida(k, v) {
+  if (/^modelo_[a-z]{3,12}$/.test(k)) return PROVEEDORES_IA.indexOf(k.substring(7)) >= 0 && k !== 'modelo_gemini' && /^[A-Za-z0-9._:\/\-]{1,100}$/.test(v);
+  if (k === 'base_otra') return /^https:\/\/[A-Za-z0-9._:\/\-]{4,200}$/.test(v);
   var p = CONFIG_PERMITIDA[k];
   return !!p && (p instanceof RegExp ? p.test(v) : p.indexOf(v) >= 0);
 }
@@ -496,16 +504,38 @@ function leerConfig() {
   var cfg = {};
   if (!hoja || hoja.getLastRow() < 2) return cfg;
   hoja.getRange(2, 1, hoja.getLastRow() - 1, 2).getValues().forEach(function (r) {
-    var k = String(r[0]).trim(), v = String(r[1]).trim().toLowerCase();
+    var k = String(r[0]).trim(), v = String(r[1]).trim();
+    if (!configLibre(k)) v = v.toLowerCase();
     if (configValida(k, v)) cfg[k] = v;
   });
   return cfg;
 }
 
+/** Claves de las IAs que el administrador pega desde la app. Se guardan en las propiedades del script (no en la hoja: no se ven en ninguna celda). */
+function guardarClaveIA(d) {
+  var p = String(d.proveedor || '');
+  if (PROVEEDORES_IA.indexOf(p) < 0) return { ok: false, error: 'Proveedor desconocido.' };
+  var clave = String(d.clave === undefined || d.clave === null ? '' : d.clave).trim();
+  var props = PropertiesService.getScriptProperties();
+  if (!clave) { props.deleteProperty('IA_KEY_' + p); return { ok: true, guardada: false }; }
+  if (!/^\S{8,400}$/.test(clave)) return { ok: false, error: 'La clave debe tener entre 8 y 400 caracteres, sin espacios.' };
+  props.setProperty('IA_KEY_' + p, clave);
+  return { ok: true, guardada: true };
+}
+
+function clavesIA() {
+  var props = PropertiesService.getScriptProperties(), out = {};
+  PROVEEDORES_IA.forEach(function (p) { var v = props.getProperty('IA_KEY_' + p); if (v) out[p] = v; });
+  return out;
+}
+
 function guardarConfig(d) {
-  var k = String(d.clave || ''), v = String(d.valor || '').trim().toLowerCase();
-  if (k === 'gemini_modelo' && v === 'auto') v = '';   // "auto" = que el sistema elija el modelo disponible
-  if (!(CONFIG_PERMITIDA[k] && (v === '' && k === 'gemini_modelo' || configValida(k, v)))) return { ok: false, error: 'Ajuste no permitido.' };
+  var k = String(d.clave || ''), v = String(d.valor === undefined || d.valor === null ? '' : d.valor).trim();
+  if (!configLibre(k)) v = v.toLowerCase();
+  if (configLibre(k) && v === 'auto') v = '';   // "auto" = que el sistema elija (o quitar el ajuste)
+  var conocida = !!CONFIG_PERMITIDA[k] || k === 'base_otra' || (/^modelo_[a-z]{3,12}$/.test(k) && PROVEEDORES_IA.indexOf(k.substring(7)) >= 0 && k !== 'modelo_gemini');
+  var vaciable = configLibre(k);                 // los ajustes libres (modelos, dirección) se pueden quitar con vacío
+  if (!conocida || !((vaciable && v === '') || configValida(k, v))) return { ok: false, error: 'Ajuste no permitido.' };
   var hoja = hojaSistema(HOJA_CONFIG, COLUMNAS_CONFIG, ['clave', 'valor']);
   var enc = buscarFila(hoja, COLUMNAS_CONFIG, 0, k);
   if (enc.fila) hoja.getRange(enc.fila, 2).setValue(v); else hoja.appendRow([k, v]);

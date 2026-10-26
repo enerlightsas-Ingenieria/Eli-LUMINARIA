@@ -255,11 +255,12 @@ async function listarModelosGemini(env: any, llamar: typeof fetch): Promise<stri
 /** Fuera los modelos de voz, imagen, audio en vivo, embeddings, etc.: no analizan fotos ni usan herramientas. */
 /** Petición mínima pero REAL: una imagen y una herramienta de respuesta forzada, como hace el análisis. */
 const PRUEBA_JPEG = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAAQABADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwAooooA/9k=';
-const cuerpoPrueba = () => aGemini({
+const cuerpoPruebaBase = () => ({
   max_tokens: 64,
   tools: [{ name: 'registrar_luminaria', description: 'Registra lo que se ve.', input_schema: { type: 'object', properties: { fabricante: { type: 'string', description: 'Fabricante' }, confianza: { type: 'string', enum: ['alta', 'media', 'baja'], description: 'Confianza' } }, required: ['confianza'] } }],
   messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: PRUEBA_JPEG } }, { type: 'text', text: 'Registra lo que ves; si no ves nada, deja el fabricante vacío.' }] }],
 });
+const cuerpoPrueba = () => aGemini(cuerpoPruebaBase());
 
 const NO_SIRVEN = /(tts|image|imagen|live|audio|embed|aqa|veo|robotics|computer|learnlm|gemma|native|speech|transcri|translate)/;
 export const esModeloUtil = (n: string) => !NO_SIRVEN.test(n);
@@ -312,23 +313,182 @@ async function conGemini(cuerpo: any, env: any, llamar: typeof fetch): Promise<I
   return { ok: true, respuesta: new Response(JSON.stringify(convertida), { status: 200, headers: { 'content-type': 'application/json' } }) };
 }
 
-export type Proveedor = 'claude' | 'gemini';
-const otro = (p: Proveedor): Proveedor => (p === 'claude' ? 'gemini' : 'claude');
+export type Proveedor = string;
+
+interface InfoProveedor { id: string; nombre: string; tipo: 'claude' | 'gemini' | 'openai'; base?: string; gratis: boolean; nota: string; donde: string; modeloDefecto?: string }
 
 /**
- * Proveedores de IA con clave configurada, en orden. `principal` (lo que el administrador eligió en la app) va primero y el otro
- * queda de respaldo; sin elección se usa ORDEN_IA (por defecto Gemini primero y Claude de respaldo).
+ * IAs que el sistema sabe usar para analizar fotos. Gemini y Claude tienen conexión propia; el resto habla el mismo "idioma" que ChatGPT
+ * (chat/completions con imágenes y herramientas), así que añadir otra es una línea. Hace falta que el modelo ACEPTE IMÁGENES: por eso no
+ * están DeepSeek (su API oficial no recibe fotos), Perplexity ni Copilot (no tienen API para esto).
+ */
+export const PROVEEDORES: InfoProveedor[] = [
+  { id: 'gemini', nombre: 'Gemini (Google)', tipo: 'gemini', gratis: true, nota: 'Capa gratuita con límites de uso. Entiende fotos.', donde: 'aistudio.google.com → Get API key' },
+  { id: 'claude', nombre: 'Claude (Anthropic)', tipo: 'claude', gratis: false, nota: 'De pago por foto. Muy buena leyendo placas.', donde: 'console.anthropic.com → API keys' },
+  { id: 'groq', nombre: 'Groq (Llama con visión)', tipo: 'openai', base: 'https://api.groq.com/openai/v1', gratis: true, nota: 'Capa gratuita con límites. Modelos Llama 4 con visión.', donde: 'console.groq.com → API Keys', modeloDefecto: 'meta-llama/llama-4-scout-17b-16e-instruct' },
+  { id: 'openrouter', nombre: 'OpenRouter (modelos gratis)', tipo: 'openai', base: 'https://openrouter.ai/api/v1', gratis: true, nota: 'Reúne muchos modelos; los que terminan en ":free" no cuestan (límites bajos).', donde: 'openrouter.ai → Keys' },
+  { id: 'mistral', nombre: 'Mistral', tipo: 'openai', base: 'https://api.mistral.ai/v1', gratis: true, nota: 'Plan gratuito de pruebas con límites. Modelos con visión (Pixtral, Mistral Small).', donde: 'console.mistral.ai → API keys', modeloDefecto: 'mistral-small-latest' },
+  { id: 'qwen', nombre: 'Qwen (Alibaba)', tipo: 'openai', base: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', gratis: false, nota: 'Cuota inicial para cuentas nuevas; luego de pago. Modelos Qwen-VL con visión.', donde: 'Alibaba Cloud Model Studio → API-KEY', modeloDefecto: 'qwen-vl-plus' },
+  { id: 'kimi', nombre: 'Kimi (Moonshot)', tipo: 'openai', base: 'https://api.moonshot.ai/v1', gratis: false, nota: 'De pago (puede dar crédito inicial). Modelos con visión.', donde: 'platform.moonshot.ai → API Keys', modeloDefecto: 'moonshot-v1-8k-vision-preview' },
+  { id: 'openai', nombre: 'ChatGPT (OpenAI)', tipo: 'openai', base: 'https://api.openai.com/v1', gratis: false, nota: 'De pago por uso.', donde: 'platform.openai.com → API keys', modeloDefecto: 'gpt-4o-mini' },
+  { id: 'otra', nombre: 'Otra compatible con OpenAI', tipo: 'openai', gratis: false, nota: 'Cualquier servicio con la API de ChatGPT que acepte imágenes (Together, Fireworks, un servidor propio…). Necesita su dirección.', donde: 'La que indique tu proveedor' },
+];
+export const IDS_IA = PROVEEDORES.map((p) => p.id);
+const infoDe = (id: string) => PROVEEDORES.find((p) => p.id === id);
+const CLAVE_ENV: Record<string, string> = {
+  gemini: 'GEMINI_API_KEY', claude: 'ANTHROPIC_API_KEY', groq: 'GROQ_API_KEY', openrouter: 'OPENROUTER_API_KEY', mistral: 'MISTRAL_API_KEY',
+  qwen: 'QWEN_API_KEY', kimi: 'KIMI_API_KEY', openai: 'OPENAI_API_KEY', otra: 'OTRA_API_KEY',
+};
+export const claveDe = (env: any, id: string): string => String(env?.[CLAVE_ENV[id]] ?? '');
+/** ¿Se puede usar? Hay clave y, para "otra", también su dirección. */
+export const tieneClave = (env: any, id: string) => !!claveDe(env, id) && (id !== 'otra' || !!env.OTRA_BASE_URL);
+const baseDe = (env: any, id: string) => (id === 'otra' ? String(env.OTRA_BASE_URL ?? '') : infoDe(id)?.base ?? '').replace(/\/+$/, '');
+const ORDEN_DEFECTO = ['gemini', 'claude', 'groq', 'openrouter', 'mistral', 'qwen', 'kimi', 'openai', 'otra'];
+
+/**
+ * Proveedores con clave, en orden. `principal` (lo que eligió el administrador) va primero y los demás quedan de respaldo en el orden
+ * por defecto (Gemini, Claude, Groq…); sin elección manda ORDEN_IA o ese orden por defecto.
  */
 export function proveedores(env: any, principal?: Proveedor): Proveedor[] {
-  const orden = principal
-    ? [principal, otro(principal)]
-    : String(env.ORDEN_IA ?? 'gemini,claude').split(',').map((x) => x.trim().toLowerCase());
-  return (['claude', 'gemini'] as const)
-    .filter((p) => orden.includes(p) && !!(p === 'claude' ? env.ANTHROPIC_API_KEY : env.GEMINI_API_KEY))
-    .sort((a, b) => orden.indexOf(a) - orden.indexOf(b));
+  let orden: string[];
+  if (principal && IDS_IA.includes(principal)) orden = [principal, ...ORDEN_DEFECTO.filter((x) => x !== principal)];
+  else if (env.ORDEN_IA) orden = String(env.ORDEN_IA).split(',').map((x) => x.trim().toLowerCase()).filter((x) => IDS_IA.includes(x));
+  else orden = ORDEN_DEFECTO;
+  return orden.filter((id) => tieneClave(env, id));
 }
 
-async function analizar(request: Request, env: any, llamar: typeof fetch, tecnico: string): Promise<Response> {
+/* ---------- IAs compatibles con la API de ChatGPT (Groq, OpenRouter, Mistral, Qwen, Kimi, OpenAI, otra) ---------- */
+
+/** Petición (formato Anthropic ya validado) → chat/completions con imágenes y herramienta de respuesta forzada. */
+export function aOpenAI(cuerpo: any, modelo: string): any {
+  const t = cuerpo.tools[0];
+  const content = cuerpo.messages[0].content.map((c: any) =>
+    c.type === 'image' ? { type: 'image_url', image_url: { url: `data:${c.source.media_type};base64,${c.source.data}` } } : { type: 'text', text: c.text });
+  return {
+    model: modelo, max_tokens: cuerpo.max_tokens, temperature: 0.1,
+    messages: [{ role: 'user', content }],
+    tools: [{ type: 'function', function: { name: t.name, description: t.description, parameters: t.input_schema } }],
+    tool_choice: { type: 'function', function: { name: t.name } },
+  };
+}
+
+/** Respuesta de chat/completions → misma forma que la de Anthropic. Acepta también el JSON escrito en el texto si el modelo no usa herramientas. */
+export function deOpenAI(r: any): any | null {
+  const msg = r?.choices?.[0]?.message;
+  const llamada = msg?.tool_calls?.[0]?.function;
+  let args: any = null;
+  if (llamada?.arguments) { try { args = typeof llamada.arguments === 'string' ? JSON.parse(llamada.arguments) : llamada.arguments; } catch { args = null; } }
+  else if (typeof msg?.content === 'string') { const m = msg.content.match(/\{[\s\S]*\}/); if (m) { try { args = JSON.parse(m[0]); } catch { args = null; } } }
+  return args && typeof args === 'object' && !Array.isArray(args) ? { content: [{ type: 'tool_use', name: llamada?.name ?? 'registrar_luminaria', input: args }] } : null;
+}
+
+const NO_CHAT = /(embed|whisper|tts|guard|moderat|rerank|dall|transcri|speech|audio|image-gen|stable-diffusion|flux)/i;
+const PARECE_VISION = /(vision|-vl\b|vl-|\bvl\b|pixtral|llava|scout|maverick|4o|gpt-4\.1|gpt-5|gemini|gemma-?3|mistral-(small|medium|large)|claude)/i;
+
+export interface ModeloListado { id: string; vision?: boolean }
+
+/** Ordena lo que ofrece un proveedor: primero lo que dice aceptar imágenes, luego lo que "parece" de visión; sin voz ni embeddings. Los ":free" van antes. */
+export function ordenarModelosVision(lista: ModeloListado[]): ModeloListado[] {
+  const util = lista.filter((m) => m.id && !NO_CHAT.test(m.id));
+  const puntos = (m: ModeloListado) => (m.vision === true ? 4 : 0) + (PARECE_VISION.test(m.id) ? 2 : 0) + (/:free$/.test(m.id) ? 1 : 0);
+  return util.slice().sort((a, b) => puntos(b) - puntos(a) || a.id.localeCompare(b.id));
+}
+
+async function listarModelosOpenAI(id: string, env: any, llamar: typeof fetch): Promise<ModeloListado[]> {
+  const r = await llamar(`${baseDe(env, id)}/models`, { headers: { authorization: `Bearer ${claveDe(env, id)}` } });
+  if (!r.ok) { await r.body?.cancel().catch(() => {}); return []; }
+  const j: any = await r.json().catch(() => null);
+  const datos: any[] = Array.isArray(j?.data) ? j.data : Array.isArray(j) ? j : [];
+  return datos.map((m) => {
+    const vision = m?.architecture?.input_modalities?.includes?.('image') ?? m?.capabilities?.vision ?? undefined;   // OpenRouter y Mistral lo informan
+    return { id: String(m?.id ?? ''), ...(typeof vision === 'boolean' ? { vision } : {}) };
+  }).filter((m) => m.id);
+}
+
+const detectadoOpenAI = new Map<string, { modelo: string; hasta: number }>();
+export const olvidarModelosDetectados = () => { detectadoOpenAI.clear(); olvidarModeloDetectado(); };
+
+async function modeloOpenAI(id: string, env: any, llamar: typeof fetch): Promise<{ modelo: string; origen: 'admin' | 'env' | 'detectado' | 'defecto' | 'ninguno' }> {
+  const cfg = await configIA(env, llamar);
+  if (cfg.modelos?.[id]) return { modelo: cfg.modelos[id], origen: 'admin' };
+  const deEnv = env[`MODELO_${id.toUpperCase()}`];
+  if (deEnv) return { modelo: String(deEnv), origen: 'env' };
+  const d = detectadoOpenAI.get(id);
+  if (d && d.hasta > Date.now()) return { modelo: d.modelo, origen: 'detectado' };
+  const def = infoDe(id)?.modeloDefecto;
+  return def ? { modelo: def, origen: 'defecto' } : { modelo: '', origen: 'ninguno' };
+}
+
+/**
+ * Llama a la IA compatible con ChatGPT. Si el modelo no existe en la cuenta y no lo fijó el administrador, busca entre los que ofrece
+ * el proveedor el que parece de visión y reintenta (queda recordado una hora). `forzar` = probar justo ese modelo, sin buscar otro.
+ */
+async function generarConOpenAI(id: string, cuerpoAnthropic: any, env: any, llamar: typeof fetch, forzar?: string): Promise<{ r: Response; modelo: string; autoElegido: boolean }> {
+  const { modelo, origen } = forzar ? { modelo: forzar, origen: 'admin' as const } : await modeloOpenAI(id, env, llamar);
+  const enviar = (m: string) => llamar(`${baseDe(env, id)}/chat/completions`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${claveDe(env, id)}` }, body: JSON.stringify(aOpenAI(cuerpoAnthropic, m)),
+  });
+  const sinModelo = (m: string) => new Response(JSON.stringify({ error: { message: `No se encontró un modelo con visión en ${infoDe(id)?.nombre}${m ? ` (${m} no existe)` : ''}. Elige uno en la lista.` } }), { status: 404 });
+  const buscar = async (excluir: string) => ordenarModelosVision(await listarModelosOpenAI(id, env, llamar)).map((m) => m.id).filter((m) => m !== excluir).slice(0, 2);
+
+  let r: Response;
+  if (!modelo) {
+    const candidatos = await buscar('');
+    if (!candidatos.length) return { r: sinModelo(''), modelo: '', autoElegido: false };
+    r = await enviar(candidatos[0]);
+    if (r.ok) detectadoOpenAI.set(id, { modelo: candidatos[0], hasta: Date.now() + 3_600_000 });
+    return { r, modelo: candidatos[0], autoElegido: true };
+  }
+  r = await enviar(modelo);
+  if (r.status === 503) { await r.body?.cancel().catch(() => {}); await new Promise((ok) => setTimeout(ok, Math.max(0, Number(env.REINTENTO_MS ?? 1000)))); r = await enviar(modelo); }
+  if (r.ok || origen === 'admin' || (r.status !== 404 && r.status !== 400)) return { r, modelo, autoElegido: false };
+  const texto = await r.clone().text().catch(() => '');
+  if (!/model|modelo/i.test(texto)) return { r, modelo, autoElegido: false };   // un 400 por otra causa (imagen inválida…) no se arregla cambiando de modelo
+  for (const m of await buscar(modelo)) {
+    await r.body?.cancel().catch(() => {});
+    r = await enviar(m);
+    if (r.ok) { detectadoOpenAI.set(id, { modelo: m, hasta: Date.now() + 3_600_000 }); return { r, modelo: m, autoElegido: true }; }
+  }
+  return { r, modelo, autoElegido: false };
+}
+
+async function conOpenAI(id: string, cuerpo: any, env: any, llamar: typeof fetch): Promise<Intento> {
+  const { r } = await generarConOpenAI(id, cuerpo, env, llamar);
+  if (!r.ok) return falla(r, env);
+  const conv = deOpenAI(await r.json().catch(() => null));
+  if (!conv) return { ok: false, estado: 502, mensaje: 'El modelo respondió sin datos estructurados (¿acepta imágenes?).' };
+  return { ok: true, respuesta: new Response(JSON.stringify(conv), { status: 200, headers: { 'content-type': 'application/json' } }) };
+}
+
+/* ---------- claves que el administrador pega desde la app (se guardan en el script de Google) ---------- */
+
+const cacheClaves = new Map<string, { v: Record<string, string>; hasta: number }>();
+export const olvidarClavesGuardadas = () => cacheClaves.clear();
+
+async function clavesGuardadas(env: any, llamar: typeof fetch): Promise<Record<string, string>> {
+  if (!env.SYNC_URL || !env.SYNC_TOKEN_ADMIN) return {};
+  const ttl = Math.max(0, Number(env.USUARIOS_CACHE_SEG ?? 60)) * 1000;
+  const g = cacheClaves.get(env.SYNC_URL);
+  if (g && g.hasta > Date.now()) return g.v;
+  try {
+    const c: any = await (await haciaHojas({ accion: 'ia_claves' }, env.SYNC_TOKEN_ADMIN, env, llamar)).json();
+    const v: Record<string, string> = c?.ok && c.claves && typeof c.claves === 'object' ? c.claves : {};
+    if (ttl > 0) cacheClaves.set(env.SYNC_URL, { v, hasta: Date.now() + ttl });
+    return v;
+  } catch { return {}; }
+}
+
+/** env + las claves pegadas desde la app (los secretos de Cloudflare mandan) + la dirección de "otra". */
+async function conClaves(env: any, llamar: typeof fetch): Promise<any> {
+  const guardadas = await clavesGuardadas(env, llamar);
+  const e = { ...env };
+  for (const id of IDS_IA) if (!e[CLAVE_ENV[id]] && guardadas[id]) e[CLAVE_ENV[id]] = guardadas[id];
+  if (!e.OTRA_BASE_URL) { const b = (await configIA(env, llamar)).baseOtra; if (b) e.OTRA_BASE_URL = b; }
+  return e;
+}
+
+async function analizar(request: Request, entorno: any, llamar: typeof fetch, tecnico: string): Promise<Response> {
+  const env = await conClaves(entorno, llamar);
   const texto = await request.text();
   if (texto.length > MAX_BYTES) return json(413, { error: 'Payload too large' });
   const modelos = (env.MODELOS_PERMITIDOS ?? 'claude-sonnet-5-5,claude-haiku-5-5,claude-opus-5-5').split(',').map((m: string) => m.trim());
@@ -336,13 +496,14 @@ async function analizar(request: Request, env: any, llamar: typeof fetch, tecnic
   if (!v.ok) return json(400, { error: v.error });
 
   const lista = proveedores(env, await iaPrincipal(env, llamar));
-  if (!lista.length) return json(503, { error: 'La IA no está configurada en el servidor (falta ANTHROPIC_API_KEY o GEMINI_API_KEY).' });
+  if (!lista.length) return json(503, { error: 'La IA no está configurada en el servidor (el administrador debe agregar una clave en Administración → Inteligencia artificial).' });
 
   let ultimo = 502;
   const detalle: string[] = [];
-  for (const p of lista) {
+  for (const p of lista.slice(0, 4)) {   // la principal y hasta 3 de respaldo (cada intento fallido cuesta tiempo)
     let intento: Intento;
-    try { intento = p === 'claude' ? await conClaude(v.cuerpo, env, llamar) : await conGemini(v.cuerpo, env, llamar); }
+    const tipo = infoDe(p)?.tipo;
+    try { intento = tipo === 'claude' ? await conClaude(v.cuerpo, env, llamar) : tipo === 'gemini' ? await conGemini(v.cuerpo, env, llamar) : await conOpenAI(p, v.cuerpo, env, llamar); }
     catch { intento = { ok: false, estado: 502 }; }
     console.log(JSON.stringify({ tecnico, proveedor: p, estado: intento.ok ? 200 : intento.estado }));
     if (intento.ok) {
@@ -355,11 +516,12 @@ async function analizar(request: Request, env: any, llamar: typeof fetch, tecnic
   return json(ultimo === 429 ? 429 : ultimo === 401 || ultimo === 403 ? 502 : ultimo, { error: `El servicio de IA no respondió (${detalle.join('; ')}).` });
 }
 
-const cacheIA = new Map<string, { v: { ia?: Proveedor; modelo?: string; fotos?: boolean }; hasta: number }>();
+interface ConfigIA { ia?: Proveedor; modelo?: string; modelos?: Record<string, string>; baseOtra?: string; fotos?: boolean }
+const cacheIA = new Map<string, { v: ConfigIA; hasta: number }>();
 export const vaciarCacheIA = () => cacheIA.clear();
 
 /** Ajustes que eligió el administrador (pestaña _Config: IA principal y modelo de Gemini), con memoria corta. Sin hoja → vacío. */
-async function configIA(env: any, llamar: typeof fetch): Promise<{ ia?: Proveedor; modelo?: string; fotos?: boolean }> {
+async function configIA(env: any, llamar: typeof fetch): Promise<ConfigIA> {
   if (!env.SYNC_URL || !env.SYNC_TOKEN) return {};
   const ttl = Math.max(0, Number(env.USUARIOS_CACHE_SEG ?? 60)) * 1000;
   const g = cacheIA.get(env.SYNC_URL);
@@ -369,7 +531,9 @@ async function configIA(env: any, llamar: typeof fetch): Promise<{ ia?: Proveedo
     const c: any = await r.json();
     const k = c?.ok ? c.config ?? {} : {};
     const v = {
-      ia: k.ia === 'claude' || k.ia === 'gemini' ? (k.ia as Proveedor) : undefined,
+      ia: typeof k.ia === 'string' && IDS_IA.includes(k.ia) ? (k.ia as Proveedor) : undefined,
+      modelos: Object.fromEntries(IDS_IA.filter((id) => id !== 'gemini' && /^[A-Za-z0-9._:/-]{1,100}$/.test(String(k[`modelo_${id}`] ?? ''))).map((id) => [id, String(k[`modelo_${id}`])])),
+      baseOtra: typeof k.base_otra === 'string' && /^https:\/\//.test(k.base_otra) ? k.base_otra : undefined,
       fotos: k.fotos === 'no' ? false : k.fotos === 'si' ? true : undefined,
       modelo: typeof k.gemini_modelo === 'string' && MODELO_GEMINI_RE.test(k.gemini_modelo) && esModeloUtil(k.gemini_modelo) ? (k.gemini_modelo as string) : undefined,   // un modelo de voz/imagen ya guardado se ignora
     };
@@ -381,71 +545,145 @@ async function configIA(env: any, llamar: typeof fetch): Promise<{ ia?: Proveedo
 const guardarFotos = async (env: any, llamar: typeof fetch) => (await configIA(env, llamar)).fotos !== false;
 const iaPrincipal = async (env: any, llamar: typeof fetch) => (await configIA(env, llamar)).ia;
 
-const SIN_CLAVES = (txt: string, env: any) => [env.ANTHROPIC_API_KEY, env.GEMINI_API_KEY].filter(Boolean).reduce((t: string, k: string) => t.split(k).join('***'), txt);
+const SIN_CLAVES = (txt: string, env: any) => IDS_IA.map((id) => claveDe(env, id)).filter((k) => k.length >= 4).reduce((t: string, k: string) => t.split(k).join('***'), txt);
 
-/** Llamada mínima a un proveedor para el botón "Probar la IA" del administrador: dice si funciona y, si no, por qué (sin claves). */
-async function probarProveedor(p: Proveedor, env: any, llamar: typeof fetch): Promise<{ ok: boolean; estado: number; mensaje: string }> {
+/** Llamada mínima y REAL (una imagen y una herramienta) a un proveedor: dice si funciona y, si no, por qué (sin claves). */
+async function probarProveedor(p: Proveedor, env: any, llamar: typeof fetch, forzar?: string): Promise<{ ok: boolean; estado: number; mensaje: string }> {
+  const tipo = infoDe(p)?.tipo;
   try {
     let usado = '', auto = false;
-    const r = p === 'claude'
-      ? await llamar('https://api.anthropic.com/v1/messages', {
-        method: 'POST', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', 'x-api-key': env.ANTHROPIC_API_KEY },
+    let r: Response;
+    if (tipo === 'claude') {
+      r = await llamar('https://api.anthropic.com/v1/messages', {
+        method: 'POST', headers: { 'content-type': 'application/json', 'anthropic-version': '2023-06-01', 'x-api-key': claveDe(env, 'claude') },
         body: JSON.stringify({ model: String(env.MODELOS_PERMITIDOS ?? 'claude-haiku-5-5').split(',')[0].trim(), max_tokens: 8, messages: [{ role: 'user', content: 'Responde solo: ok' }] }),
-      })
-      : await (async () => {
-        const g = await generarConGemini(cuerpoPrueba(), env, llamar);
-        usado = g.modelo; auto = g.autoElegido;
-        return g.r;
-      })();
-    if (r.ok && p === 'gemini' && !deGemini(await r.clone().json().catch(() => null))) {
-      return { ok: false, estado: 200, mensaje: `El modelo ${usado} respondió, pero no sabe analizar imágenes con herramientas (no sirve para esto). Elige otro modelo o "Automático".` };
+      });
+    } else if (tipo === 'gemini') {
+      const g = await generarConGemini(cuerpoPrueba(), env, llamar, forzar);
+      usado = g.modelo; auto = g.autoElegido; r = g.r;
+      if (r.ok && !deGemini(await r.clone().json().catch(() => null))) {
+        return { ok: false, estado: 200, mensaje: `El modelo ${usado} respondió, pero no sabe analizar imágenes con herramientas (no sirve para esto). Elige otro modelo o "Automático".` };
+      }
+    } else {
+      const g = await generarConOpenAI(p, cuerpoPruebaBase(), env, llamar, forzar);
+      usado = g.modelo; auto = g.autoElegido; r = g.r;
+      if (r.ok && !deOpenAI(await r.clone().json().catch(() => null))) {
+        return { ok: false, estado: 200, mensaje: `El modelo ${usado} respondió, pero no devolvió datos estructurados a partir de una imagen (¿acepta imágenes?). Elige otro modelo.` };
+      }
     }
     if (r.ok) { await r.body?.cancel().catch(() => {}); return { ok: true, estado: r.status, mensaje: usado ? `Funciona con el modelo ${usado}${auto ? ' (elegido automáticamente porque el anterior no existe para tu cuenta)' : ''}.` : 'Funciona.' }; }
     const j: any = await r.json().catch(() => null);
-    const msg = String(j?.error?.message ?? j?.error ?? '').slice(0, 220);
+    const msg = String(j?.error?.message ?? (typeof j?.error === 'string' ? j.error : '') ?? j?.message ?? '').slice(0, 220);
     return { ok: false, estado: r.status, mensaje: SIN_CLAVES(msg, env) || `Respondió ${r.status}.` };
   } catch { return { ok: false, estado: 0, mensaje: 'No se pudo conectar con el proveedor.' }; }
 }
 
-/** Menú de administración → Inteligencia artificial: ver estado, elegir cuál va primero, probar. Solo administradores. */
-async function administrarIA(request: Request, env: any, llamar: typeof fetch): Promise<Response> {
+/** Menú de administración → Inteligencia artificial: proveedores, claves, modelos, cuál va primero y pruebas. Solo administradores. */
+async function administrarIA(request: Request, entorno: any, llamar: typeof fetch): Promise<Response> {
   const texto = await request.text();
   if (texto.length > 2000) return json(413, { ok: false, error: 'Payload too large' });
   let c: any;
   try { c = JSON.parse(texto); } catch { return json(400, { ok: false, error: 'JSON inválido' }); }
-  const disponibles = { claude: !!env.ANTHROPIC_API_KEY, gemini: !!env.GEMINI_API_KEY };
-  const estado = async () => ({ ok: true, principal: (await iaPrincipal(env, llamar)) ?? proveedores({ ...env, ANTHROPIC_API_KEY: 'x', GEMINI_API_KEY: 'x' })[0], disponibles, modeloGemini: (await modeloGemini(env, llamar)).modelo });
-  if (c?.accion === 'estado') { cacheIA.clear(); return json(200, await estado()); }
-  if (c?.accion === 'guardar') {
-    if (c.proveedor !== 'claude' && c.proveedor !== 'gemini') return json(400, { ok: false, error: 'Proveedor inválido' });
-    const r = await haciaHojas({ accion: 'config_guardar', clave: 'ia', valor: c.proveedor }, env.SYNC_TOKEN_ADMIN, env, llamar);
-    cacheIA.clear();
+  const guardadasAntes = await clavesGuardadas(entorno, llamar);
+  const env = await conClaves(entorno, llamar);
+  const disponibles: Record<string, boolean> = Object.fromEntries(IDS_IA.map((id) => [id, tieneClave(env, id)]));
+  const idValido = (x: unknown): x is string => typeof x === 'string' && IDS_IA.includes(x);
+
+  // El estado se calcula SIEMPRE de nuevo (claves, dirección y modelos pueden haber cambiado justo antes).
+  const estado = async () => {
+    const guardadas = await clavesGuardadas(entorno, llamar);
+    const e = await conClaves(entorno, llamar);
+    const cfg = await configIA(e, llamar);
+    const dispo: Record<string, boolean> = Object.fromEntries(IDS_IA.map((id) => [id, tieneClave(e, id)]));
+    const modeloActual = async (id: string) => (id === 'gemini' ? (await modeloGemini(e, llamar)).modelo : id === 'claude' ? '' : (await modeloOpenAI(id, e, llamar)).modelo);
+    const lista = [];
+    for (const p of PROVEEDORES) {
+      lista.push({
+        id: p.id, nombre: p.nombre, gratis: p.gratis, nota: p.nota, donde: p.donde, configurado: dispo[p.id],
+        origenClave: claveDe(entorno, p.id) ? 'servidor' : guardadas[p.id] ? 'app' : null,
+        modelo: dispo[p.id] ? await modeloActual(p.id) : '', ...(p.id === 'otra' ? { base: e.OTRA_BASE_URL ?? '' } : {}),
+      });
+    }
+    return { ok: true, principal: cfg.ia ?? proveedores(e)[0] ?? 'gemini', disponibles: dispo, modeloGemini: (await modeloGemini(e, llamar)).modelo, proveedores: lista };
+  };
+  const guardarConfig = async (clave: string, valor: string) => {
+    const r = await haciaHojas({ accion: 'config_guardar', clave, valor }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    cacheIA.clear(); olvidarModelosDetectados();
     const j: any = await r.clone().json().catch(() => null);
-    return j?.ok ? json(200, await estado()) : r;
+    return j?.ok ? null : r;
+  };
+
+  if (c?.accion === 'estado') { cacheIA.clear(); cacheClaves.clear(); return json(200, await estado()); }
+
+  if (c?.accion === 'guardar') {
+    if (!idValido(c.proveedor)) return json(400, { ok: false, error: 'Proveedor inválido' });
+    const fallo = await guardarConfig('ia', c.proveedor);
+    return fallo ?? json(200, await estado());
   }
+
+  if (c?.accion === 'clave') {   // pegar (o quitar) la clave de un proveedor desde la app
+    if (!idValido(c.proveedor)) return json(400, { ok: false, error: 'Proveedor inválido' });
+    if (c.clave === '' || c.clave === null) {
+      if (claveDe(entorno, c.proveedor)) return json(400, { ok: false, error: 'Esa clave está fijada en el servidor (Cloudflare); desde la app solo se pueden quitar las que se pegaron aquí.' });
+      await haciaHojas({ accion: 'ia_clave_guardar', proveedor: c.proveedor, clave: '' }, env.SYNC_TOKEN_ADMIN, env, llamar);
+      cacheClaves.clear(); cacheIA.clear();
+      return json(200, await estado());
+    }
+    if (typeof c.clave !== 'string' || !/^\S{8,400}$/.test(c.clave.trim())) return json(400, { ok: false, error: 'La clave debe tener entre 8 y 400 caracteres, sin espacios.' });
+    const clave = c.clave.trim();
+    const e2 = { ...env, [CLAVE_ENV[c.proveedor]]: clave };
+    if (c.proveedor === 'otra' && !e2.OTRA_BASE_URL) return json(400, { ok: false, error: 'Primero escribe la dirección del servicio.' });
+    const prueba = await probarProveedor(c.proveedor, e2, llamar);
+    if (prueba.estado === 401 || prueba.estado === 403) return json(400, { ok: false, error: `El proveedor rechazó la clave (${prueba.estado}). ${prueba.mensaje}`.slice(0, 300) });
+    const r = await haciaHojas({ accion: 'ia_clave_guardar', proveedor: c.proveedor, clave }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    const j: any = await r.clone().json().catch(() => null);
+    if (!j?.ok) return r;
+    cacheClaves.clear(); cacheIA.clear();
+    return json(200, { ...(await estado()), prueba });
+  }
+
+  if (c?.accion === 'base') {   // dirección de la IA "otra compatible con OpenAI"
+    const b = typeof c.base === 'string' ? c.base.trim().replace(/\/+$/, '') : '';
+    if (b && !/^https:\/\/[A-Za-z0-9._:/-]{4,200}$/.test(b)) return json(400, { ok: false, error: 'La dirección debe empezar por https:// (por ejemplo https://api.together.xyz/v1).' });
+    const fallo = await guardarConfig('base_otra', b || 'auto');
+    return fallo ?? json(200, await estado());
+  }
+
   if (c?.accion === 'modelos') {
-    if (!disponibles.gemini) return json(200, { ok: true, modelos: [], actual: '', mensaje: 'Sin clave de Gemini en el servidor.' });
-    const todos = await listarModelosGemini(env, llamar);
-    const orden = [...todos].sort((a, b) => Number(/flash/.test(b)) - Number(/flash/.test(a)) || b.localeCompare(a));
-    return json(200, { ok: true, modelos: orden.slice(0, 30), actual: (await modeloGemini(env, llamar)).modelo, sugerido: mejorModelo(todos) ?? '' });
+    const id = c.proveedor === undefined ? 'gemini' : c.proveedor;
+    if (!idValido(id)) return json(400, { ok: false, error: 'Proveedor inválido' });
+    if (!disponibles[id]) return json(200, { ok: true, proveedor: id, modelos: [], actual: '', mensaje: `Sin clave de ${infoDe(id)!.nombre}.` });
+    if (id === 'claude') return json(200, { ok: true, proveedor: id, modelos: [], actual: '', mensaje: 'El modelo de Claude lo define la app (Ajustes → Modelo).' });
+    if (id === 'gemini') {
+      const todos = await listarModelosGemini(env, llamar);
+      const orden = [...todos].sort((a, b) => Number(/flash/.test(b)) - Number(/flash/.test(a)) || b.localeCompare(a));
+      return json(200, { ok: true, proveedor: id, modelos: orden.slice(0, 30), actual: (await modeloGemini(env, llamar)).modelo, sugerido: mejorModelo(todos) ?? '' });
+    }
+    const orden = ordenarModelosVision(await listarModelosOpenAI(id, env, llamar));
+    return json(200, { ok: true, proveedor: id, modelos: orden.slice(0, 60).map((m) => m.id), actual: (await modeloOpenAI(id, env, llamar)).modelo, sugerido: orden[0]?.id ?? '' });
   }
+
   if (c?.accion === 'modelo') {
+    const id = c.proveedor === undefined ? 'gemini' : c.proveedor;
+    if (!idValido(id) || id === 'claude') return json(400, { ok: false, error: 'Proveedor inválido' });
     const m = c.modelo === 'auto' ? 'auto' : c.modelo;
-    if (typeof m !== 'string' || (m !== 'auto' && !MODELO_GEMINI_RE.test(m))) return json(400, { ok: false, error: 'Modelo inválido' });
-    if (m !== 'auto' && disponibles.gemini) {   // no se guarda un modelo que no sirve (voz, solo texto, inexistente…); 429/503 son momentáneos y sí se guarda
-      const g = await generarConGemini(cuerpoPrueba(), env, llamar, m);
-      const malo = g.r.status === 400 || g.r.status === 404 || (g.r.ok && !deGemini(await g.r.clone().json().catch(() => null)));
-      if (malo) return json(400, { ok: false, error: `El modelo ${m} no sirve para analizar fotos (${g.r.ok ? 'no usa herramientas' : 'error ' + g.r.status}). Elige otro de la lista.` });
+    const formato = id === 'gemini' ? MODELO_GEMINI_RE : /^[A-Za-z0-9._:/-]{1,100}$/;
+    if (typeof m !== 'string' || (m !== 'auto' && !formato.test(m))) return json(400, { ok: false, error: 'Modelo inválido' });
+    if (m !== 'auto' && disponibles[id]) {   // no se guarda un modelo que no sirve (voz, solo texto, inexistente…); 429/503 son momentáneos y sí se guarda
+      const g = id === 'gemini' ? await generarConGemini(cuerpoPrueba(), env, llamar, m) : await generarConOpenAI(id, cuerpoPruebaBase(), env, llamar, m);
+      const cuerpo = await g.r.clone().json().catch(() => null);
+      const sinHerramienta = g.r.ok && !(id === 'gemini' ? deGemini(cuerpo) : deOpenAI(cuerpo));
+      if (g.r.status === 400 || g.r.status === 404 || sinHerramienta) return json(400, { ok: false, error: `El modelo ${m} no sirve para analizar fotos (${g.r.ok ? 'no usa herramientas o no acepta imágenes' : 'error ' + g.r.status}). Elige otro de la lista.` });
       await g.r.body?.cancel().catch(() => {});
     }
-    const r = await haciaHojas({ accion: 'config_guardar', clave: 'gemini_modelo', valor: m }, env.SYNC_TOKEN_ADMIN, env, llamar);
-    cacheIA.clear(); olvidarModeloDetectado();
-    const j: any = await r.clone().json().catch(() => null);
-    return j?.ok ? json(200, await estado()) : r;
+    const fallo = await guardarConfig(id === 'gemini' ? 'gemini_modelo' : `modelo_${id}`, m);
+    return fallo ?? json(200, await estado());
   }
+
   if (c?.accion === 'probar') {
     const res: Record<string, any> = {};
-    for (const p of ['gemini', 'claude'] as Proveedor[]) res[p] = disponibles[p] ? await probarProveedor(p, env, llamar) : { ok: false, estado: 0, mensaje: 'Sin clave configurada en el servidor.' };
+    const ids = idValido(c.proveedor) ? [c.proveedor] : IDS_IA;
+    for (const id of ids) res[id] = disponibles[id] ? await probarProveedor(id, env, llamar) : { ok: false, estado: 0, mensaje: 'Sin clave configurada en el servidor.' };
     return json(200, { ok: true, resultados: res });
   }
   return json(400, { ok: false, error: 'Acción no permitida' });

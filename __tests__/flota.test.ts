@@ -971,3 +971,222 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
     for (const c of [{ accion: 'guardar', fotos: 'no' }, { accion: 'guardar' }, { accion: 'otra' }]) expect((await m.post('/sistema', c, 'claveJefe99')).status).toBe(400);
   });
 });
+
+describe('otras IAs (Groq, OpenRouter, Mistral, Qwen, Kimi, ChatGPT, otra): compatibles con la API de ChatGPT', () => {
+  const { crearServidor } = require('./helpers/hoja');
+  const {
+    aOpenAI, deOpenAI, PROVEEDORES, IDS_IA, ordenarModelosVision, olvidarModelosDetectados, olvidarClavesGuardadas,
+  } = require('../server/worker');
+  const imagen = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' } };
+  const analisis = JSON.stringify({ model: 'claude-sonnet-5-5', max_tokens: 1024, tools: [TOOL], tool_choice: { type: 'tool', name: 'registrar_luminaria' }, messages: [{ role: 'user', content: [imagen, { type: 'text', text: 'Foto general:' }] }] });
+  const llamadaOk = (args: any = { fabricante: 'Schréder', tecnologia: 'LED', confianza: 'alta' }) =>
+    new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: 'registrar_luminaria', arguments: JSON.stringify(args) } }] } }] }), { status: 200 });
+
+  const montar = (extra: any = {}, comportamiento: (url: string, init: any) => Response | undefined = () => undefined) => {
+    const gs = crearServidor();
+    const env: any = { APP_TOKENS: 'juan:tokJ', ADMIN_TOKENS: 'jefe:claveJefe99', SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, REINTENTO_MS: 0, ...extra };
+    const visto: { url: string; init: any }[] = [];
+    const f = jest.fn(async (u: any, i: any) => {
+      const url = String(u);
+      if (url.includes('gs.example')) return gs.llamar(u, i);
+      visto.push({ url, init: i });
+      return comportamiento(url, i) ?? new Response('{"error":{"message":"sin simular"}}', { status: 500 });
+    });
+    const pet = (ruta: string, clave: string, cuerpo: string) => new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave }, body: cuerpo });
+    const ia = async (cuerpo: any) => { const r = await manejar(pet('/ia', 'claveJefe99', JSON.stringify(cuerpo)), env, f as any); return { status: r.status, j: await r.json() }; };
+    const analizar = async () => manejar(pet('/analizar', 'tokJ', analisis), env, f as any);
+    return { gs, env, f, visto, ia, analizar };
+  };
+  beforeEach(() => { vaciarCacheUsuarios(); vaciarCacheIA(); olvidarModeloDetectado(); olvidarModelosDetectados(); olvidarClavesGuardadas(); });
+
+  it('el registro trae los proveedores pedidos y deja claro cuáles son gratis; DeepSeek/Perplexity/Copilot no están porque no sirven para fotos', () => {
+    expect(IDS_IA).toEqual(['gemini', 'claude', 'groq', 'openrouter', 'mistral', 'qwen', 'kimi', 'openai', 'otra']);
+    expect(PROVEEDORES.filter((p: any) => p.gratis).map((p: any) => p.id)).toEqual(['gemini', 'groq', 'openrouter', 'mistral']);
+    for (const p of PROVEEDORES) { expect(p.nombre).toBeTruthy(); expect(p.donde).toBeTruthy(); if (p.tipo === 'openai' && p.id !== 'otra') expect(p.base).toMatch(/^https:\/\//); }
+  });
+
+  it('proveedores(): solo los que tienen clave; "otra" además necesita su dirección; el elegido va primero y el resto de respaldo', () => {
+    const env = { GROQ_API_KEY: 'g', MISTRAL_API_KEY: 'm', GEMINI_API_KEY: 'x', OTRA_API_KEY: 'o' };
+    expect(proveedores(env)).toEqual(['gemini', 'groq', 'mistral']);                                    // "otra" sin dirección no cuenta
+    expect(proveedores({ ...env, OTRA_BASE_URL: 'https://api.otra.example/v1' })).toEqual(['gemini', 'groq', 'mistral', 'otra']);
+    expect(proveedores(env, 'mistral')).toEqual(['mistral', 'gemini', 'groq']);
+    expect(proveedores({ ...env, ORDEN_IA: 'groq,gemini' })).toEqual(['groq', 'gemini']);
+    expect(proveedores(env, 'inventada' as any)).toEqual(['gemini', 'groq', 'mistral']);
+  });
+
+  it('aOpenAI: mismas fotos como data URL, la herramienta como función y la llamada forzada', () => {
+    const b = aOpenAI(JSON.parse(analisis), 'mi-modelo');
+    expect(b.model).toBe('mi-modelo');
+    expect(b.messages[0].content[0]).toEqual({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,AAAA' } });
+    expect(b.messages[0].content[1]).toEqual({ type: 'text', text: 'Foto general:' });
+    expect(b.tools[0].function.name).toBe('registrar_luminaria');
+    expect(Object.keys(b.tools[0].function.parameters.properties)).toEqual(Object.keys(TOOL.input_schema.properties));
+    expect(b.tool_choice).toEqual({ type: 'function', function: { name: 'registrar_luminaria' } });
+  });
+
+  it('deOpenAI: lee la llamada a la función; acepta el JSON escrito en el texto; ignora lo demás', () => {
+    expect(deOpenAI(JSON.parse(JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: 'registrar_luminaria', arguments: '{"fabricante":"X"}' } }] } }] }))))
+      .toEqual({ content: [{ type: 'tool_use', name: 'registrar_luminaria', input: { fabricante: 'X' } }] });
+    expect(deOpenAI({ choices: [{ message: { content: 'Aquí está: {"fabricante":"Y","confianza":"alta"} listo' } }] }).content[0].input).toEqual({ fabricante: 'Y', confianza: 'alta' });
+    for (const malo of [null, {}, { choices: [] }, { choices: [{ message: { content: 'sin datos' } }] }, { choices: [{ message: { tool_calls: [{ function: { arguments: '{no json' } }] } }] }]) expect(deOpenAI(malo)).toBeNull();
+  });
+
+  it('ordenarModelosVision: primero los que dicen aceptar imágenes, luego los que lo parecen; sin voz ni embeddings; ":free" antes', () => {
+    const o = ordenarModelosVision([
+      { id: 'whisper-large-v3' }, { id: 'text-embedding-3' }, { id: 'llama-3.1-8b' }, { id: 'meta-llama/llama-4-scout-17b' },
+      { id: 'a/solo-texto', vision: false }, { id: 'b/con-vision', vision: true }, { id: 'c/vision:free', vision: true },
+    ]).map((m: any) => m.id);
+    expect(o.slice(0, 3)).toEqual(['c/vision:free', 'b/con-vision', 'meta-llama/llama-4-scout-17b']);
+    expect(o).not.toContain('whisper-large-v3'); expect(o).not.toContain('text-embedding-3');
+  });
+
+  it('analiza con Groq: usa su dirección, la clave como Bearer y el modelo por defecto; la respuesta llega con la forma de siempre', async () => {
+    const m = montar({ GROQ_API_KEY: 'gsk_clave_larga' }, (url) => (url.includes('api.groq.com') ? llamadaOk() : undefined));
+    const r = await m.analizar();
+    expect(r.status).toBe(200); expect(r.headers.get('x-ia-proveedor')).toBe('groq');
+    expect((await r.json()).content[0]).toEqual({ type: 'tool_use', name: 'registrar_luminaria', input: { fabricante: 'Schréder', tecnologia: 'LED', confianza: 'alta' } });
+    const v = m.visto[0];
+    expect(v.url).toBe('https://api.groq.com/openai/v1/chat/completions');
+    expect(v.init.headers.authorization).toBe('Bearer gsk_clave_larga');
+    expect(JSON.parse(v.init.body).model).toBe('meta-llama/llama-4-scout-17b-16e-instruct');
+  });
+
+  it('cadena de respaldo: si la principal falla se prueba la siguiente con clave, sea de la familia que sea', async () => {
+    const m = montar({ GEMINI_API_KEY: 'g-clave-1', GROQ_API_KEY: 'gsk_clave_larga', MISTRAL_API_KEY: 'mis_clave_larga' }, (url) => {
+      if (url.includes('generativelanguage')) return new Response('{"error":{"message":"quota"}}', { status: 429 });
+      if (url.includes('groq')) return new Response('{"error":{"message":"rate limit"}}', { status: 429 });
+      if (url.includes('mistral')) return llamadaOk();
+      return undefined;
+    });
+    const r = await m.analizar();
+    expect(r.headers.get('x-ia-proveedor')).toBe('mistral');
+    const quien = m.visto.map((v) => (v.url.includes('generativelanguage') ? 'gemini' : v.url.includes('groq') ? 'groq' : v.url.includes('mistral') ? 'mistral' : 'otro'));
+    expect(quien.filter((x, i) => quien.indexOf(x) === i)).toEqual(['gemini', 'groq', 'mistral']);
+  });
+
+  it('si fallan todas, el error dice cuál falló y por qué, sin mostrar claves', async () => {
+    const m = montar({ GROQ_API_KEY: 'gsk_clave_larga' }, () => new Response('{"error":{"message":"invalid api key gsk_clave_larga"}}', { status: 401 }));
+    const r = await m.analizar();
+    const t = await r.text();
+    expect(t).toContain('groq 401: invalid api key'); expect(t).not.toContain('gsk_clave_larga');
+  });
+
+  it('el administrador pega la clave de un proveedor DESDE LA APP: se prueba, se guarda en el script (no en la hoja), se usa y nunca vuelve a mostrarse', async () => {
+    const m = montar({}, (url) => (url.includes('api.groq.com/openai/v1/chat') ? llamadaOk() : undefined));
+    expect((await m.ia({ accion: 'estado' })).j.proveedores.find((p: any) => p.id === 'groq')).toMatchObject({ configurado: false, origenClave: null });
+    const r = await m.ia({ accion: 'clave', proveedor: 'groq', clave: 'gsk_pegada_desde_la_app' });
+    expect(r.status).toBe(200);
+    expect(r.j.proveedores.find((p: any) => p.id === 'groq')).toMatchObject({ configurado: true, origenClave: 'app' });
+    expect(r.j.prueba).toMatchObject({ ok: true });
+    expect(JSON.stringify(r.j)).not.toContain('gsk_pegada_desde_la_app');
+    expect(m.gs.propiedades.get('IA_KEY_groq')).toBe('gsk_pegada_desde_la_app');
+    expect(JSON.stringify(m.gs.hojas.map((h: any) => h.filas))).not.toContain('gsk_pegada_desde_la_app');   // en ninguna celda
+    const a = await m.analizar();
+    expect(a.headers.get('x-ia-proveedor')).toBe('groq');
+    expect(m.visto.at(-1)!.init.headers.authorization).toBe('Bearer gsk_pegada_desde_la_app');
+    const q = await m.ia({ accion: 'clave', proveedor: 'groq', clave: '' });                         // quitarla
+    expect(q.j.proveedores.find((p: any) => p.id === 'groq').configurado).toBe(false);
+    expect(m.gs.propiedades.has('IA_KEY_groq')).toBe(false);
+  });
+
+  it('una clave que el proveedor rechaza (401/403) no se guarda; formato inválido, proveedor desconocido y secretos de Cloudflare se tratan aparte', async () => {
+    const m = montar({ GEMINI_API_KEY: 'gem-del-servidor' }, (url) => (url.includes('groq') ? new Response('{"error":{"message":"Invalid API Key"}}', { status: 401 }) : undefined));
+    const mala = await m.ia({ accion: 'clave', proveedor: 'groq', clave: 'gsk_clave_equivocada' });
+    expect(mala.status).toBe(400); expect(mala.j.error).toContain('rechazó la clave');
+    expect(m.gs.propiedades.has('IA_KEY_groq')).toBe(false);
+    for (const clave of ['corta', 'con espacio dentro 123', 5 as any]) expect((await m.ia({ accion: 'clave', proveedor: 'groq', clave })).status).toBe(400);
+    expect((await m.ia({ accion: 'clave', proveedor: 'deepseek', clave: 'abcdefghij' })).status).toBe(400);
+    const quitar = await m.ia({ accion: 'clave', proveedor: 'gemini', clave: '' });                  // viene de Cloudflare: no se quita desde la app
+    expect(quitar.status).toBe(400); expect(quitar.j.error).toContain('Cloudflare');
+    expect((await m.ia({ accion: 'estado' })).j.proveedores.find((p: any) => p.id === 'gemini')).toMatchObject({ configurado: true, origenClave: 'servidor' });
+  });
+
+  it('solo los administradores: ni el técnico en /ia ni el token del equipo en el script pueden leer o guardar claves', async () => {
+    const m = montar();
+    const tec = await manejar(new Request('https://p.example/ia', { method: 'POST', headers: { 'x-api-key': 'tokJ' }, body: JSON.stringify({ accion: 'clave', proveedor: 'groq', clave: 'gsk_clave_larga' }) }), m.env, m.f as any);
+    expect(tec.status).toBe(401);
+    for (const accion of [{ accion: 'ia_claves' }, { accion: 'ia_clave_guardar', proveedor: 'groq', clave: 'gsk_clave_larga' }]) {
+      const r = await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', ...accion }) });
+      expect((await r.json()).ok).toBe(false);
+    }
+    expect(m.gs.propiedades.size).toBe(0);
+  });
+
+  it('modelos: se listan los de visión primero (OpenRouter informa las modalidades) y se puede elegir uno, que se prueba antes de guardar y conserva mayúsculas', async () => {
+    const lista = { data: [
+      { id: 'google/gemini-x:free', architecture: { input_modalities: ['text', 'image'] } }, { id: 'meta/solo-texto', architecture: { input_modalities: ['text'] } },
+      { id: 'Qwen/Qwen2.5-VL-72B-Instruct', architecture: { input_modalities: ['text', 'image'] } },
+    ] };
+    const m = montar({ OPENROUTER_API_KEY: 'sk-or-clave-larga' }, (url, init) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify(lista), { status: 200 });
+      if (url.endsWith('/chat/completions')) return JSON.parse(init.body).model === 'meta/solo-texto' ? new Response('{"error":{"message":"image input not supported"}}', { status: 400 }) : llamadaOk();
+      return undefined;
+    });
+    const l = (await m.ia({ accion: 'modelos', proveedor: 'openrouter' })).j;
+    expect(l.modelos[0]).toBe('google/gemini-x:free');                                                   // visión + gratis primero
+    expect(l.modelos.indexOf('Qwen/Qwen2.5-VL-72B-Instruct')).toBeLessThan(l.modelos.indexOf('meta/solo-texto'));
+    const malo = await m.ia({ accion: 'modelo', proveedor: 'openrouter', modelo: 'meta/solo-texto' });
+    expect(malo.status).toBe(400); expect(malo.j.error).toContain('no sirve para analizar fotos');
+    expect(m.gs.hoja('_Config')?.filas.some((f: any[]) => String(f[0]).startsWith('modelo_'))).toBeFalsy();
+    const ok = await m.ia({ accion: 'modelo', proveedor: 'openrouter', modelo: 'Qwen/Qwen2.5-VL-72B-Instruct' });
+    expect(ok.status).toBe(200);
+    expect(m.gs.hoja('_Config')!.filas.some((f: any[]) => f[0] === 'modelo_openrouter' && f[1] === 'Qwen/Qwen2.5-VL-72B-Instruct')).toBe(true);
+    await m.ia({ accion: 'guardar', proveedor: 'openrouter' });
+    await m.analizar();
+    expect(JSON.parse(m.visto.at(-1)!.init.body).model).toBe('Qwen/Qwen2.5-VL-72B-Instruct');             // usa el elegido, con sus mayúsculas
+    await m.ia({ accion: 'modelo', proveedor: 'openrouter', modelo: 'auto' });                            // volver a automático
+    expect((await m.ia({ accion: 'estado' })).j.proveedores.find((p: any) => p.id === 'openrouter').modelo).not.toBe('Qwen/Qwen2.5-VL-72B-Instruct');
+  });
+
+  it('sin modelo por defecto (OpenRouter) o con uno que ya no existe (Groq): busca uno de visión en la lista del proveedor y lo recuerda', async () => {
+    const m = montar({ OPENROUTER_API_KEY: 'sk-or-clave-larga', GROQ_API_KEY: 'gsk_clave_larga', ORDEN_IA: 'openrouter' }, (url, init) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'x/texto', architecture: { input_modalities: ['text'] } }, { id: 'x/ve-imagenes', architecture: { input_modalities: ['image', 'text'] } }] }), { status: 200 });
+      if (url.endsWith('/chat/completions')) return JSON.parse(init.body).model === 'x/ve-imagenes' ? llamadaOk() : new Response('{"error":{"message":"The model does not exist"}}', { status: 404 });
+      return undefined;
+    });
+    const r = await m.analizar();
+    expect(r.status).toBe(200); expect(r.headers.get('x-ia-proveedor')).toBe('openrouter');
+    const modelos = m.visto.filter((v) => v.url.endsWith('/chat/completions')).map((v) => JSON.parse(v.init.body).model);
+    expect(modelos).toEqual(['x/ve-imagenes']);                                                        // sin modelo por defecto: fue directo al de visión
+    await m.analizar();
+    expect(m.visto.filter((v) => v.url.endsWith('/chat/completions')).map((v) => JSON.parse(v.init.body).model)).toEqual(['x/ve-imagenes', 'x/ve-imagenes']);   // recordado
+  });
+
+  it('"otra compatible con OpenAI": exige una dirección https, la usa tal cual (con sus mayúsculas) y se prueba como los demás', async () => {
+    const m = montar({}, (url, init) => (url.startsWith('https://api.mio.example/v1/chat/completions') ? llamadaOk() : url.endsWith('/models') ? new Response(JSON.stringify({ data: [{ id: 'Mi-Modelo-VL' }] }), { status: 200 }) : undefined));
+    expect((await m.ia({ accion: 'clave', proveedor: 'otra', clave: 'clave-de-otra-123' })).j.error).toContain('dirección');   // sin dirección no se puede
+    for (const base of ['http://inseguro.example/v1', 'api.sin.https', 'https://con espacio']) expect((await m.ia({ accion: 'base', base })).status).toBe(400);
+    expect((await m.ia({ accion: 'base', base: 'https://api.mio.example/v1/' })).status).toBe(200);
+    const c = await m.ia({ accion: 'clave', proveedor: 'otra', clave: 'clave-de-otra-123' });
+    expect(c.status).toBe(200); expect(c.j.proveedores.find((p: any) => p.id === 'otra')).toMatchObject({ configurado: true, base: 'https://api.mio.example/v1' });
+    await m.ia({ accion: 'guardar', proveedor: 'otra' });
+    const r = await m.analizar();
+    expect(r.headers.get('x-ia-proveedor')).toBe('otra');
+    expect(m.visto.at(-1)!.url).toBe('https://api.mio.example/v1/chat/completions');
+    expect(JSON.parse(m.visto.at(-1)!.init.body).model).toBe('Mi-Modelo-VL');                          // sin modelo definido → el único de la lista
+  });
+
+  it('elegir como principal cualquiera de la lista; uno desconocido se rechaza; el aviso de "no configurada" ya no habla de variables', async () => {
+    const m = montar({ GROQ_API_KEY: 'gsk_clave_larga' }, (url) => (url.includes('groq') ? llamadaOk() : undefined));
+    expect((await m.ia({ accion: 'guardar', proveedor: 'groq' })).j.principal).toBe('groq');
+    expect((await m.ia({ accion: 'guardar', proveedor: 'deepseek' })).status).toBe(400);
+    const sin = montar();
+    const r = await sin.analizar();
+    expect(r.status).toBe(503); expect((await r.json()).error).toContain('Administración');
+  });
+
+  it('"Probar" recorre todos los que tienen clave y dice qué pasó con cada uno; un modelo que no acepta imágenes no pasa', async () => {
+    const m = montar({ GROQ_API_KEY: 'gsk_clave_larga', MISTRAL_API_KEY: 'mis_clave_larga' }, (url) => {
+      if (url.includes('groq')) return llamadaOk();
+      if (url.includes('mistral')) return new Response(JSON.stringify({ choices: [{ message: { content: 'hola' } }] }), { status: 200 });   // responde texto, sin datos
+      return undefined;
+    });
+    const j = (await m.ia({ accion: 'probar' })).j.resultados;
+    expect(j.groq).toMatchObject({ ok: true }); expect(j.groq.mensaje).toContain('Funciona con el modelo');
+    expect(j.mistral).toMatchObject({ ok: false }); expect(j.mistral.mensaje).toContain('acepta imágenes');
+    expect(j.openai).toMatchObject({ ok: false, mensaje: 'Sin clave configurada en el servidor.' });
+    expect(Object.keys(j)).toEqual(IDS_IA);
+    const uno = (await m.ia({ accion: 'probar', proveedor: 'groq' })).j.resultados;
+    expect(Object.keys(uno)).toEqual(['groq']);
+  });
+});

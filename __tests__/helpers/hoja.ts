@@ -49,7 +49,8 @@ export function crearServidor(rutaScript?: string) {
   const libro = { getSheets: () => hojas, insertSheet: (n: string) => { const h = new Hoja(n); hojas.push(h); return h; }, deleteSheet: (h: Hoja) => { hojas.splice(hojas.indexOf(h), 1); } };
   const fuente = fs.readFileSync(rutaScript ?? path.join(__dirname, '../../server/google-apps-script.gs'), 'utf8');
   const html = { createHtmlOutput: (h: string) => ({ html: h, setTitle() { return this; }, addMetaTag() { return this; } }) };
-  const gs = new Function('SpreadsheetApp', 'LockService', 'ContentService', 'DriveApp', 'Utilities', 'HtmlService',
+  const propiedades = new Map<string, string>();                    // propiedades del script (donde se guardan las claves de las IAs)
+  const gs = new Function('SpreadsheetApp', 'LockService', 'ContentService', 'DriveApp', 'Utilities', 'HtmlService', 'PropertiesService',
     fuente + '\n;return { doPost, doGet, datosEquipo, calcularAlertas, auditarTodo, generarClavesFaltantes, prepararUsuarios, buscarUsuario, pestanasObsoletas, eliminarPestanas, reiniciarDatos };')(
     { getActiveSpreadsheet: () => libro },
     { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
@@ -59,11 +60,12 @@ export function crearServidor(rutaScript?: string) {
       createFolder: (n: string) => { const c = { nombre: n, papelera: false }; carpetas.push(c); return carpetaApi(c); },
     },
     { getUuid: () => crypto.randomUUID(), newBlob: (_d: any, _t: string, nombre: string) => ({ nombre }), base64Decode: (x: string) => x }, html,
+    { getScriptProperties: () => ({ setProperty: (k: string, v: string) => { propiedades.set(k, v); }, getProperty: (k: string) => propiedades.get(k) ?? null, deleteProperty: (k: string) => { propiedades.delete(k); } }) },
   );
   const llamar = async (_url: string, init: any) => {
     const salida = gs.doPost({ postData: { contents: init.body } });
     return new Response(salida.t, { status: 200, headers: { 'content-type': 'application/json' } });
   };
   const hoja = (nombre: string) => hojas.find((h) => h.nombre === nombre);
-  return { hojas, llamar, hoja, gs, carpetas, fotosGuardadas };
+  return { hojas, llamar, hoja, gs, carpetas, fotosGuardadas, propiedades };
 }

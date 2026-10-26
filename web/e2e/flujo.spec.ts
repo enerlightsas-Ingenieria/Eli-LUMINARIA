@@ -244,16 +244,17 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await expect(admin.page.getByRole('button', { name: 'Nuevo usuario' })).toHaveCount(0);     // aquí no hay usuarios
 
   // IA: el administrador ve qué claves hay, prueba cada proveedor y elige cuál va primero
-  await expect(admin.page.getByText('Gemini ❌ falta')).toBeVisible();                       // en esta prueba solo hay clave de Claude
-  await admin.page.getByRole('button', { name: 'Probar la IA' }).click();
+  const gemini = admin.page.getByRole('region', { name: 'Gemini (Google)' });
+  await expect(gemini).toContainText('❌ Sin clave');                                         // en esta prueba solo hay clave de Claude
+  await expect(admin.page.getByRole('region', { name: 'Claude (Anthropic)' })).toContainText('✅ Clave configurada');
+  await admin.page.getByRole('button', { name: 'Probar todas las IAs' }).click();
   await expect(admin.page.getByText('Claude: ✅ funciona')).toBeVisible();
-  await expect(admin.page.getByText(/Gemini: ❌.*Sin clave configurada/)).toBeVisible();
-  await admin.page.getByRole('tab', { name: 'Claude' }).click();
-  await expect.poll(() => b.gs.hoja('_Config')?.filas[1]?.join('=')).toBe('ia=claude');
+  await expect(gemini).toContainText('Sin clave configurada');
+  await expect(admin.page.getByRole('region', { name: 'Claude (Anthropic)' })).toContainText('Principal');   // es la única con clave
 
   await admin.page.getByRole('button', { name: 'Volver' }).click();
   await admin.page.getByRole('button', { name: 'Administrar usuarios' }).click();
-  await expect(admin.page.getByText('Elegir el modelo de Gemini')).toHaveCount(0);            // aquí no hay IA
+  await expect(admin.page.getByText('Elegir modelo de Gemini')).toHaveCount(0);               // aquí no hay IA
   await admin.page.getByRole('button', { name: 'Nuevo usuario' }).click();
   await admin.page.getByLabel('Nombre completo').fill('Carla Gómez');
   await expect(admin.page.getByLabel('Usuario (para entrar)')).toHaveValue('cgomez');           // propuesta: inicial + apellido
@@ -306,7 +307,7 @@ test('administración de la IA: se ven TODOS los modelos (se pueden alcanzar y e
   await admin.page.getByRole('link', { name: 'Ajustes' }).click();
   await admin.page.getByRole('button', { name: 'Administración (usuarios e IA)' }).click();
   await admin.page.getByRole('button', { name: 'Administrar la inteligencia artificial' }).click();
-  await admin.page.getByRole('button', { name: 'Elegir el modelo de Gemini' }).click();
+  await admin.page.getByRole('button', { name: 'Elegir modelo de Gemini' }).click();
 
   const grupo = admin.page.getByRole('group', { name: 'Modelos de Gemini' });
   for (const m of MODELOS_GEMINI) {
@@ -393,6 +394,13 @@ test('ingreso con usuario y clave (sin enlaces): el administrador crea la cuenta
   await dario.page.getByLabel('Clave', { exact: true }).fill('clave-dario-1');            // el usuario ya viene escrito (se acuerda del último)
   await dario.page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(dario.page.getByRole('alert')).toContainText('Usuario o clave incorrectos');
+
+  // y luego lo elimina del todo: desaparece de la lista y de la hoja de usuarios
+  await admin.page.getByRole('button', { name: /Darío Ruiz, Técnico, de baja/ }).click();
+  await admin.page.getByRole('button', { name: 'Eliminar usuario' }).click();
+  await dialogo(admin.page).getByRole('button', { name: 'Eliminar', exact: true }).click();
+  await expect(admin.page.getByRole('button', { name: /Darío Ruiz/ })).toHaveCount(0);
+  expect(b.gs.hoja('_Usuarios')!.filas.some((f: any[]) => f[5] === 'druiz')).toBe(false);
 });
 
 test('cámara: pellizcar o usar la barra acerca la IMAGEN (no la página) y la foto sale recortada con ese zoom', async ({ browser }) => {
@@ -582,4 +590,50 @@ test('WhatsApp: el administrador envía los datos de acceso al teléfono de la p
   // el mensaje se puede editar antes de enviar
   await dina.page.getByLabel('Mensaje').fill('Necesito ayuda con una luminaria');
   expect(decodeURIComponent((await dina.page.locator('[aria-label^="Sara Mejía"]').getByRole('link', { name: 'WhatsApp' }).getAttribute('href'))!.split('?text=')[1])).toBe('Necesito ayuda con una luminaria');
+});
+
+test('otras IAs: el administrador pega la clave de Groq desde la app, la elige como principal y los técnicos analizan con ella; la clave nunca se vuelve a mostrar', async ({ browser }) => {
+  const b = crearBackend({ fabricante: 'Lumenpulse', tecnologia: 'LED', potenciaW: '120', confianza: 'alta' });
+  const admin = await telefono(browser, b);
+  await configurar(admin.page, enlace({ token: 'tokSup' }));
+  await admin.page.getByRole('link', { name: 'Ajustes' }).click();
+  await admin.page.getByRole('button', { name: 'Administración (usuarios e IA)' }).click();
+  await admin.page.getByRole('button', { name: 'Administrar la inteligencia artificial' }).click();
+
+  const groq = admin.page.getByRole('region', { name: /^Groq/ });
+  await expect(groq).toContainText('Gratis');
+  await expect(groq).toContainText('❌ Sin clave');
+  await groq.getByRole('button', { name: 'Poner clave de Groq' }).click();
+  await expect(admin.page.getByText(/console\.groq\.com/)).toBeVisible();                       // dice dónde conseguirla
+  await admin.page.getByLabel('Clave (API key)').fill('gsk_e2e_clave_123');
+  await admin.page.getByRole('button', { name: 'Probar y guardar' }).click();
+  await admin.page.getByRole('alertdialog').getByRole('button', { name: 'Entendido' }).click();
+  await expect(groq).toContainText('✅ Clave configurada (pegada en la app)');
+  expect(await admin.page.content()).not.toContain('gsk_e2e_clave_123');                         // nunca se vuelve a mostrar
+  expect(b.gs.propiedades.get('IA_KEY_groq')).toBe('gsk_e2e_clave_123');
+  expect(JSON.stringify(b.gs.hojas.map((h: any) => h.filas))).not.toContain('gsk_e2e_clave_123');   // ni en la hoja
+
+  await groq.getByRole('button', { name: 'Usar Groq como principal' }).click();
+  await expect(groq).toContainText('Principal');
+  await groq.getByRole('button', { name: 'Elegir modelo de Groq' }).click();
+  const lista = admin.page.getByRole('group', { name: 'Modelos de Groq' });
+  await expect(lista.getByRole('button', { name: 'meta-llama/llama-4-scout-17b-16e-instruct', exact: true })).toBeVisible();
+  await expect(lista.getByRole('button', { name: 'whisper-large-v3', exact: true })).toHaveCount(0);   // los modelos de voz no se ofrecen
+  await lista.getByRole('button', { name: /^Automático/ }).click();
+  await admin.page.getByRole('alertdialog').getByRole('button', { name: 'Entendido' }).click();
+
+  // un técnico analiza una foto: responde Groq, no Claude
+  const ana = await telefono(browser, b);
+  await configurar(ana.page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A'] }));
+  await usarProyecto(ana.page, 'Barrio A');
+  await capturar(ana.page, 'ia');
+  await expect(ana.page.getByLabel('Fabricante', { exact: true })).toHaveValue('Lumenpulse');
+  expect(b.estado.llamadasGroq).toBeGreaterThanOrEqual(1);
+  expect(b.estado.llamadasIA).toBe(0);
+
+  // quitar la clave desde la app
+  await groq.getByRole('button', { name: 'Quitar clave de Groq' }).click();
+  await dialogo(admin.page).getByRole('button', { name: 'Quitar', exact: true }).click();
+  await expect(groq).toContainText('❌ Sin clave');
+  expect(b.gs.propiedades.has('IA_KEY_groq')).toBe(false);
 });

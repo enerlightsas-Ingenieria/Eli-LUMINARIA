@@ -29,6 +29,14 @@ Cada persona abre la dirección de la web (por ejemplo `https://eli-luminaria.pa
 - La app queda lista sola: servidor, cuenta, rol, modo contratista, política de fotos y los proyectos que ya existen en la hoja.
 - El enlace directo sigue existiendo como alternativa, pero igualmente se pedirá usuario y clave cuando se vuelva a abrir la app.
 
+## Cambiar el nombre del superusuario
+El superusuario viene del secreto `ADMIN_TOKENS`. Para llamarlo `SUPERUSUARIO`:
+```powershell
+npx wrangler secret put ADMIN_TOKENS --name eli-luminaria-proxy      # escribe:  SUPERUSUARIO:tu-clave
+npx wrangler deploy server/worker.ts --name eli-luminaria-proxy --compatibility-date 2026-01-01
+```
+Desde ese momento su nombre y su usuario son `SUPERUSUARIO` (no distingue mayúsculas al ingresar).
+
 ## Quién es el administrador "superusuario"
 Los administradores definidos en Cloudflare (`ADMIN_TOKENS`) son **superusuarios**: la llave de emergencia de la plataforma. Aparecen arriba en la lista de usuarios (solo el nombre, nunca la clave) y no se editan desde la app. Para el día a día conviene crear **tu propia cuenta de administrador** en la lista (rol Administrador) y usar esa; el superusuario queda de respaldo.
 
@@ -42,6 +50,7 @@ En Administración → **Fotos**: *Guardar la primera foto de cada luminaria en 
 - **Nueva persona:** Ajustes → *Administración* → *Usuarios* → **+** → nombre completo, usuario (se propone solo: inicial + apellido) y rol. La clave puede escribirla el administrador (8 o más caracteres, sin espacios) o, si la deja vacía, el sistema genera una fácil de teclear (`k7mq2-xp9vl`). Pulsa **Crear y ver datos de acceso** y luego **Compartir** (WhatsApp o correo): el mensaje trae dirección, usuario y clave.
 - **Contratista:** marca *Contratista (modo terceros)*: exige jornada, cámara y GPS preciso. Lo decide el administrador; la persona no puede quitarlo.
 - **Cambiar de rol o clave:** toca la persona, cambia lo que necesites y guarda. El rol se aplica la próxima vez que abra la app con conexión; una clave nueva, al instante.
+- **Eliminar:** toca la persona → *Eliminar usuario*. Su cuenta desaparece y no puede volver a entrar. Los registros que hizo se conservan en la hoja con su nombre y usuario. No puedes eliminarte a ti mismo. Si solo quieres que no entre por ahora, usa la baja.
 - **Baja:** desmarca *Con acceso*. Deja de poder ingresar, sincronizar y usar la IA (en un minuto como máximo para quien ya tiene la sesión abierta).
 - **Clave olvidada o filtrada:** *Generar clave nueva*. La anterior deja de servir.
 - **Salir:** Ajustes → *Cerrar sesión* (los registros guardados en el teléfono se conservan).
@@ -75,3 +84,13 @@ Nunca toca `_Usuarios`, `_Config`, `_Equipo`, `_Jornadas` ni proyectos con regis
 
 ## Dirección del servidor en la web publicada
 La web trae el servidor de tu empresa en el archivo `web/public/servidor.json` (`{"proxy": "https://…workers.dev"}`). Si cambias de servidor, edítalo y vuelve a publicar la web. Si el archivo falta, la pantalla de ingreso pide la dirección a mano.
+
+## WhatsApp: escribir al equipo
+Sin costo ni cuentas de empresa: la app abre WhatsApp con el mensaje ya escrito y la persona solo pulsa *Enviar*.
+- **Teléfono:** el administrador lo agrega al crear o editar a cada persona (*Teléfono (WhatsApp)*). Si trae 10 dígitos se le agrega el código de país de la empresa (`codigoPais` en `web/public/servidor.json`, `57` = Colombia); con `+` o `00` se respeta tal cual.
+- **Datos de acceso por WhatsApp:** al crear a alguien aparece *Enviar por WhatsApp a …* con dirección, usuario y clave.
+- **Contactos** (Ajustes → *Contactos y WhatsApp*): el **técnico** ve a sus supervisores y administradores; el **supervisor** y el **administrador** ven a todo el equipo. Cada contacto tiene *WhatsApp* y *Llamar*, y el mensaje se puede editar antes de enviar. Quien tiene más de un contacto puede además *escribir a un grupo* (se elige el chat en WhatsApp).
+- **Desde el Panel:** cada técnico con teléfono tiene un botón *WhatsApp*; si está *sin señal* el mensaje ya viene redactado.
+- Nadie ve claves en los contactos, ni gente dada de baja o sin teléfono.
+
+**Qué no hace:** no envía mensajes solo (por ejemplo, alertas automáticas). Eso exige la API de WhatsApp Business de Meta (cuenta de empresa verificada, plantillas aprobadas y costo por conversación); si algún día se quiere, es un cambio aparte.

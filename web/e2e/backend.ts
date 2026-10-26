@@ -20,13 +20,18 @@ export function crearBackend(respuestaIA: Record<string, string> = { fabricante:
     ...(opciones.gemini ? { GEMINI_API_KEY: 'AIza-prueba' } : {}),
     SYNC_URL: 'https://gs.test/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN',
   };
-  const estado = { llamadasIA: 0, ultimaPeticionIA: null as any };
+  const estado = { llamadasIA: 0, llamadasGroq: 0, ultimaPeticionIA: null as any };
 
   const llamar = async (url: any, init: any): Promise<Response> => {
     const u = String(url);
     if (u.startsWith('https://api.anthropic.com')) {
       estado.llamadasIA++; estado.ultimaPeticionIA = JSON.parse(init.body);
       return new Response(JSON.stringify({ content: [{ type: 'tool_use', input: respuestaIA }] }), { status: 200 });
+    }
+    if (u.startsWith('https://api.groq.com')) {                                       // una IA "compatible con ChatGPT"
+      if (u.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'meta-llama/llama-4-scout-17b-16e-instruct' }, { id: 'whisper-large-v3' }] }), { status: 200 });
+      estado.llamadasGroq++;
+      return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: 'registrar_luminaria', arguments: JSON.stringify(respuestaIA) } }] } }] }), { status: 200 });
     }
     if (u.startsWith('https://generativelanguage.googleapis.com')) {
       if (u.includes('/models?')) return new Response(JSON.stringify({ models: MODELOS_GEMINI.map((n) => ({ name: 'models/' + n, supportedGenerationMethods: ['generateContent'] })) }), { status: 200 });
