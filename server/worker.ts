@@ -442,6 +442,17 @@ async function generarConOpenAI(id: string, cuerpoAnthropic: any, env: any, llam
     void r.body?.cancel().catch(() => {});
     return post({ ...b, tool_choice: 'auto' });
   };
+  const enviarEstructurado = async (m: string) => {
+    const r = await enviar(m);
+    if (!r.ok || deOpenAI(await r.clone().json().catch(() => null))) return r;
+    // respondió pero en prosa (típico de modelos gratuitos que ignoran la herramienta): una segunda vez, pidiendo solo el JSON
+    const b = aOpenAI(cuerpoAnthropic, m);
+    const campos = Object.keys(cuerpoAnthropic.tools[0].input_schema.properties ?? {}).join(', ');
+    b.messages[0].content.push({ type: 'text', text: `Responde SOLO con un objeto JSON (sin texto adicional) con los campos: ${campos}. Usa "" o null si no se ve.` });
+    b.tool_choice = 'auto';
+    void r.body?.cancel().catch(() => {});
+    return post(b);
+  };
   const sinModelo = (m: string) => new Response(JSON.stringify({ error: { message: `No se encontró un modelo con visión en ${infoDe(id)?.nombre}${m ? ` (${m} no existe)` : ''}. Elige uno en la lista.` } }), { status: 404 });
   const buscar = async (excluir: string) => candidatosVision(await listarModelosOpenAI(id, env, llamar)).map((m) => m.id).filter((m) => m !== excluir).slice(0, 2);
 
@@ -449,12 +460,12 @@ async function generarConOpenAI(id: string, cuerpoAnthropic: any, env: any, llam
   if (!modelo) {
     const candidatos = await buscar('');
     if (!candidatos.length) return { r: sinModelo(''), modelo: '', autoElegido: false };
-    r = await enviar(candidatos[0]);
+    r = await enviarEstructurado(candidatos[0]);
     if (r.ok) detectadoOpenAI.set(id, { modelo: candidatos[0], hasta: Date.now() + 3_600_000 });
     return { r, modelo: candidatos[0], autoElegido: true };
   }
-  r = await enviar(modelo);
-  if (r.status === 503) { await r.body?.cancel().catch(() => {}); await new Promise((ok) => setTimeout(ok, Math.max(0, Number(env.REINTENTO_MS ?? 1000)))); r = await enviar(modelo); }
+  r = await enviarEstructurado(modelo);
+  if (r.status === 503) { await r.body?.cancel().catch(() => {}); await new Promise((ok) => setTimeout(ok, Math.max(0, Number(env.REINTENTO_MS ?? 1000)))); r = await enviarEstructurado(modelo); }
   if (r.ok || origen === 'admin' || (r.status !== 404 && r.status !== 400)) return { r, modelo, autoElegido: false };
   const texto = await r.clone().text().catch(() => '');
   if (!/model|modelo/i.test(texto)) return { r, modelo, autoElegido: false };   // un 400 por otra causa (imagen inválida…) no se arregla cambiando de modelo
@@ -463,7 +474,7 @@ async function generarConOpenAI(id: string, cuerpoAnthropic: any, env: any, llam
   if (!candidatos.length) return { r: original, modelo, autoElegido: false };   // sin evidencia de visión no se prueba nada: se muestra el error real del modelo por defecto
   for (const m of candidatos) {
     void r.body?.cancel().catch(() => {});   // sin await: si hay un clon sin leer, cancelar esperaría a que también se cierre
-    r = await enviar(m);
+    r = await enviarEstructurado(m);
     if (r.ok) { detectadoOpenAI.set(id, { modelo: m, hasta: Date.now() + 3_600_000 }); return { r, modelo: m, autoElegido: true }; }
   }
   return { r, modelo, autoElegido: false };

@@ -1184,6 +1184,19 @@ describe('otras IAs (Groq, OpenRouter, Mistral, Qwen, Kimi, ChatGPT, otra): comp
     expect(mal.status).toBe(400); expect(mal.j.error).toContain('images unsupported');
   });
 
+  it('un modelo que responde en prosa en vez de usar la herramienta: se reintenta pidiendo solo JSON y entonces sirve', async () => {
+    let n = 0;
+    const m = montar({ OPENROUTER_API_KEY: 'sk-or-clave-larga' }, (url, init) => {
+      if (!url.endsWith('/chat/completions')) return undefined;
+      n++;
+      const txt = JSON.stringify(JSON.parse(init.body).messages[0].content);
+      return txt.includes('SOLO con un objeto JSON') ? new Response(JSON.stringify({ choices: [{ message: { content: '{"fabricante":"Philips","confianza":"media"}' } }] }), { status: 200 })
+        : new Response(JSON.stringify({ choices: [{ message: { content: 'Veo una imagen gris.' } }] }), { status: 200 });
+    });
+    const r = await m.ia({ accion: 'modelo', proveedor: 'openrouter', modelo: 'nvidia/nemotron-3.5-super-vl:free' });
+    expect(r.status).toBe(200); expect(n).toBe(2);
+  });
+
   it('si el proveedor no ofrece ningún modelo que parezca de visión: no se adivina, se muestra el error real del modelo por defecto', async () => {
     const m = montar({ GROQ_API_KEY: 'gsk_clave_larga' }, (url) => {
       if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'canopylabs/orpheus-arabic-saudi' }, { id: 'llama-3.1-8b-instant' }] }), { status: 200 });
