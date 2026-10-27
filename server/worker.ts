@@ -382,7 +382,7 @@ export function deOpenAI(r: any): any | null {
   return args && typeof args === 'object' && !Array.isArray(args) ? { content: [{ type: 'tool_use', name: llamada?.name ?? 'registrar_luminaria', input: args }] } : null;
 }
 
-const NO_CHAT = /(embed|whisper|tts|guard|moderat|rerank|dall|transcri|speech|audio|image-gen|stable-diffusion|flux)/i;
+const NO_CHAT = /(embed|whisper|tts|orpheus|playai|guard|safeguard|moderat|rerank|dall|transcri|speech|audio|image-gen|stable-diffusion|flux|compound|allam)/i;
 const PARECE_VISION = /(vision|-vl\b|vl-|\bvl\b|pixtral|llava|scout|maverick|4o|gpt-4\.1|gpt-5|gemini|gemma-?3|mistral-(small|medium|large)|claude)/i;
 
 export interface ModeloListado { id: string; vision?: boolean }
@@ -392,6 +392,11 @@ export function ordenarModelosVision(lista: ModeloListado[]): ModeloListado[] {
   const util = lista.filter((m) => m.id && !NO_CHAT.test(m.id));
   const puntos = (m: ModeloListado) => (m.vision === true ? 4 : 0) + (PARECE_VISION.test(m.id) ? 2 : 0) + (/:free$/.test(m.id) ? 1 : 0);
   return util.slice().sort((a, b) => puntos(b) - puntos(a) || a.id.localeCompare(b.id));
+}
+
+/** Solo los que ACEPTAN imágenes según el proveedor o lo parecen por su nombre. Nunca se adivina: sin evidencia, no se prueba. */
+export function candidatosVision(lista: ModeloListado[]): ModeloListado[] {
+  return ordenarModelosVision(lista).filter((m) => m.vision === true || (m.vision !== false && PARECE_VISION.test(m.id)));
 }
 
 async function listarModelosOpenAI(id: string, env: any, llamar: typeof fetch): Promise<ModeloListado[]> {
@@ -429,7 +434,7 @@ async function generarConOpenAI(id: string, cuerpoAnthropic: any, env: any, llam
     method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${claveDe(env, id)}` }, body: JSON.stringify(aOpenAI(cuerpoAnthropic, m)),
   });
   const sinModelo = (m: string) => new Response(JSON.stringify({ error: { message: `No se encontró un modelo con visión en ${infoDe(id)?.nombre}${m ? ` (${m} no existe)` : ''}. Elige uno en la lista.` } }), { status: 404 });
-  const buscar = async (excluir: string) => ordenarModelosVision(await listarModelosOpenAI(id, env, llamar)).map((m) => m.id).filter((m) => m !== excluir).slice(0, 2);
+  const buscar = async (excluir: string) => candidatosVision(await listarModelosOpenAI(id, env, llamar)).map((m) => m.id).filter((m) => m !== excluir).slice(0, 2);
 
   let r: Response;
   if (!modelo) {
@@ -444,8 +449,11 @@ async function generarConOpenAI(id: string, cuerpoAnthropic: any, env: any, llam
   if (r.ok || origen === 'admin' || (r.status !== 404 && r.status !== 400)) return { r, modelo, autoElegido: false };
   const texto = await r.clone().text().catch(() => '');
   if (!/model|modelo/i.test(texto)) return { r, modelo, autoElegido: false };   // un 400 por otra causa (imagen inválida…) no se arregla cambiando de modelo
-  for (const m of await buscar(modelo)) {
-    await r.body?.cancel().catch(() => {});
+  const original = r.clone();
+  const candidatos = await buscar(modelo);
+  if (!candidatos.length) return { r: original, modelo, autoElegido: false };   // sin evidencia de visión no se prueba nada: se muestra el error real del modelo por defecto
+  for (const m of candidatos) {
+    void r.body?.cancel().catch(() => {});   // sin await: si hay un clon sin leer, cancelar esperaría a que también se cierre
     r = await enviar(m);
     if (r.ok) { detectadoOpenAI.set(id, { modelo: m, hasta: Date.now() + 3_600_000 }); return { r, modelo: m, autoElegido: true }; }
   }
@@ -659,8 +667,9 @@ async function administrarIA(request: Request, entorno: any, llamar: typeof fetc
       const orden = [...todos].sort((a, b) => Number(/flash/.test(b)) - Number(/flash/.test(a)) || b.localeCompare(a));
       return json(200, { ok: true, proveedor: id, modelos: orden.slice(0, 30), actual: (await modeloGemini(env, llamar)).modelo, sugerido: mejorModelo(todos) ?? '' });
     }
-    const orden = ordenarModelosVision(await listarModelosOpenAI(id, env, llamar));
-    return json(200, { ok: true, proveedor: id, modelos: orden.slice(0, 60).map((m) => m.id), actual: (await modeloOpenAI(id, env, llamar)).modelo, sugerido: orden[0]?.id ?? '' });
+    const todos = await listarModelosOpenAI(id, env, llamar);
+    const orden = ordenarModelosVision(todos);
+    return json(200, { ok: true, proveedor: id, modelos: orden.slice(0, 60).map((m) => m.id), actual: (await modeloOpenAI(id, env, llamar)).modelo, sugerido: candidatosVision(todos)[0]?.id ?? '' });
   }
 
   if (c?.accion === 'modelo') {

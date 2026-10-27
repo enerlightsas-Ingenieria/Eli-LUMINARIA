@@ -1152,6 +1152,38 @@ describe('otras IAs (Groq, OpenRouter, Mistral, Qwen, Kimi, ChatGPT, otra): comp
     expect(m.visto.filter((v) => v.url.endsWith('/chat/completions')).map((v) => JSON.parse(v.init.body).model)).toEqual(['x/ve-imagenes', 'x/ve-imagenes']);   // recordado
   });
 
+  it('caso real de Groq: si el modelo por defecto no está disponible, NUNCA se prueba a ciegas un modelo de voz (orpheus, playai, whisper…); solo candidatos de visión', async () => {
+    const lista = { data: [{ id: 'canopylabs/orpheus-arabic-saudi' }, { id: 'playai-tts' }, { id: 'whisper-large-v3' }, { id: 'llama-3.1-8b-instant' }, { id: 'meta-llama/llama-4-maverick-17b-128e-instruct' }] };
+    const m = montar({ GROQ_API_KEY: 'gsk_clave_larga' }, (url, init) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify(lista), { status: 200 });
+      if (url.endsWith('/chat/completions')) return JSON.parse(init.body).model === 'meta-llama/llama-4-maverick-17b-128e-instruct' ? llamadaOk() : new Response('{"error":{"message":"The model `x` does not exist or requires terms acceptance"}}', { status: 404 });
+      return undefined;
+    });
+    const r = await m.analizar();
+    expect(r.status).toBe(200);
+    const probados = m.visto.filter((v) => v.url.endsWith('/chat/completions')).map((v) => JSON.parse(v.init.body).model);
+    expect(probados).toEqual(['meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct']);
+    for (const malo of ['orpheus', 'playai', 'whisper', 'llama-3.1-8b-instant']) expect(probados.join()).not.toContain(malo);
+    const sug = (await m.ia({ accion: 'modelos', proveedor: 'groq' })).j;
+    expect(sug.sugerido).toBe('meta-llama/llama-4-maverick-17b-128e-instruct');
+    expect(sug.modelos.slice(0, 1)).toEqual(['meta-llama/llama-4-maverick-17b-128e-instruct']);
+    expect(sug.modelos.join()).not.toMatch(/orpheus|playai|whisper/);
+  });
+
+  it('si el proveedor no ofrece ningún modelo que parezca de visión: no se adivina, se muestra el error real del modelo por defecto', async () => {
+    const m = montar({ GROQ_API_KEY: 'gsk_clave_larga' }, (url) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'canopylabs/orpheus-arabic-saudi' }, { id: 'llama-3.1-8b-instant' }] }), { status: 200 });
+      if (url.endsWith('/chat/completions')) return new Response('{"error":{"message":"The model `meta-llama/llama-4-scout-17b-16e-instruct` requires terms acceptance. Please accept at console.groq.com"}}', { status: 400 });
+      return undefined;
+    });
+    const r = await m.analizar();
+    const t = await r.text();
+    expect(t).toContain('requires terms acceptance');                                                    // el motivo real, no el de un modelo cualquiera
+    expect(m.visto.filter((v) => v.url.endsWith('/chat/completions'))).toHaveLength(1);                   // solo se intentó el por defecto
+    const p = (await m.ia({ accion: 'probar', proveedor: 'groq' })).j.resultados.groq;
+    expect(p.ok).toBe(false); expect(p.mensaje).toContain('requires terms acceptance');
+  });
+
   it('"otra compatible con OpenAI": exige una dirección https, la usa tal cual (con sus mayúsculas) y se prueba como los demás', async () => {
     const m = montar({}, (url, init) => (url.startsWith('https://api.mio.example/v1/chat/completions') ? llamadaOk() : url.endsWith('/models') ? new Response(JSON.stringify({ data: [{ id: 'Mi-Modelo-VL' }] }), { status: 200 }) : undefined));
     expect((await m.ia({ accion: 'clave', proveedor: 'otra', clave: 'clave-de-otra-123' })).j.error).toContain('dirección');   // sin dirección no se puede
