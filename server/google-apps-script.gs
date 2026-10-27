@@ -58,7 +58,7 @@ function doPost(e) {
     lock.waitLock(30000);
     var d = JSON.parse(e.postData.contents);
     // 'equipo' y la administración de usuarios exigen TOKEN_ADMIN; todo lo demás, el token del equipo
-    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'config_guardar', 'ia_clave_guardar', 'ia_claves'].indexOf(d.accion) >= 0;
+    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'proyecto_eliminar', 'config_guardar', 'ia_clave_guardar', 'ia_claves'].indexOf(d.accion) >= 0;
     var esAdmin = soloAdmin && d.token === TOKEN_ADMIN;
     if (soloAdmin ? !esAdmin : d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' }); // las acciones de administración NO sirven con el token del equipo
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
@@ -75,6 +75,7 @@ function doPost(e) {
     if (d.accion === 'usuarios_listar') return salida({ ok: true, usuarios: listarUsuarios() });
     if (d.accion === 'usuarios_guardar') return salida(guardarUsuario(d));
     if (d.accion === 'usuarios_borrar') return salida(borrarUsuario(d));
+    if (d.accion === 'proyecto_eliminar') return salida(eliminarProyecto(d));
     var hoja = obtenerHoja(d.proyecto && d.proyecto.nombre);
 
     if (d.accion === 'listar') return salida({ ok: true, ahora: ahora, luminarias: listar(hoja, d.desde || '') });
@@ -417,7 +418,8 @@ function pestanasObsoletas() {
     var nombre = h.getName(), clave = nombre.toLowerCase();
     if (PESTANAS_SISTEMA.indexOf(clave) >= 0 || clave.charAt(0) === '_') return;
     var filas = h.getLastRow();
-    if (/ \(anterior( \d+)?\)$/.test(nombre)) res.push({ nombre: nombre, motivo: 'archivada con el diseño anterior de columnas', filas: Math.max(0, filas - 1) });
+    if (/ \(eliminado( \d+)?\)$/.test(nombre)) res.push({ nombre: nombre, motivo: 'proyecto eliminado por el administrador', filas: Math.max(0, filas - 1) });
+    else if (/ \(anterior( \d+)?\)$/.test(nombre)) res.push({ nombre: nombre, motivo: 'archivada con el diseño anterior de columnas', filas: Math.max(0, filas - 1) });
     else if (PESTANAS_VACIAS_DE_GOOGLE.indexOf(clave) >= 0 && filas <= 1) res.push({ nombre: nombre, motivo: 'hoja en blanco de Google', filas: 0 });
     else if (filas <= 1 && h.getRange(1, 1).getValue() === COLUMNAS[0][1]) res.push({ nombre: nombre, motivo: 'proyecto sin registros (se recrea sola al sincronizar)', filas: 0 });
   });
@@ -648,10 +650,27 @@ function nombresProyectos() {
   var res = [];
   SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(function (h) {
     var n = h.getName();
-    if (n.charAt(0) === '_' || / \(anterior( \d+)?\)$/.test(n) || res.length >= 100) return;
+    if (n.charAt(0) === '_' || / \((anterior|eliminado)( \d+)?\)$/.test(n) || res.length >= 100) return;
     if (h.getLastRow() >= 1 && h.getRange(1, 1).getValue() === COLUMNAS[0][1]) res.push(n);
   });
   return res;
+}
+
+/**
+ * Elimina un proyecto para todo el equipo: su pestaña se archiva como "Nombre (eliminado)" (los datos no se pierden; se borran del todo
+ * con "Limpiar pestañas que no se usan"). Desde ese momento ya no aparece en la lista y los teléfonos lo quitan al conectarse.
+ */
+function eliminarProyecto(d) {
+  var nombre = String(d.nombre === undefined || d.nombre === null ? '' : d.nombre).trim();
+  if (!nombre || nombre.charAt(0) === '_') return { ok: false, error: 'Falta el nombre del proyecto.' };
+  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  var hoja = buscarHoja(libro, nombre);
+  if (!hoja) return { ok: true, eliminado: false };   // ya no estaba en la hoja: nada que archivar
+  if (hoja.getLastRow() < 1 || hoja.getRange(1, 1).getValue() !== COLUMNAS[0][1]) return { ok: false, error: 'Esa pestaña no es un proyecto.' };
+  var destino = hoja.getName() + ' (eliminado)', n = 2;
+  while (buscarHoja(libro, destino)) destino = hoja.getName() + ' (eliminado ' + n++ + ')';
+  hoja.setName(destino);
+  return { ok: true, eliminado: true };
 }
 
 /** Todas las personas (con su clave: solo la ve el administrador a través del proxy). */

@@ -164,3 +164,25 @@ describe('zoom digital de la cámara', () => {
     expect(recorteParaZoom(100, 100, NaN)).toEqual({ sx: 0, sy: 0, sw: 100, sh: 100 });
   });
 });
+
+describe('conciliar proyectos con la hoja (un proyecto eliminado por el administrador desaparece aquí)', () => {
+  it('quita solo lo que la hoja ya conocía y no tiene nada pendiente; lo recién creado y lo pendiente se respetan', async () => {
+    const [general] = await db.listarProyectos();
+    const a = await db.crearProyecto('Barrio A');           // conocido por la hoja y luego eliminado → se quita
+    const b = await db.crearProyecto('Barrio B');           // nuevo, nunca visto en la hoja → se respeta
+    const c = await db.crearProyecto('Barrio C');           // eliminado en la hoja pero con un registro sin enviar → se respeta
+    await db.guardarLuminaria(borrador(c));
+    expect(await db.conciliarProyectos(['General', 'Barrio A', 'Barrio C'])).toBe(0);   // la hoja los lista: se marcan como conocidos
+    expect(await db.conciliarProyectos(['General', 'barrio b'])).toBe(1);               // A y C ya no están en la hoja; sin distinguir mayúsculas
+    const quedan = (await db.listarProyectos()).map((p) => p.nombre).sort();
+    expect(quedan).toEqual(['Barrio B', 'Barrio C', 'General']);
+    expect(general.id).toBeTruthy(); expect(a).not.toBe(b);
+  });
+
+  it('si se quitan todos, queda un proyecto "General" para poder trabajar', async () => {
+    await db.crearProyecto('Solo');
+    await db.conciliarProyectos(['General', 'Solo']);
+    expect(await db.conciliarProyectos(['Otro'])).toBe(2);
+    expect((await db.listarProyectos()).map((p) => p.nombre)).toEqual(['General']);
+  });
+});

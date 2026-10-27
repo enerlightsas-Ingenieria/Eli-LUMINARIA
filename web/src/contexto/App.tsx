@@ -60,17 +60,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!listo) return;
     let vivo = true;
-    verificarIdentidad().then((cambio) => { if (cambio && vivo) cargarAjustes().then(setAjustes); });
+    verificarIdentidad().then((cambio) => { if (cambio && vivo) { cargarAjustes().then(setAjustes); cargar(); } });
     return () => { vivo = false; };
-  }, [listo, versionConfig]);
+  }, [listo, versionConfig, cargar]);
 
   // Al volver el internet se vuelve a preguntar quién es esta cuenta (así se notan bajas y cambios de rol hechos mientras no había señal).
   useEffect(() => {
     if (!listo || !ajustes.apiKey) return;
-    const alVolver = () => { verificarIdentidad().then((cambio) => { if (cambio) cargarAjustes().then(setAjustes); }); };
+    const alVolver = () => { verificarIdentidad().then((cambio) => { if (cambio) { cargarAjustes().then(setAjustes); cargar(); } }); };
     window.addEventListener('online', alVolver);
     return () => window.removeEventListener('online', alVolver);
-  }, [listo, ajustes.apiKey]);
+  }, [listo, ajustes.apiKey, cargar]);
 
   // Bloqueo por inactividad: tras INACTIVIDAD_MINUTOS sin tocar la app (o al volver a ella pasado ese tiempo) se pide la clave otra vez.
   const hayCuenta = !!ajustes.apiKey;

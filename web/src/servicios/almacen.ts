@@ -113,6 +113,28 @@ export async function borrarProyecto(id: number): Promise<string[]> {
   return fotos;
 }
 
+/**
+ * Alinea los proyectos de este dispositivo con la hoja: los que el administrador eliminó desaparecen aquí también. Solo se quita un
+ * proyecto que la hoja ya conocía (se vio en su lista o tiene registros sincronizados) y que no tiene nada pendiente de enviar.
+ * Devuelve cuántos quitó. `enHoja` = nombres que informa el servidor (si el servidor no respondió, no se llama a esta función).
+ */
+export async function conciliarProyectos(enHoja: string[]): Promise<number> {
+  const nombres = new Set(enHoja.map((n) => n.trim().toLowerCase()));
+  let quitados = 0;
+  for (const p of await listarProyectos()) {
+    const marca = `enHoja:${p.uuid}`;
+    if (nombres.has(p.nombre.trim().toLowerCase())) { if ((await leerKv(marca)) !== '1') await guardarKv(marca, '1'); continue; }
+    const ls = await listarLuminarias(p.id);
+    const conocido = (await leerKv(marca)) === '1' || ls.some((l) => l.sincronizado);
+    const pendiente = ls.some((l) => !l.sincronizado) || (await borradasPendientes(p.id)).length > 0;
+    if (!conocido || pendiente) continue;
+    await borrarFotos(await borrarProyecto(p.id));
+    quitados++;
+  }
+  if (quitados && !(await listarProyectos()).length) await crearProyecto('General');
+  return quitados;
+}
+
 /* ---------- luminarias ---------- */
 export async function listarLuminarias(proyectoId: number): Promise<Luminaria[]> {
   const db = await abrir();

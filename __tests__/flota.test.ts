@@ -916,6 +916,24 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
     expect((await m.post('/usuarios', { accion: 'listar' }, 'claveJefe99')).j.usuarios.map((u: any) => u.usuario).sort()).toEqual(['ana', 'luz']);
   });
 
+  it('eliminar un proyecto es solo del administrador: se archiva en la hoja, deja de aparecer en la lista y ya no se ofrece a nadie', async () => {
+    const m = montar();
+    const tec = (await m.crear({ nombre: 'Ana', usuario: 'ana', rol: 'tecnico' })).j.usuario.clave;
+    const sup = (await m.crear({ nombre: 'Sara', usuario: 'sara', rol: 'supervisor' })).j.usuario.clave;
+    await m.post('/sync', subida(), tec);
+    expect((await m.post('/yo', {}, tec)).j.proyectos).toEqual(['Barrio A']);
+    for (const clave of [tec, sup]) expect((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre: 'Barrio A' }, clave)).status).toBe(401);   // técnico y supervisor no
+    expect((await m.post('/yo', {}, tec)).j.proyectos).toEqual(['Barrio A']);
+    for (const nombre of ['', 5, '_Usuarios', 'x'.repeat(121)]) expect([400, 200]).toContain((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre }, 'claveJefe99')).status);
+    expect((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre: '_Usuarios' }, 'claveJefe99')).j.ok).toBe(false);          // no se pueden borrar pestañas del sistema
+    expect((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre: 'Barrio A' }, 'claveJefe99')).j).toMatchObject({ ok: true, eliminado: true });
+    expect((await m.post('/yo', {}, tec)).j.proyectos).toEqual([]);
+    expect(m.gs.hoja('Barrio A (eliminado)')).toBeTruthy();                                                                              // los datos se conservan archivados
+    expect((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre: 'Barrio A' }, 'claveJefe99')).j).toMatchObject({ ok: true, eliminado: false });   // repetirlo no falla
+    const script = await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'proyecto_eliminar', nombre: 'Barrio A' }) });
+    expect((await script.json()).ok).toBe(false);                                                                                       // el token del equipo no sirve
+  });
+
   it('teléfono (WhatsApp): se guarda, se conserva al editar sin enviarlo, se puede cambiar o quitar, y se valida', async () => {
     const m = montar();
     const u = (await m.crear({ nombre: 'Ana', usuario: 'ana', rol: 'tecnico', telefono: '+57 300 123 4567' })).j.usuario;

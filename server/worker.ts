@@ -734,6 +734,9 @@ async function administrarSistema(request: Request, env: any, llamar: typeof fet
     const j: any = await r.clone().json().catch(() => null);
     return j?.ok ? json(200, { ok: true, fotos: c.fotos }) : r;
   }
+  if (c?.accion === 'eliminar_proyecto' && typeof c.nombre === 'string' && c.nombre.trim() && c.nombre.length <= 120) {
+    return haciaHojas({ accion: 'proyecto_eliminar', nombre: c.nombre.trim() }, env.SYNC_TOKEN_ADMIN, env, llamar);
+  }
   return json(400, { ok: false, error: 'Acción no permitida' });
 }
 
@@ -790,13 +793,13 @@ async function verificarIngreso(usuario: string, clave: string, env: any, llamar
   return deLaHoja(u);
 }
 
-/** Nombres de los proyectos que ya existen en la hoja (para que cada persona los vea al entrar). Si la hoja no responde, vacío. */
-async function proyectosDeLaHoja(env: any, llamar: typeof fetch): Promise<string[]> {
-  if (!env.SYNC_URL || !env.SYNC_TOKEN) return [];
+/** Nombres de los proyectos que ya existen en la hoja (para que cada persona los vea al entrar). Si la hoja no responde, undefined (los teléfonos no deben interpretarlo como "no hay proyectos"). */
+async function proyectosDeLaHoja(env: any, llamar: typeof fetch): Promise<string[] | undefined> {
+  if (!env.SYNC_URL || !env.SYNC_TOKEN) return undefined;
   try {
     const c: any = await (await haciaHojas({ accion: 'proyectos' }, env.SYNC_TOKEN, env, llamar)).json();
-    return c?.ok && Array.isArray(c.proyectos) ? c.proyectos.filter((x: unknown) => typeof x === 'string').slice(0, 100) : [];
-  } catch { return []; }
+    return c?.ok && Array.isArray(c.proyectos) ? c.proyectos.filter((x: unknown) => typeof x === 'string').slice(0, 100) : undefined;
+  } catch { return undefined; }
 }
 
 /** POST /ingresar { usuario, clave } → { ok, nombre, rol, terceros?, proyectos }. No requiere cabecera: es la puerta de entrada. */

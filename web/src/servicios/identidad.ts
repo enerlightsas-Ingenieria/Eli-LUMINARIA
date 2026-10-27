@@ -2,6 +2,7 @@ import { rolDe, type Rol } from '@compartido/core/ajustes';
 import { codificar, type ConfigFlota } from '@compartido/lib/config';
 import { cargarAjustes, guardarAjustes } from './ajustes';
 import { dejarAviso, fijarClaveDeSesion, guardarVerificador, olvidarVerificador, verificarLocal } from './sesion';
+import { conciliarProyectos } from './almacen';
 import { asegurarProyectos } from './configuracion';
 
 export interface Usuario { nombre: string; usuario: string; rol: Rol; clave: string; activo: boolean; terceros?: boolean; telefono?: string }
@@ -51,11 +52,18 @@ export async function verificarIdentidad(): Promise<boolean> {
   const terceros = typeof j.terceros === 'boolean' ? j.terceros : a.modoTerceros;   // lo decide el administrador (si el servidor lo informa)
   const fotos = typeof j.fotos === 'boolean' ? j.fotos : a.syncFotos;
   const usuario = typeof j.usuario === 'string' && j.usuario ? j.usuario : a.usuario;
-  const creados = Array.isArray(j.proyectos) ? await asegurarProyectos(j.proyectos) : 0;
+  // Quita primero lo que el administrador eliminó y luego crea lo que falte (si el servidor no informó la lista, no se toca nada)
+  const quitados = Array.isArray(j.proyectos) ? await conciliarProyectos(j.proyectos).catch(() => 0) : 0;
+  const creados = (Array.isArray(j.proyectos) ? await asegurarProyectos(j.proyectos) : 0) + quitados;
   if (rolDe(a) === j.rol && a.rol === j.rol && a.tecnico === j.nombre && !a.supervisor && a.modoTerceros === terceros && a.syncFotos === fotos && a.usuario === usuario) return creados > 0;
   await guardarAjustes({ ...a, rol: j.rol, supervisor: false, tecnico: j.nombre, usuario, modoTerceros: terceros, syncFotos: fotos });
   if (usuario && usuario !== a.usuario) await guardarVerificador(usuario, a.apiKey).catch(() => {});   // el usuario correcto para entrar sin conexión
   return true;
+}
+
+/** Elimina un proyecto para TODO el equipo (solo administrador; el servidor lo comprueba). Necesita conexión: si no, el proyecto reaparecería. */
+export async function eliminarProyectoDelEquipo(nombre: string): Promise<void> {
+  await llamarProxy('/sistema', { accion: 'eliminar_proyecto', nombre }, 20000);
 }
 
 /** Dirección del servidor de la empresa: la que trae la web publicada (servidor.json); si falta, se pide a mano al entrar. */
@@ -92,7 +100,7 @@ export async function ingresar(servidor: string, usuario: string, clave: string)
     syncFotos: typeof j.fotos === 'boolean' ? j.fotos : a.syncFotos,
   });
   await guardarVerificador(login, clave);
-  if (Array.isArray(j.proyectos)) await asegurarProyectos(j.proyectos);
+  if (Array.isArray(j.proyectos)) { await conciliarProyectos(j.proyectos).catch(() => 0); await asegurarProyectos(j.proyectos); }
   return { nombre: j.nombre, rol: j.rol };
 }
 
