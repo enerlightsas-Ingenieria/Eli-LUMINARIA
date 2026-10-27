@@ -325,7 +325,7 @@ interface InfoProveedor { id: string; nombre: string; tipo: 'claude' | 'gemini' 
 export const PROVEEDORES: InfoProveedor[] = [
   { id: 'gemini', nombre: 'Gemini (Google)', tipo: 'gemini', gratis: true, nota: 'Capa gratuita con límites de uso. Entiende fotos.', donde: 'aistudio.google.com → Get API key' },
   { id: 'claude', nombre: 'Claude (Anthropic)', tipo: 'claude', gratis: false, nota: 'De pago por foto. Muy buena leyendo placas.', donde: 'console.anthropic.com → API keys' },
-  { id: 'groq', nombre: 'Groq (Llama con visión)', tipo: 'openai', base: 'https://api.groq.com/openai/v1', gratis: true, nota: 'Capa gratuita con límites. Modelos Llama 4 con visión.', donde: 'console.groq.com → API Keys', modeloDefecto: 'meta-llama/llama-4-scout-17b-16e-instruct' },
+  { id: 'groq', nombre: 'Groq (Llama con visión)', tipo: 'openai', base: 'https://api.groq.com/openai/v1', gratis: true, nota: 'Capa gratuita con límites. Modelos con visión (p. ej. Qwen 3.6). Si el modelo por defecto deja de existir, elige otro en la lista.', donde: 'console.groq.com → API Keys', modeloDefecto: 'qwen/qwen3.6-27b' },
   { id: 'openrouter', nombre: 'OpenRouter (modelos gratis)', tipo: 'openai', base: 'https://openrouter.ai/api/v1', gratis: true, nota: 'Reúne muchos modelos; los que terminan en ":free" no cuestan (límites bajos).', donde: 'openrouter.ai → Keys' },
   { id: 'mistral', nombre: 'Mistral', tipo: 'openai', base: 'https://api.mistral.ai/v1', gratis: true, nota: 'Plan gratuito de pruebas con límites. Modelos con visión (Pixtral, Mistral Small).', donde: 'console.mistral.ai → API keys', modeloDefecto: 'mistral-small-latest' },
   { id: 'qwen', nombre: 'Qwen (Alibaba)', tipo: 'openai', base: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', gratis: false, nota: 'Cuota inicial para cuentas nuevas; luego de pago. Modelos Qwen-VL con visión.', donde: 'Alibaba Cloud Model Studio → API-KEY', modeloDefecto: 'qwen-vl-plus' },
@@ -383,7 +383,7 @@ export function deOpenAI(r: any): any | null {
 }
 
 const NO_CHAT = /(embed|whisper|tts|orpheus|playai|guard|safeguard|moderat|rerank|dall|transcri|speech|audio|image-gen|stable-diffusion|flux|compound|allam)/i;
-const PARECE_VISION = /(vision|-vl\b|vl-|\bvl\b|pixtral|llava|scout|maverick|4o|gpt-4\.1|gpt-5|gemini|gemma-?3|mistral-(small|medium|large)|claude)/i;
+const PARECE_VISION = /(vision|-vl\b|vl-|\bvl\b|pixtral|llava|scout|qwen3\.[5-9]|maverick|4o|gpt-4\.1|gpt-5|gemini|gemma-?3|mistral-(small|medium|large)|claude)/i;
 
 export interface ModeloListado { id: string; vision?: boolean }
 

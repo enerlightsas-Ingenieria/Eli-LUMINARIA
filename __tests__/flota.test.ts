@@ -1048,7 +1048,7 @@ describe('otras IAs (Groq, OpenRouter, Mistral, Qwen, Kimi, ChatGPT, otra): comp
     const v = m.visto[0];
     expect(v.url).toBe('https://api.groq.com/openai/v1/chat/completions');
     expect(v.init.headers.authorization).toBe('Bearer gsk_clave_larga');
-    expect(JSON.parse(v.init.body).model).toBe('meta-llama/llama-4-scout-17b-16e-instruct');
+    expect(JSON.parse(v.init.body).model).toBe('qwen/qwen3.6-27b');
   });
 
   it('cadena de respaldo: si la principal falla se prueba la siguiente con clave, sea de la familia que sea', async () => {
@@ -1162,7 +1162,7 @@ describe('otras IAs (Groq, OpenRouter, Mistral, Qwen, Kimi, ChatGPT, otra): comp
     const r = await m.analizar();
     expect(r.status).toBe(200);
     const probados = m.visto.filter((v) => v.url.endsWith('/chat/completions')).map((v) => JSON.parse(v.init.body).model);
-    expect(probados).toEqual(['meta-llama/llama-4-scout-17b-16e-instruct', 'meta-llama/llama-4-maverick-17b-128e-instruct']);
+    expect(probados).toEqual(['qwen/qwen3.6-27b', 'meta-llama/llama-4-maverick-17b-128e-instruct']);
     for (const malo of ['orpheus', 'playai', 'whisper', 'llama-3.1-8b-instant']) expect(probados.join()).not.toContain(malo);
     const sug = (await m.ia({ accion: 'modelos', proveedor: 'groq' })).j;
     expect(sug.sugerido).toBe('meta-llama/llama-4-maverick-17b-128e-instruct');
