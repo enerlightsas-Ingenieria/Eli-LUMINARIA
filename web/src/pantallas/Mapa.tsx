@@ -16,7 +16,7 @@ export function Mapa() {
 
   const marcas = useMemo<Marca[]>(() => items.filter((l) => coordenadaValida(l.latitud, l.longitud)).map((l) => ({
     lat: l.latitud!, lng: l.longitud!, color: colorTecnologia(l.tecnologia),
-    lineas: [l.codigo || l.codigoPoste || [l.fabricante, l.modelo].filter(Boolean).join(' ') || `Luminaria #${l.id}`, [l.tecnologia, l.potenciaW && `${l.potenciaW} W`].filter(Boolean).join(' · ')].filter(Boolean),
+    lineas: [l.codigo || l.codigoPoste || l.fabricante || `Luminaria #${l.id}`, [l.tecnologia, l.potenciaW && `${l.potenciaW} W`].filter(Boolean).join(' · ')].filter(Boolean),
     accion: { texto: 'Abrir ficha', alClic: () => ir(`/editar/${l.id}`) },
   })), [items]);
 

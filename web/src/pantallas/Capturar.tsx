@@ -101,7 +101,7 @@ export function Capturar() {
       const borrador: LuminariaBorrador = {
         ...car, uuid: nuevoUuid(), proyectoId: proyecto.id, creadoEn: ahora, actualizadoEn: ahora, fotos: ids, confianza,
         latitud: posFinal?.latitud ?? null, longitud: posFinal?.longitud ?? null, precisionM: posFinal?.precisionM ?? null,
-        direccion: '', codigoPoste: '', codigo: '', tecnico: ajustes.tecnico,
+        direccion: '', sector: '', codigoPoste: '', codigo: '', tecnico: ajustes.tecnico,
         // las fotos elegidas con el selector del sistema no se pueden verificar: se marcan como "galería" y el servidor las audita
         origen: tomadas.some((f) => f.origen === 'galeria') ? 'galeria' : 'camara',
         ubicacionSimulada: !!posFinal?.simulada,

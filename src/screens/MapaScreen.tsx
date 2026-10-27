@@ -24,7 +24,7 @@ export function MapaScreen() {
     .filter((l) => coordenadaValida(l.latitud, l.longitud))
     .map((l) => ({
       id: l.id, lat: l.latitud!, lng: l.longitud!, tec: l.tecnologia,
-      titulo: l.codigo || l.codigoPoste || [l.fabricante, l.modelo].filter(Boolean).join(' ') || `Luminaria #${l.id}`,
+      titulo: l.codigo || l.codigoPoste || l.fabricante || `Luminaria #${l.id}`,
       detalle: [l.tecnologia, l.potenciaW && `${l.potenciaW} W`].filter(Boolean).join(' · '),
     })), [items]);
 

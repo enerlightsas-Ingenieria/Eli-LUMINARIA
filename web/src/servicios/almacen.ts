@@ -142,8 +142,10 @@ export async function listarLuminarias(proyectoId: number): Promise<Luminaria[]>
   return ls.map(completar).sort((a, b) => b.id - a.id);
 }
 
-/** Registros guardados antes de que existiera el código del poste. */
-const completar = (l: Luminaria): Luminaria => (l.codigoPoste === undefined ? { ...l, codigoPoste: '' } : l);
+/** Registros guardados antes de que existieran el código del poste, el sector, el material del poste o el transformador. */
+const completar = (l: Luminaria): Luminaria => (
+  l.codigoPoste === undefined || l.sector === undefined || l.materialPoste === undefined || l.numeroTransformador === undefined
+    ? { ...l, codigoPoste: l.codigoPoste ?? '', sector: l.sector ?? '', materialPoste: l.materialPoste ?? '', numeroTransformador: l.numeroTransformador ?? '' } : l);
 
 export async function obtenerLuminaria(id: number): Promise<Luminaria | undefined> {
   const db = await abrir();

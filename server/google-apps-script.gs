@@ -42,8 +42,11 @@ var COLUMNAS = [
   ['estado', 'Estado'], ['confianza', 'Confianza IA'], ['observaciones', 'Observaciones'],
   ['mapa', 'Enlace mapa'], ['foto', 'Foto'], ['eliminada', 'Eliminada'], ['recibidoEn', 'Recibido'],
   // Las columnas nuevas se AÑADEN SIEMPRE AL FINAL: todo el script lee por posición y así las pestañas ya creadas siguen siendo válidas.
-  ['origen', 'Origen de la foto'], ['ubicacionSimulada', 'Ubicación simulada'], ['jornadaId', 'ID jornada'], ['alertas', 'Alertas'], ['usuario', 'Usuario']
+  ['origen', 'Origen de la foto'], ['ubicacionSimulada', 'Ubicación simulada'], ['jornadaId', 'ID jornada'], ['alertas', 'Alertas'], ['usuario', 'Usuario'],
+  ['sector', 'Sector'], ['materialPoste', 'Material del poste'], ['numeroTransformador', 'N.º transformador']
 ];
+// Campos que la app ya no pide (modelo, tensión, pines y temperatura de color): sus columnas se conservan para no mover las demás, pero se ocultan.
+var COLUMNAS_RETIRADAS = ['modelo', 'tensionV', 'pinesFotocelda', 'temperaturaColorK'];
 // Encabezados de la versión anterior (con Marca, Tipo de luminaria, Flujo y Altura): esas pestañas se archivan, no se mezclan.
 var ENCABEZADOS_RETIRADOS = ['Marca', 'Tipo de luminaria', 'Flujo (lm)', 'Altura (m)', 'Código activo'];
 // Columnas que se dejan como número (para sumar/graficar); el resto se fuerza a texto para que Sheets no
@@ -158,6 +161,7 @@ function obtenerHoja(nombreProyecto) {
     COLUMNAS.forEach(function (c, i) {
       if (NUMERICAS.indexOf(c[0]) < 0) hoja.getRange(2, i + 1, hoja.getMaxRows() - 1, 1).setNumberFormat('@');
     });
+    ocultarRetiradas(hoja);
   }
   return hoja;
 }
@@ -183,12 +187,20 @@ function asegurarEncabezados(hoja) {
   var maxCol = hoja.getMaxColumns();
   if (maxCol < COLUMNAS.length) hoja.insertColumnsAfter(maxCol, COLUMNAS.length - maxCol);
   var cab = hoja.getRange(1, 1, 1, COLUMNAS.length).getValues()[0];
+  var nuevas = false;
   COLUMNAS.forEach(function (c, i) {
     if (cab[i] !== '') return;
+    nuevas = true;
     hoja.getRange(1, i + 1).setValue(c[1]);
     hoja.getRange(1, i + 1, 1, 1).setFontWeight('bold').setBackground('#FFC53D');
     if (NUMERICAS.indexOf(c[0]) < 0) hoja.getRange(2, i + 1, hoja.getMaxRows() - 1, 1).setNumberFormat('@');
   });
+  if (nuevas) ocultarRetiradas(hoja);   // una pestaña de una versión anterior recibe las columnas nuevas y esconde las retiradas
+}
+
+/** Oculta las columnas de campos retirados (los datos que ya tuvieran se conservan). */
+function ocultarRetiradas(hoja) {
+  COLUMNAS.forEach(function (c, i) { if (COLUMNAS_RETIRADAS.indexOf(c[0]) >= 0) hoja.hideColumns(i + 1); });
 }
 
 /** Lee todas las filas de datos con exactamente COLUMNAS.length columnas (rellena si la pestaña es antigua y más angosta). */

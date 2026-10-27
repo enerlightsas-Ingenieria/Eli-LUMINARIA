@@ -33,7 +33,7 @@ export function Registros() {
       if (filtro === 'pendientes' && l.sincronizado) return false;
       if (filtro === 'sinGps' && l.latitud != null) return false;
       if (!t) return true;
-      return [l.codigo, l.codigoPoste, l.modelo, l.fabricante, l.tecnologia, l.direccion, l.tecnico, String(l.id)].some((x) => x.toLowerCase().includes(t));
+      return [l.codigo, l.codigoPoste, l.fabricante, l.tecnologia, l.direccion, l.tecnico, String(l.id)].some((x) => x.toLowerCase().includes(t));
     });
   }, [items, q, filtro]);
 
@@ -101,11 +101,11 @@ export function Registros() {
           </div>
         )}
         {visibles.map((l) => (
-          <button key={l.id} type="button" className="tarjeta item" onClick={() => ir(`/editar/${l.id}`)} aria-label={`Luminaria ${l.id}, ${l.fabricante} ${l.modelo}`}>
+          <button key={l.id} type="button" className="tarjeta item" onClick={() => ir(`/editar/${l.id}`)} aria-label={`Luminaria ${l.id}, ${l.fabricante}`}>
             <Foto id={l.fotos[0]} className="miniatura" />
             <div style={{ minWidth: 0 }}>
-              <div className="t">{l.codigo || `#${l.id}`} · {[l.fabricante, l.modelo].filter(Boolean).join(' ') || 'Sin identificar'}</div>
-              <div className="s">{[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.pinesFotocelda && `fotocelda ${l.pinesFotocelda}p`].filter(Boolean).join(' · ') || '—'}</div>
+              <div className="t">{l.codigo || `#${l.id}`} · {l.fabricante || 'Sin identificar'}</div>
+              <div className="s">{[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.fotocelda === 'Sí' && 'con fotocelda'].filter(Boolean).join(' · ') || '—'}</div>
               {!!l.tecnico && <div className="s" style={{ fontSize: 12 }}>Por {l.tecnico}</div>}
               <div className="c">{l.latitud != null ? `📍 ${l.latitud.toFixed(6)}, ${l.longitud?.toFixed(6)}` : '📍 sin coordenada'}</div>
               <div className="etq">

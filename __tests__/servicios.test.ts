@@ -20,11 +20,11 @@ describe('analizarFotos', () => {
   afterEach(() => { (global as any).fetch = undefined; mockAjustes.apiKey = 'sk-test'; });
 
   it('envía las imágenes y mapea la herramienta a características', async () => {
-    const f = jest.fn().mockResolvedValue(resp(200, { content: [{ type: 'tool_use', input: { fabricante: ' Philips ', potenciaW: '150', pinesFotocelda: '7', tecnologia: 'LED', confianza: 'alta' } }] }));
+    const f = jest.fn().mockResolvedValue(resp(200, { content: [{ type: 'tool_use', input: { fabricante: ' Philips ', potenciaW: '150', fotocelda: 'Sin fotocelda', montaje: 'brazo', tecnologia: 'LED', confianza: 'alta' } }] }));
     (global as any).fetch = f;
     const r = await analizarFotos(['AAA', 'BBB']);
     expect(r.confianza).toBe('alta');
-    expect(r.caracteristicas).toMatchObject({ fabricante: 'Philips', potenciaW: '150', pinesFotocelda: '7', modelo: '' });
+    expect(r.caracteristicas).toMatchObject({ fabricante: 'Philips', potenciaW: '150', fotocelda: 'No', montaje: 'Otro: brazo' });
     const body = JSON.parse(f.mock.calls[0][1].body);
     expect(body.messages[0].content.filter((c: any) => c.type === 'image')).toHaveLength(2);
     expect(body.tool_choice).toEqual({ type: 'tool', name: 'registrar_luminaria' });

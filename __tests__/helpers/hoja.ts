@@ -19,6 +19,7 @@ export class Hoja {
   getMaxRows() { return 1000; }
   getMaxColumns() { return this.maxColumnas; }
   insertColumnsAfter(_pos: number, n: number) { this.maxColumnas += n; }
+  hideColumns(_col: number) { /* sin efecto en la simulación */ }
   setFrozenRows() {}
   coac(x: any, col: number, cabecera = false) {
     if (typeof x === 'string' && /^'[=+@]/.test(x)) return x.slice(1); // el apóstrofo fuerza texto y no se guarda

@@ -134,16 +134,16 @@ describe('segunda revisión', () => {
   describe('texto seguro en la hoja', () => {
     it('textos con fórmula se guardan con un espacio delante y vuelven intactos; los números negativos no se tocan', async () => {
       const pA = await proyectoDe(A, 'Barrio A'); const pB = await proyectoDe(B, 'Barrio A');
-      await nueva(A, pA.id, { tecnologia: '-abc', observaciones: '=calibrar()', modelo: '+5', fabricante: '@x', longitud: -74.0721, potenciaW: '-12' });
+      await nueva(A, pA.id, { tecnologia: '-abc', observaciones: '=calibrar()', numeroTransformador: '+5', fabricante: '@x', longitud: -74.0721, potenciaW: '-12' });
       await A.sync.sincronizar(pA); await B.sync.sincronizar(pB);
       const h = srv.hoja('Barrio A')!; const fila = h.filas[1]; const cab = h.filas[0];
       expect(fila[cab.indexOf('Observaciones')]).toBe(' =calibrar()');          // texto, no fórmula (y sin depender de apóstrofos)
-      expect(fila[cab.indexOf('Modelo')]).toBe(' +5');
+      expect(fila[cab.indexOf('N.º transformador')]).toBe(' +5');
       expect(fila[cab.indexOf('Tecnología')]).toBe(' -abc');
       expect(fila[cab.indexOf('Longitud')]).toBe(-74.0721);                      // número negativo intacto
       expect(fila[cab.indexOf('Potencia (W)')]).toBe(-12);
       const [l] = await B.db.listarLuminarias(pB.id);
-      expect(l).toMatchObject({ observaciones: '=calibrar()', modelo: '+5', fabricante: '@x', tecnologia: '-abc' }); // la app recorta el espacio
+      expect(l).toMatchObject({ observaciones: '=calibrar()', numeroTransformador: '+5', fabricante: '@x', tecnologia: '-abc' }); // la app recorta el espacio
     });
   });
 });

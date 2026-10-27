@@ -20,7 +20,7 @@ describe('equipo: varios técnicos, mismo proyecto', () => {
   afterEach(() => { (global as any).fetch = undefined; });
 
   it('los registros de todos llegan a la hoja y a todos los teléfonos, sin duplicar', async () => {
-    await nueva(A, pA.id, { fabricante: 'Philips', potenciaW: '150', modelo: '1-2', latitud: 4.711 });
+    await nueva(A, pA.id, { fabricante: 'Philips', potenciaW: '150', numeroTransformador: '1-2', latitud: 4.711 });
     await nueva(A, pA.id, { fabricante: 'Schréder', potenciaW: '70', latitud: 4.712 });
     await nueva(B, pB.id, { fabricante: 'Lumenpulse', potenciaW: '100', latitud: 4.713 });
 
@@ -39,7 +39,7 @@ describe('equipo: varios técnicos, mismo proyecto', () => {
     }
     const lsA = await A.db.listarLuminarias(pA.id);
     const philips = lsA.find((l) => l.fabricante === 'Philips')!;
-    expect(philips).toMatchObject({ potenciaW: '150', modelo: '1-2', tecnico: 'Ana' }); // números y "1-2" sobreviven a Sheets
+    expect(philips).toMatchObject({ potenciaW: '150', numeroTransformador: '1-2', tecnico: 'Ana' }); // números y "1-2" sobreviven a Sheets
     expect(lsA.find((l) => l.fabricante === 'Lumenpulse')!.tecnico).toBe('Beto');            // se ve quién lo hizo
     expect(lsA.find((l) => l.fabricante === 'Lumenpulse')!.fotos).toEqual([]);               // las fotos no viajan sin la opción
   });
@@ -48,9 +48,9 @@ describe('equipo: varios técnicos, mismo proyecto', () => {
     const id = await nueva(A, pA.id, { fabricante: 'Philips', tecnologia: 'LED' });
     await A.sync.sincronizar(pA); await B.sync.sincronizar(pB);
     const [l] = await A.db.listarLuminarias(pA.id);
-    await A.db.guardarLuminaria({ ...l, id, fabricante: 'Philips Lumileds', pinesFotocelda: '7' });
+    await A.db.guardarLuminaria({ ...l, id, fabricante: 'Philips Lumileds', numeroTransformador: 'T-77' });
     await A.sync.sincronizar(pA); await B.sync.sincronizar(pB);
-    expect((await B.db.listarLuminarias(pB.id))[0]).toMatchObject({ fabricante: 'Philips Lumileds', pinesFotocelda: '7' });
+    expect((await B.db.listarLuminarias(pB.id))[0]).toMatchObject({ fabricante: 'Philips Lumileds', numeroTransformador: 'T-77' });
     expect(srv.hojas[0].filas).toHaveLength(2); // actualiza la fila, no añade otra
   });
 

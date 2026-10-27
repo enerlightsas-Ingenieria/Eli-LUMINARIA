@@ -1,4 +1,4 @@
-import { Caracteristicas, caracteristicasVacias, Confianza, normalizarTecnologia } from '../types';
+import { Caracteristicas, caracteristicasVacias, Confianza, normalizarFotocelda, normalizarMaterialPoste, normalizarMontaje, normalizarTecnologia } from '../types';
 import { Ajustes } from './ajustes';
 
 export interface ResultadoAnalisis {
@@ -10,12 +10,13 @@ const PROMPT = `Eres un técnico experto en alumbrado público e iluminación ex
 Recibes de 1 a 3 fotos de UNA misma luminaria (general, placa/etiqueta, fotocelda). Extrae sus características básicas.
 
 Reglas:
-- Lee cualquier etiqueta, placa, grabado o texto visible (fabricante, modelo, potencia, tensión, IP, K, país).
+- Lee cualquier etiqueta, placa, grabado o texto visible (fabricante, potencia, IP, país).
 - Si un dato NO se puede ver ni deducir con razonable certeza, devuelve cadena vacía "". No inventes cifras.
 - Si deduces un dato sólo por la forma/aspecto, añade " (est.)" al final.
-- Fotocelda: indica si hay (NEMA/twist-lock ANSI C136.10, integrada, externa) o no. Cuenta los pines/contactos visibles del receptáculo: 3 pines = on/off estándar; 5 pines = con dimming 0-10V/DALI; 7 pines = dimming + datos/telegestión (ANSI C136.41). Ponlo en "pinesFotocelda" (solo el número).
+- Fotocelda: responde solo "Sí" si se ve una fotocelda (NEMA/twist-lock, integrada o externa) o "No" si claramente no hay. Si no la puedes ver, déjalo vacío.
+- Montaje: "Poste" si la luminaria va sobre un poste o en un brazo de poste, "Fachada" si va fijada a una pared o fachada, o "Otro: <cuál>". Si es poste, en "materialPoste" pon el material que se ve: Concreto, Madera, Metálico, Fibra de vidrio, Fibra de vidrio traslúcido u "Otro: <cuál>".
 - Tecnología: responde SOLO con una de estas: LED, Sodio, Metal Halide, Mercurio, Fluorescente, Incandescente, Halógena, Inducción, Luz mixta. Si ninguna encaja, responde "Otra: <cuál>". Por aspecto: módulo de LEDs con lentes = LED; lámpara tubular/elipsoidal tras vidrio = sodio, mercurio o metal halide (solo si lo puedes distinguir).
-- Responde en español, valores cortos. Campos numéricos sin unidad (W, V, K).
+- Responde en español, valores cortos. Campos numéricos sin unidad (W).
 - Son luminarias de alumbrado público.
 - Usa la herramienta registrar_luminaria para responder.`;
 
@@ -28,20 +29,17 @@ export const TOOL = {
     type: 'object',
     properties: {
       fabricante: campo('Fabricante'),
-      modelo: campo('Modelo o referencia'),
       tecnologia: campo('Una de: LED, Sodio, Metal Halide, Mercurio, Fluorescente, Incandescente, Halógena, Inducción, Luz mixta; si ninguna, "Otra: <cuál>"'),
       potenciaW: campo('Potencia en vatios'),
-      tensionV: campo('Tensión nominal en voltios'),
-      fotocelda: campo('Presencia y tipo de fotocelda'),
-      pinesFotocelda: campo('Número de pines de la fotocelda/receptáculo: 3, 5 o 7'),
-      temperaturaColorK: campo('Temperatura de color en kelvin'),
+      fotocelda: campo('"Sí" si tiene fotocelda, "No" si no la tiene'),
       ip: campo('Grado de protección IP'),
-      montaje: campo('Poste, brazo o suspendida'),
+      montaje: campo('Poste, Fachada u "Otro: <cuál>"'),
+      materialPoste: campo('Solo si el montaje es poste: Concreto, Madera, Metálico, Fibra de vidrio, Fibra de vidrio traslúcido u "Otro: <cuál>"'),
       estado: campo('Estado visual: bueno, deteriorado, apagada o vandalizada'),
       observaciones: campo('Notas útiles: brazo, color, daños, texto leído'),
       confianza: { type: 'string', enum: ['alta', 'media', 'baja'], description: 'Confianza global en la identificación' },
     },
-    required: [...Object.keys(caracteristicasVacias()), 'confianza'],
+    required: [...Object.keys(caracteristicasVacias()).filter((k) => k !== 'numeroTransformador'), 'confianza'],   // el n.º del transformador no se ve en la foto: lo escribe la persona
   },
 };
 
@@ -117,6 +115,8 @@ export async function analizarFotosCon(cargarAjustes: () => Promise<Ajustes>, ba
     out[k] = typeof v === 'string' ? v.trim() : v != null ? String(v) : '';
   }
   out.tecnologia = normalizarTecnologia(out.tecnologia);
+  out.fotocelda = normalizarFotocelda(out.fotocelda); out.montaje = normalizarMontaje(out.montaje);
+  out.materialPoste = /^poste\b/i.test(out.montaje) ? normalizarMaterialPoste(out.materialPoste) : '';
   const c = bloque.input?.confianza;
   return { caracteristicas: out, confianza: c === 'alta' || c === 'media' || c === 'baja' ? c : 'baja' };
 }

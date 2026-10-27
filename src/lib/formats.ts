@@ -13,16 +13,15 @@ const COLUMNAS: [string, (l: Luminaria, p?: Proyecto) => string | number | null]
   ['Longitud', (l) => l.longitud],
   ['Precisión (m)', (l) => (l.precisionM != null ? Math.round(l.precisionM) : null)],
   ['Dirección', (l) => l.direccion],
+  ['Sector', (l) => l.sector],
   ['Fabricante', (l) => l.fabricante],
-  ['Modelo', (l) => l.modelo],
   ['Tecnología', (l) => l.tecnologia],
   ['Potencia (W)', (l) => l.potenciaW],
-  ['Tensión (V)', (l) => l.tensionV],
   ['Fotocelda', (l) => l.fotocelda],
-  ['Pines fotocelda', (l) => l.pinesFotocelda],
-  ['Temp. color (K)', (l) => l.temperaturaColorK],
   ['IP', (l) => l.ip],
   ['Montaje', (l) => l.montaje],
+  ['Material del poste', (l) => l.materialPoste],
+  ['N.º del transformador', (l) => l.numeroTransformador],
   ['Estado', (l) => l.estado],
   ['Confianza IA', (l) => l.confianza],
   ['Origen de la foto', (l) => l.origen],
@@ -54,9 +53,8 @@ export function aGeoJson(items: Luminaria[], proyecto?: Proyecto): string {
       geometry: { type: 'Point', coordinates: [l.longitud, l.latitud] },
       properties: {
         id: l.id, proyecto: proyecto?.nombre ?? '', codigo_poste: l.codigoPoste, codigo_luminaria: l.codigo, tecnico: l.tecnico, usuario: l.usuario ?? '', fabricante: l.fabricante,
-        modelo: l.modelo, tecnologia: l.tecnologia, potencia_w: l.potenciaW,
-        tension_v: l.tensionV, fotocelda: l.fotocelda, pines_fotocelda: l.pinesFotocelda,
-        temperatura_color_k: l.temperaturaColorK, ip: l.ip, montaje: l.montaje,
+        tecnologia: l.tecnologia, potencia_w: l.potenciaW, fotocelda: l.fotocelda, ip: l.ip, montaje: l.montaje,
+        material_poste: l.materialPoste, numero_transformador: l.numeroTransformador, sector: l.sector,
         estado: l.estado, confianza_ia: l.confianza, origen: l.origen, ubicacion_simulada: l.ubicacionSimulada, jornada_id: l.jornadaId, direccion: l.direccion,
         observaciones: l.observaciones, fecha: l.creadoEn,
       },
@@ -72,7 +70,7 @@ export function aKml(items: Luminaria[], proyecto?: Proyecto): string {
   const marcas = items
     .filter((l) => coordenadaValida(l.latitud, l.longitud))
     .map((l) => {
-      const nombre = l.codigo || l.codigoPoste || [l.fabricante, l.modelo].filter(Boolean).join(' ') || `Luminaria ${l.id}`;
+      const nombre = l.codigo || l.codigoPoste || l.fabricante || `Luminaria ${l.id}`;
       const desc = COLUMNAS.filter(([h]) => !EXCLUIDAS_KML.includes(h))
         .map(([h, f]) => ({ h, v: f(l, proyecto) }))
         .filter((x) => x.v !== '' && x.v != null)

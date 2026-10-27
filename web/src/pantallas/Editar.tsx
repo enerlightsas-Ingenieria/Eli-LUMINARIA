@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { analizarFotosCon } from '@compartido/core/analizador';
 import { coordenadaValida, enlaceMapa, masCercano } from '@compartido/lib/geo';
 import { galeriaPermitida } from '@compartido/lib/politicas';
-import { CAMPOS, LuminariaBorrador } from '@compartido/types';
+import { CAMPOS, LuminariaBorrador, SECTORES } from '@compartido/types';
 import { Camara } from '../componentes/Camara';
 import { avisar, confirmar, dialogo } from '../componentes/dialogos';
 import { Foto } from '../componentes/Foto';
@@ -81,7 +81,7 @@ export function Editar({ id }: { id: string }) {
     try {
       const r = await analizarFotosCon(cargarAjustes, await Promise.all(l.fotos.slice(0, 3).map(base64DeFoto)));
       if (!Object.values(r.caracteristicas).some(Boolean)) { await avisar('IA', 'La IA no pudo identificar datos en estas fotos.'); return; }
-      setL((p) => (p ? { ...p, ...r.caracteristicas, confianza: r.confianza } : p));
+      setL((p) => (p ? { ...p, ...r.caracteristicas, numeroTransformador: p.numeroTransformador, confianza: r.confianza } : p));
       setAviso(undefined);
     } catch (e: any) { await avisar('No se pudo analizar', e.message ?? String(e)); }
     finally { setOcupado(null); }
@@ -91,7 +91,7 @@ export function Editar({ id }: { id: string }) {
     setOcupado('Guardando…');
     try {
       if (l.latitud != null && !coordenadaValida(l.latitud, l.longitud)) { await avisar('Coordenada inválida', 'Revisa la latitud (−90 a 90) y la longitud (−180 a 180).'); return; }
-      await guardarLuminaria(l);
+      await guardarLuminaria({ ...l, materialPoste: /^poste\b/i.test(l.montaje.trim()) ? l.materialPoste : '' });   // el material solo aplica a postes
       await borrarFotos(originales.current.filter((u) => !l.fotos.includes(u)));
       guardado.current = true;
       if (esNuevo) await guardarKv('borrador', '');
@@ -134,7 +134,7 @@ export function Editar({ id }: { id: string }) {
   const copiarDelAnterior = () => {
     if (!anterior) return;
     const copia = Object.fromEntries(CAMPOS.filter((f) => f.key !== 'observaciones' && f.key !== 'estado').map((f) => [f.key, anterior[f.key]]));
-    setL((p) => (p ? { ...p, ...copia } : p));
+    setL((p) => (p ? { ...p, ...copia, sector: anterior.sector ?? '' } : p));
   };
 
   return (
@@ -167,14 +167,15 @@ export function Editar({ id }: { id: string }) {
       </div>
       {terceros && <p className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 8 }}>Modo terceros: la coordenada la registra el GPS y no se edita a mano.</p>}
       {l.precisionM != null && <p className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 10 }}>Precisión GPS ≈ {Math.round(l.precisionM)} m</p>}
-      <Campo etiqueta="Dirección / referencia" valor={l.direccion} alCambiar={(t) => set('direccion', t)} />
+      <Campo etiqueta="Dirección / referencia" valor={l.direccion} alCambiar={(t) => set('direccion', t)} pista="Dirección más cercana, barrio y municipio. Ej. Cra 7 #12-30, Barrio Centro, Soacha" />
+      <Campo etiqueta="Sector" valor={l.sector ?? ''} alCambiar={(t) => set('sector', t)} opciones={SECTORES} soloOpciones />
       {coordenadaValida(l.latitud, l.longitud) && (
         <a className="boton secundario bloque" style={{ textDecoration: 'none' }} href={enlaceMapa(l.latitud!, l.longitud!)} target="_blank" rel="noopener noreferrer"><Icono nombre="mapa" tam={18} />Abrir en mapa</a>
       )}
 
       <Seccion>Características</Seccion>
-      {CAMPOS.map((f) => (
-        <Campo key={f.key} etiqueta={f.label} pista={f.hint} multilinea={f.multiline} numerico={f.numeric} opciones={f.opciones} valor={l[f.key]} alCambiar={(t) => set(f.key, t)} />
+      {CAMPOS.filter((f) => !f.visibleSi || f.visibleSi(l)).map((f) => (
+        <Campo key={f.key} etiqueta={f.label} pista={f.hint} multilinea={f.multiline} numerico={f.numeric} opciones={f.opciones} soloOpciones={f.soloOpciones} valor={l[f.key]} alCambiar={(t) => set(f.key, t)} />
       ))}
 
       <div className="pila" style={{ marginTop: 8 }}>

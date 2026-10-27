@@ -37,7 +37,7 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
       if (filtro === 'pendientes' && l.sincronizado) return false;
       if (filtro === 'sinGps' && l.latitud != null) return false;
       if (!t) return true;
-      return [l.codigo, l.codigoPoste, l.modelo, l.fabricante, l.tecnologia, l.direccion, String(l.id)]
+      return [l.codigo, l.codigoPoste, l.fabricante, l.tecnologia, l.direccion, String(l.id)]
         .some((x) => x.toLowerCase().includes(t));
     });
   }, [items, q, filtro]);
@@ -127,12 +127,12 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
         }
         renderItem={({ item: l }) => (
           <Pressable onPress={() => nav.navigate('Editar', { id: l.id })} onLongPress={() => confirmarBorrado(l)} style={s.card}
-            accessibilityRole="button" accessibilityLabel={`Luminaria ${l.id}, ${l.fabricante} ${l.modelo}`}>
+            accessibilityRole="button" accessibilityLabel={`Luminaria ${l.id}, ${l.fabricante}`}>
             {l.fotos[0] ? <Image source={{ uri: l.fotos[0] }} style={s.thumb} /> : <View style={s.thumb} />}
             <View style={{ flex: 1 }}>
-              <Text style={s.t} numberOfLines={1}>{l.codigo || `#${l.id}`} · {[l.fabricante, l.modelo].filter(Boolean).join(' ') || 'Sin identificar'}</Text>
+              <Text style={s.t} numberOfLines={1}>{l.codigo || `#${l.id}`} · {l.fabricante || 'Sin identificar'}</Text>
               <Text style={s.sub} numberOfLines={1}>
-                {[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.pinesFotocelda && `fotocelda ${l.pinesFotocelda}p`].filter(Boolean).join(' · ') || '—'}
+                {[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.fotocelda === 'Sí' && 'con fotocelda'].filter(Boolean).join(' · ') || '—'}
               </Text>
               {!!l.tecnico && <Text style={[s.sub, { fontSize: 12 }]} numberOfLines={1}>Por {l.tecnico}</Text>}
               <Text style={s.coord} numberOfLines={1}>

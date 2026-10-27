@@ -7,7 +7,7 @@ let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 const CAR_COLS = Object.keys(caracteristicasVacias()) as (keyof Caracteristicas)[];
 const COLS = [
-  'uuid', 'proyectoId', 'creadoEn', 'actualizadoEn', 'fotos', 'latitud', 'longitud', 'precisionM', 'direccion',
+  'uuid', 'proyectoId', 'creadoEn', 'actualizadoEn', 'fotos', 'latitud', 'longitud', 'precisionM', 'direccion', 'sector',
   'codigoPoste', 'codigo', 'tecnico', 'origen', 'ubicacionSimulada', 'jornadaId', 'confianza', ...CAR_COLS,
 ] as const;
 
@@ -23,7 +23,7 @@ const SCHEMA = `
     id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT NOT NULL UNIQUE,
     proyectoId INTEGER NOT NULL REFERENCES proyectos(id) ON DELETE CASCADE,
     creadoEn TEXT NOT NULL, actualizadoEn TEXT NOT NULL, fotos TEXT NOT NULL DEFAULT '[]',
-    latitud REAL, longitud REAL, precisionM REAL, direccion TEXT DEFAULT '', codigoPoste TEXT DEFAULT '', codigo TEXT DEFAULT '', tecnico TEXT DEFAULT '', origen TEXT DEFAULT '', ubicacionSimulada INTEGER NOT NULL DEFAULT 0, jornadaId TEXT DEFAULT '',
+    latitud REAL, longitud REAL, precisionM REAL, direccion TEXT DEFAULT '', sector TEXT DEFAULT '', codigoPoste TEXT DEFAULT '', codigo TEXT DEFAULT '', tecnico TEXT DEFAULT '', origen TEXT DEFAULT '', ubicacionSimulada INTEGER NOT NULL DEFAULT 0, jornadaId TEXT DEFAULT '',
     confianza TEXT DEFAULT '', sincronizado INTEGER NOT NULL DEFAULT 0,
     ${CAR_COLS.map((c) => `${c} TEXT DEFAULT ''`).join(', ')}
   );
@@ -40,6 +40,7 @@ function abrir() {
     if (user_version < 3) await migrarAV3(db);
     if (user_version < 4) await migrarAV4(db);
     if (user_version < 5) await migrarAV5(db);
+    if (user_version < 6) await migrarAV6(db);
     return db;
   })();
   return dbPromise;
@@ -94,6 +95,13 @@ async function migrarAV5(db: SQLite.SQLiteDatabase) {
   await db.execAsync('PRAGMA user_version = 5');
 }
 
+/** v5 → v6: sector, material del poste y n.º del transformador. (Modelo, tensión, pines y temperatura de color quedan sin uso en bases antiguas.) */
+async function migrarAV6(db: SQLite.SQLiteDatabase) {
+  const cols = (await db.getAllAsync<{ name: string }>('PRAGMA table_info(luminarias)')).map((c) => c.name);
+  for (const c of ['sector', 'materialPoste', 'numeroTransformador']) if (!cols.includes(c)) await db.execAsync(`ALTER TABLE luminarias ADD COLUMN ${c} TEXT DEFAULT ''`);
+  await db.execAsync('PRAGMA user_version = 6');
+}
+
 /** SQLite no acepta booleanos: se guardan como 0/1. */
 const aSql = (v: any) => (typeof v === 'boolean' ? (v ? 1 : 0) : v ?? null);
 /** La columna booleana es NOT NULL: un valor ausente cuenta como false. */
@@ -102,6 +110,7 @@ const aSqlCol = (c: string, v: any) => (c === 'ubicacionSimulada' ? (v ? 1 : 0) 
 const aLuminaria = (r: any): Luminaria => ({
   ...r, fotos: JSON.parse(r.fotos || '[]'), sincronizado: !!r.sincronizado,
   ubicacionSimulada: !!r.ubicacionSimulada, origen: r.origen ?? '', jornadaId: r.jornadaId ?? '', codigoPoste: r.codigoPoste ?? '',
+  sector: r.sector ?? '', materialPoste: r.materialPoste ?? '', numeroTransformador: r.numeroTransformador ?? '',
 });
 
 /* ---------- kv ---------- */

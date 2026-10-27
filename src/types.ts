@@ -3,15 +3,17 @@ export type Confianza = 'alta' | 'media' | 'baja';
 /** Características que la IA intenta extraer de la foto (todas opcionales). */
 export interface Caracteristicas {
   fabricante: string;
-  modelo: string;
   tecnologia: string;
   potenciaW: string;
-  tensionV: string;
+  /** Binario: "Sí" o "No". */
   fotocelda: string;
-  pinesFotocelda: string;
-  temperaturaColorK: string;
   ip: string;
+  /** "Poste", "Fachada" u "Otro: <cuál>". */
   montaje: string;
+  /** Solo si el montaje es poste: Concreto, Madera, Metálico, Fibra de vidrio, Fibra de vidrio traslúcido u "Otro: <cuál>". */
+  materialPoste: string;
+  /** Número del transformador que alimenta la luminaria (lo escribe la persona; la IA no lo ve). */
+  numeroTransformador: string;
   estado: string;
   observaciones: string;
 }
@@ -35,7 +37,10 @@ export interface Luminaria extends Caracteristicas {
   latitud: number | null;
   longitud: number | null;
   precisionM: number | null;
+  /** Dirección más cercana, con barrio y municipio. */
   direccion: string;
+  /** Urbano o Rural. */
+  sector: string;
   /** Código del poste (opcional; el que use la empresa). */
   codigoPoste: string;
   /** Código de la luminaria (opcional; el que use la empresa). */
@@ -60,7 +65,7 @@ export type LuminariaBorrador = Omit<Luminaria, 'id' | 'sincronizado'> & { id?: 
 export const TECNOLOGIAS = ['LED', 'Sodio', 'Metal Halide', 'Mercurio', 'Fluorescente', 'Incandescente', 'Halógena', 'Inducción', 'Luz mixta', 'Otra (¿cuál?)'];
 export const PREFIJO_OTRA = 'Otra: ';
 /** Una opción "abierta" (Otra) se marca activa con cualquier texto que empiece por "otra". */
-export const esOpcionAbierta = (opcion: string) => /^otra\b/i.test(opcion);
+export const esOpcionAbierta = (opcion: string) => /^otr[ao]\b/i.test(opcion);
 
 /** Lleva lo que diga la IA (o un dato antiguo) a una de las tecnologías de la lista; lo que no encaje queda como "Otra: …". */
 export function normalizarTecnologia(valor: string): string {
@@ -80,22 +85,68 @@ export function normalizarTecnologia(valor: string): string {
   return PREFIJO_OTRA + v;
 }
 
-export const CAMPOS: { key: keyof Caracteristicas; label: string; hint?: string; multiline?: boolean; numeric?: boolean; opciones?: string[] }[] = [
+export const SECTORES = ['Urbano', 'Rural'];
+export const MONTAJES = ['Poste', 'Fachada', 'Otro (¿cuál?)'];
+export const MATERIALES_POSTE = ['Concreto', 'Madera', 'Metálico', 'Fibra de vidrio', 'Fibra de vidrio traslúcido', 'Otro (¿cuál?)'];
+export const PREFIJO_OTRO = 'Otro: ';
+
+const sinTildes = (t: string) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
+
+/** Fotocelda es Sí/No. Datos antiguos o lo que diga la IA: "Sin fotocelda"/"no" → No; cualquier otra descripción (NEMA, integrada…) → Sí. */
+export function normalizarFotocelda(valor: string): string {
+  const v = valor.trim();
+  if (!v) return '';
+  const k = sinTildes(v);
+  if (k === 'no' || k.startsWith('sin') || k.startsWith('ninguna') || k === 'nohay' || k === 'ausente') return 'No';
+  return 'Sí';
+}
+
+/** Lleva el montaje a Poste, Fachada u "Otro: <cuál>" (un dato antiguo como "Brazo" queda como "Otro: Brazo"). */
+export function normalizarMontaje(valor: string): string {
+  const v = valor.trim();
+  if (!v) return '';
+  const k = sinTildes(v);
+  if (k === 'poste') return 'Poste';
+  if (k === 'fachada') return 'Fachada';
+  if (/^otr[oa]\b/i.test(v)) return /^otr[oa]\s*:\s*\S/i.test(v) ? PREFIJO_OTRO + v.replace(/^otr[oa]\s*:\s*/i, '') : 'Otro';
+  return PREFIJO_OTRO + v;
+}
+
+/** Lleva el material del poste a una opción de la lista; lo que no encaje queda como "Otro: <cuál>". */
+export function normalizarMaterialPoste(valor: string): string {
+  const v = valor.trim();
+  if (!v) return '';
+  const k = sinTildes(v);
+  if (/^otr[oa]\b/i.test(v)) return /^otr[oa]\s*:\s*\S/i.test(v) ? PREFIJO_OTRO + v.replace(/^otr[oa]\s*:\s*/i, '') : 'Otro';
+  const directo = MATERIALES_POSTE.slice(0, -1).find((m) => sinTildes(m) === k);
+  if (directo) return directo;
+  if (k.startsWith('concreto') || k.startsWith('hormigon') || k.startsWith('cemento')) return 'Concreto';
+  if (k.startsWith('madera')) return 'Madera';
+  if (k.startsWith('metal') || k.startsWith('acero') || k.startsWith('hierro')) return 'Metálico';
+  if (k.includes('traslucid') || k.includes('translucid')) return 'Fibra de vidrio traslúcido';
+  if (k.startsWith('fibra')) return 'Fibra de vidrio';
+  return PREFIJO_OTRO + v;
+}
+
+export const CAMPOS: {
+  key: keyof Caracteristicas; label: string; hint?: string; multiline?: boolean; numeric?: boolean; opciones?: string[];
+  /** Solo se elige entre las opciones (sin escribir). */
+  soloOpciones?: boolean;
+  /** El campo solo aparece cuando esto es verdadero (según los demás datos). */
+  visibleSi?: (c: Caracteristicas) => boolean;
+}[] = [
   { key: 'fabricante', label: 'Fabricante', hint: 'Ej. Philips, Schréder, Lumenpulse' },
-  { key: 'modelo', label: 'Modelo / referencia' },
   { key: 'tecnologia', opciones: TECNOLOGIAS, label: 'Tecnología', hint: 'Si es otra, escribe cuál' },
   { key: 'potenciaW', opciones: ['30','50','70','100','150','250','400'], label: 'Potencia (W)', numeric: true },
-  { key: 'tensionV', opciones: ['120','208','220','240','277'], label: 'Tensión (V)', numeric: true },
-  { key: 'fotocelda', opciones: ['Sin fotocelda','NEMA / twist-lock','Integrada','Externa'], label: 'Fotocelda', hint: 'Sin fotocelda, NEMA/twist-lock, integrada, externa' },
-  { key: 'pinesFotocelda', opciones: ['3','5','7'], label: 'Pines de la fotocelda', hint: '3, 5 o 7 pines', numeric: true },
-  { key: 'temperaturaColorK', opciones: ['3000','4000','5000','6500'], label: 'Temperatura de color (K)', numeric: true },
+  { key: 'fotocelda', opciones: ['Sí','No'], soloOpciones: true, label: 'Fotocelda' },
   { key: 'ip', opciones: ['IP54','IP65','IP66','IP67'], label: 'Grado IP' },
-  { key: 'montaje', opciones: ['Poste','Brazo','Suspendida'], label: 'Montaje', hint: 'Poste, brazo, suspendida' },
+  { key: 'montaje', opciones: MONTAJES, label: 'Montaje', hint: 'Poste, fachada u otro (escribe cuál)' },
+  { key: 'materialPoste', opciones: MATERIALES_POSTE, label: 'Material del poste', hint: 'Si es otro, escribe cuál', visibleSi: (c) => /^poste\b/i.test(c.montaje.trim()) },
+  { key: 'numeroTransformador', label: 'N.º del transformador', hint: 'Opcional' },
   { key: 'estado', opciones: ['Bueno','Deteriorado','Apagada','Vandalizada'], label: 'Estado visual', hint: 'Bueno, deteriorado, apagada, vandalizada' },
   { key: 'observaciones', label: 'Observaciones', multiline: true },
 ];
 
 export const caracteristicasVacias = (): Caracteristicas => ({
-  fabricante: '', modelo: '', tecnologia: '', potenciaW: '', tensionV: '', fotocelda: '', pinesFotocelda: '',
-  temperaturaColorK: '', ip: '', montaje: '', estado: '', observaciones: '',
+  fabricante: '', tecnologia: '', potenciaW: '', fotocelda: '', ip: '', montaje: '', materialPoste: '', numeroTransformador: '', estado: '', observaciones: '',
 });

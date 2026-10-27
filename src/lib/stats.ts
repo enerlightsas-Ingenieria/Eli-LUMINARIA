@@ -1,4 +1,4 @@
-import { Luminaria } from '../types';
+import { Luminaria, normalizarFotocelda } from '../types';
 
 export interface Resumen {
   total: number;
@@ -41,6 +41,6 @@ export function resumir(items: Luminaria[]): Resumen {
     sincronizadas: items.filter((l) => l.sincronizado).length,
     potenciaTotalKw: Math.round(items.reduce((a, l) => a + num(l.potenciaW), 0)) / 1000,
     porTecnologia: cuenta(items.map((l) => normalizaTecnologia(l.tecnologia))),
-    porFotocelda: cuenta(items.map((l) => (l.pinesFotocelda.trim() ? `${l.pinesFotocelda.trim()} pines` : l.fotocelda.trim() ? 'Otra' : 'Sin dato'))),
+    porFotocelda: cuenta(items.map((l) => (normalizarFotocelda(l.fotocelda) === 'Sí' ? 'Con fotocelda' : normalizarFotocelda(l.fotocelda) === 'No' ? 'Sin fotocelda' : 'Sin dato'))),
   };
 }

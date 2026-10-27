@@ -1,6 +1,6 @@
 import { ReactNode, useEffect } from 'react';
 import { Icono } from './Icono';
-import { esOpcionAbierta, PREFIJO_OTRA } from '@compartido/types';
+import { esOpcionAbierta, PREFIJO_OTRA, PREFIJO_OTRO } from '@compartido/types';
 
 export function Boton({ texto, onClick, variante = 'primario', deshabilitado, cargando, icono, bloque = true, tipo = 'button' }: {
   texto: string; onClick?: () => void; variante?: 'primario' | 'secundario' | 'peligro'; deshabilitado?: boolean; cargando?: boolean;
@@ -15,9 +15,11 @@ export function Boton({ texto, onClick, variante = 'primario', deshabilitado, ca
 }
 
 /** Campo de texto con opciones rápidas (un toque) para llenar a mano más rápido. */
-export function Campo({ etiqueta, valor, alCambiar, pista, multilinea, numerico, conSigno, secreto, soloLectura, opciones, tipo, autoComplete }: {
+export function Campo({ etiqueta, valor, alCambiar, pista, multilinea, numerico, conSigno, secreto, soloLectura, opciones, soloOpciones, tipo, autoComplete }: {
   etiqueta: string; valor: string; alCambiar: (t: string) => void; pista?: string; multilinea?: boolean; numerico?: boolean;
   conSigno?: boolean; secreto?: boolean; soloLectura?: boolean; opciones?: string[]; tipo?: string; autoComplete?: string;
+  /** Se elige solo entre las opciones (no se muestra la caja de texto). */
+  soloOpciones?: boolean;
 }) {
   const id = `c-${etiqueta.replace(/\W+/g, '-').toLowerCase()}`;
   const comun = {
@@ -27,16 +29,17 @@ export function Campo({ etiqueta, valor, alCambiar, pista, multilinea, numerico,
   return (
     <div className="campo">
       <label htmlFor={id}>{etiqueta}</label>
-      {multilinea
+      {soloOpciones ? null : multilinea
         ? <textarea {...comun} rows={3} />
         : <input {...comun} type={secreto ? 'password' : tipo ?? 'text'} inputMode={conSigno ? 'text' : numerico ? 'decimal' : tipo === 'url' ? 'url' : undefined} />}
       {!!opciones?.length && (
         <div className="fichas" role="group" aria-label={`Opciones para ${etiqueta}`}>
           {opciones.map((o) => {
             const abierta = esOpcionAbierta(o);
-            const activa = abierta ? /^otra\b/i.test(valor.trim()) : valor.trim().toLowerCase() === o.toLowerCase();
+            const prefijo = /^otro\b/i.test(o) ? PREFIJO_OTRO : PREFIJO_OTRA;
+            const activa = abierta ? /^otr[ao]\b/i.test(valor.trim()) : valor.trim().toLowerCase() === o.toLowerCase();
             return <button key={o} type="button" className={`ficha${activa ? ' activa' : ''}`} aria-pressed={activa}
-              onClick={() => { if (activa) alCambiar(''); else { alCambiar(abierta ? PREFIJO_OTRA : o); if (abierta) document.getElementById(id)?.focus(); } }}>{o}</button>;
+              onClick={() => { if (activa) alCambiar(''); else { alCambiar(abierta ? prefijo : o); if (abierta) document.getElementById(id)?.focus(); } }}>{o}</button>;
           })}
         </div>
       )}

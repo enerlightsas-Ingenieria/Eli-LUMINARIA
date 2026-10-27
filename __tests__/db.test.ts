@@ -80,13 +80,13 @@ describe('db', () => {
     const [p] = await db.listarProyectos();
     const ls = await db.listarLuminarias(p.id);
     expect(ls).toHaveLength(1);
-    expect(ls[0]).toMatchObject({ fabricante: 'Lumenpulse', potenciaW: '150', pinesFotocelda: '7', fotos: ['file:///v0.jpg'], latitud: 4.5, longitud: -74.1 });
+    expect(ls[0]).toMatchObject({ fabricante: 'Lumenpulse', potenciaW: '150', fotos: ['file:///v0.jpg'], latitud: 4.5, longitud: -74.1 });
     expect(ls[0].uuid).toHaveLength(36);
     expect(mockMotor.prepare("SELECT name FROM sqlite_master WHERE name='luminarias_v0'").get()).toBeUndefined();
   });
 });
 
-describe('migración v1 → v5', () => {
+describe('migración v1 → v6', () => {
   it('añade tecnico, tombstones y la evidencia de captura a una base v1 sin perder filas', async () => {
     mockMotor = new DatabaseSync(':memory:');
     mockMotor.exec(`
@@ -105,7 +105,7 @@ describe('migración v1 → v5', () => {
     expect(ls[0]).toMatchObject({ marca: 'Schréder', tecnico: '' });
     await db.guardarLuminaria({ ...ls[0], tecnico: 'Ana' });
     expect((await db.listarLuminarias(1))[0].tecnico).toBe('Ana');
-    expect((mockMotor.prepare('PRAGMA user_version').get() as any).user_version).toBe(5);
+    expect((mockMotor.prepare('PRAGMA user_version').get() as any).user_version).toBe(6);
     expect(ls[0]).toMatchObject({ origen: '', ubicacionSimulada: false, jornadaId: '' });
     await db.guardarLuminaria({ ...ls[0], origen: 'camara', ubicacionSimulada: true, jornadaId: 'j9' });
     expect((await db.listarLuminarias(1))[0]).toMatchObject({ origen: 'camara', ubicacionSimulada: true, jornadaId: 'j9' });

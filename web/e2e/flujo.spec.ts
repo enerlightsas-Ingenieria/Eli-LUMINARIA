@@ -57,7 +57,12 @@ test('técnico: configura por enlace, captura con IA, guarda y se sincroniza a l
   expect(imagenes[0].source.data.length).toBeGreaterThan(500);                      // una foto real de la cámara simulada
 
   await expect(page.getByLabel('Fabricante', { exact: true })).toHaveValue('Philips');   // la IA rellenó el formulario
-  await expect(page.getByLabel('Pines de la fotocelda', { exact: true })).toHaveValue('7');
+  await expect(page.getByRole('group', { name: 'Opciones para Fotocelda' }).getByRole('button', { name: 'Sí', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByLabel('Material del poste', { exact: true })).toHaveValue('Concreto');   // con montaje en poste aparece el material
+  await expect(page.getByLabel('Modelo', { exact: true })).toHaveCount(0);                            // campos retirados
+  await expect(page.getByLabel('Tensión (V)', { exact: true })).toHaveCount(0);
+  await page.getByRole('group', { name: 'Opciones para Sector' }).getByRole('button', { name: 'Rural', exact: true }).click();
+  await page.getByLabel('N.º del transformador', { exact: true }).fill('T-123');
   await expect(page.getByLabel('Latitud', { exact: true })).toHaveValue('4.711');
   await expect(page.getByLabel('Longitud', { exact: true })).toHaveValue('-74.0721');
   await page.getByLabel('Código de la luminaria', { exact: true }).fill('P-001');
@@ -66,7 +71,7 @@ test('técnico: configura por enlace, captura con IA, guarda y se sincroniza a l
   await expect(page.getByText('P-001 · Philips')).toBeVisible();
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);   // sincronización automática (3 s después de guardar)
   const fila = filas(b, 'Barrio A')[0];
-  expect(fila).toMatchObject({ Fabricante: 'Philips', 'Código de la luminaria': 'P-001', Técnico: 'Ana', Tecnología: 'LED', 'Pines fotocelda': 7, Latitud: 4.711, Longitud: -74.0721, 'Origen de la foto': 'camara' });
+  expect(fila).toMatchObject({ Fabricante: 'Philips', 'Código de la luminaria': 'P-001', Técnico: 'Ana', Tecnología: 'LED', Fotocelda: 'Sí', Montaje: 'Poste', 'Material del poste': 'Concreto', Sector: 'Rural', 'N.º transformador': 'T-123', Latitud: 4.711, Longitud: -74.0721, 'Origen de la foto': 'camara' });
   await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);                          // ya no figura como pendiente
 });
 
@@ -110,7 +115,9 @@ test('sin conexión: captura manual con opciones rápidas y se envía sola al vo
   await capturar(page, 'manual');
   await page.getByLabel('Fabricante', { exact: true }).fill('Schréder');
   await page.getByRole('group', { name: 'Opciones para Tecnología' }).getByRole('button', { name: 'LED', exact: true }).click();
-  await page.getByRole('group', { name: 'Opciones para Pines de la fotocelda' }).getByRole('button', { name: '7', exact: true }).click();
+  await page.getByRole('group', { name: 'Opciones para Fotocelda' }).getByRole('button', { name: 'No', exact: true }).click();
+  await page.getByRole('group', { name: 'Opciones para Montaje' }).getByRole('button', { name: 'Fachada', exact: true }).click();
+  await expect(page.getByLabel('Material del poste', { exact: true })).toHaveCount(0);                // fachada: no hay material de poste
   await expect(page.getByLabel('Tecnología', { exact: true })).toHaveValue('LED');
   await guardar(page);
   await expect(page.getByText('Pendiente', { exact: true })).toBeVisible();
@@ -119,7 +126,7 @@ test('sin conexión: captura manual con opciones rápidas y se envía sola al vo
 
   await ctx.setOffline(false);                                                       // vuelve la señal
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);
-  expect(filas(b, 'Barrio A')[0]).toMatchObject({ Fabricante: 'Schréder', Tecnología: 'LED', 'Pines fotocelda': 7 });
+  expect(filas(b, 'Barrio A')[0]).toMatchObject({ Fabricante: 'Schréder', Tecnología: 'LED', Fotocelda: 'No', Montaje: 'Fachada', 'Material del poste': '' });
   await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);
 });
 

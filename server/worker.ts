@@ -48,8 +48,7 @@ const MAX_TEXTO_BLOQUE = 3000;
 const MAX_TEXTO_TOTAL = 5000;
 const HERRAMIENTA = 'registrar_luminaria';
 const PROPIEDADES = [
-  'fabricante', 'modelo', 'tecnologia', 'potenciaW', 'tensionV', 'fotocelda', 'pinesFotocelda',
-  'temperaturaColorK', 'ip', 'montaje', 'estado', 'observaciones', 'confianza',
+  'fabricante', 'tecnologia', 'potenciaW', 'fotocelda', 'ip', 'montaje', 'materialPoste', 'estado', 'observaciones', 'confianza',
 ];
 
 const json = (status: number, cuerpo: unknown) =>
