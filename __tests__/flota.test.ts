@@ -1170,6 +1170,20 @@ describe('otras IAs (Groq, OpenRouter, Mistral, Qwen, Kimi, ChatGPT, otra): comp
     expect(sug.modelos.join()).not.toMatch(/orpheus|playai|whisper/);
   });
 
+  it('un modelo que rechaza la herramienta forzada se reintenta con tool_choice "auto"; y el rechazo del probar/elegir muestra el motivo real del proveedor', async () => {
+    const m = montar({ GROQ_API_KEY: 'gsk_clave_larga' }, (url, init) => {
+      if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'qwen/qwen3.8-27b' }] }), { status: 200 });
+      if (!url.endsWith('/chat/completions')) return undefined;
+      const b = JSON.parse(init.body);
+      if (b.model.includes('gpt-oss')) return new Response('{"error":{"message":"content must be a string (images unsupported)"}}', { status: 400 });
+      return typeof b.tool_choice === 'object' ? new Response('{"error":{"message":"tool_choice with a named function is not supported with reasoning"}}', { status: 400 }) : llamadaOk();
+    });
+    const ok = await m.ia({ accion: 'modelo', proveedor: 'groq', modelo: 'qwen/qwen3.8-27b' });
+    expect(ok.status).toBe(200);
+    const mal = await m.ia({ accion: 'modelo', proveedor: 'groq', modelo: 'openai/gpt-oss-20b' });
+    expect(mal.status).toBe(400); expect(mal.j.error).toContain('images unsupported');
+  });
+
   it('si el proveedor no ofrece ningún modelo que parezca de visión: no se adivina, se muestra el error real del modelo por defecto', async () => {
     const m = montar({ GROQ_API_KEY: 'gsk_clave_larga' }, (url) => {
       if (url.endsWith('/models')) return new Response(JSON.stringify({ data: [{ id: 'canopylabs/orpheus-arabic-saudi' }, { id: 'llama-3.1-8b-instant' }] }), { status: 200 });

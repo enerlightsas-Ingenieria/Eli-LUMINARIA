@@ -430,9 +430,18 @@ async function modeloOpenAI(id: string, env: any, llamar: typeof fetch): Promise
  */
 async function generarConOpenAI(id: string, cuerpoAnthropic: any, env: any, llamar: typeof fetch, forzar?: string): Promise<{ r: Response; modelo: string; autoElegido: boolean }> {
   const { modelo, origen } = forzar ? { modelo: forzar, origen: 'admin' as const } : await modeloOpenAI(id, env, llamar);
-  const enviar = (m: string) => llamar(`${baseDe(env, id)}/chat/completions`, {
-    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${claveDe(env, id)}` }, body: JSON.stringify(aOpenAI(cuerpoAnthropic, m)),
+  const post = (b: any) => llamar(`${baseDe(env, id)}/chat/completions`, {
+    method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${claveDe(env, id)}` }, body: JSON.stringify(b),
   });
+  const enviar = async (m: string) => {
+    const b = aOpenAI(cuerpoAnthropic, m);
+    const r = await post(b);
+    if (r.status !== 400) return r;
+    const t = await r.clone().text().catch(() => '');
+    if (!/tool_choice|tool choice|forced|required/i.test(t)) return r;   // algunos modelos (razonamiento) no admiten forzar la herramienta: se reintenta dejándola a su elección
+    void r.body?.cancel().catch(() => {});
+    return post({ ...b, tool_choice: 'auto' });
+  };
   const sinModelo = (m: string) => new Response(JSON.stringify({ error: { message: `No se encontró un modelo con visión en ${infoDe(id)?.nombre}${m ? ` (${m} no existe)` : ''}. Elige uno en la lista.` } }), { status: 404 });
   const buscar = async (excluir: string) => candidatosVision(await listarModelosOpenAI(id, env, llamar)).map((m) => m.id).filter((m) => m !== excluir).slice(0, 2);
 
@@ -682,7 +691,10 @@ async function administrarIA(request: Request, entorno: any, llamar: typeof fetc
       const g = id === 'gemini' ? await generarConGemini(cuerpoPrueba(), env, llamar, m) : await generarConOpenAI(id, cuerpoPruebaBase(), env, llamar, m);
       const cuerpo = await g.r.clone().json().catch(() => null);
       const sinHerramienta = g.r.ok && !(id === 'gemini' ? deGemini(cuerpo) : deOpenAI(cuerpo));
-      if (g.r.status === 400 || g.r.status === 404 || sinHerramienta) return json(400, { ok: false, error: `El modelo ${m} no sirve para analizar fotos (${g.r.ok ? 'no usa herramientas o no acepta imágenes' : 'error ' + g.r.status}). Elige otro de la lista.` });
+      if (g.r.status === 400 || g.r.status === 404 || sinHerramienta) {
+        const motivo = SIN_CLAVES(String(cuerpo?.error?.message ?? cuerpo?.error ?? '').slice(0, 300), env);
+        return json(400, { ok: false, error: `El modelo ${m} no sirve para analizar fotos (${g.r.ok ? 'no usa herramientas o no acepta imágenes' : 'error ' + g.r.status}${motivo ? ': ' + motivo : ''}). Elige otro de la lista.` });
+      }
       await g.r.body?.cancel().catch(() => {});
     }
     const fallo = await guardarConfig(id === 'gemini' ? 'gemini_modelo' : `modelo_${id}`, m);
