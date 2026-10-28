@@ -762,9 +762,11 @@ function proyectosInfo() {
 }
 
 function nuevoIdProyecto() { return 'p' + Utilities.getUuid().replace(/-/g, '').substring(0, 10); }
-function proyectoPorId(id) {
-  var todos = proyectosInfo();
-  for (var i = 0; i < todos.length; i++) if (todos[i].id === String(id)) return todos[i];
+function proyectoPorId(id) {   // ligero (se usa en cada envío): solo lee _Proyectos, sin recorrer las pestañas
+  var h = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_PROYECTOS);
+  if (!h || h.getLastRow() < 2) return null;
+  var filas = h.getRange(2, 1, h.getLastRow() - 1, 2).getValues();
+  for (var i = 0; i < filas.length; i++) if (String(filas[i][0]) === String(id)) return { id: String(filas[i][0]), nombre: String(filas[i][1]) };
   return null;
 }
 function buscarProyecto(d) {

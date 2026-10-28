@@ -23,7 +23,12 @@ async function llamarProxy(ruta: string, cuerpo: object, timeoutMs = 15000): Pro
   if (!p) throw new Error('La app aún no está configurada con el servidor de tu empresa.');
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const r = await fetch(`${p.base}${ruta}`, { method: 'POST', headers: { 'x-api-key': p.clave, 'content-type': 'text/plain;charset=utf-8' }, body: JSON.stringify(cuerpo), signal: ctl.signal });
+    let r: Response;
+    try { r = await fetch(`${p.base}${ruta}`, { method: 'POST', headers: { 'x-api-key': p.clave, 'content-type': 'text/plain;charset=utf-8' }, body: JSON.stringify(cuerpo), signal: ctl.signal }); }
+    catch (e: any) {
+      if (e?.name === 'AbortError' || ctl.signal.aborted) throw Object.assign(new Error('El servidor tardó demasiado en responder (la hoja de Google puede estar lenta u ocupada). Si era un cambio, puede haberse aplicado: espera un momento, mira si cambió y, si no, inténtalo de nuevo.'), { estado: 0, tiempoAgotado: true });
+      throw Object.assign(new Error('No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.'), { estado: 0 });
+    }
     const j = await r.json().catch(() => null);
     if (r.status === 401) throw Object.assign(new Error('Esta cuenta no tiene permiso para esto.'), { estado: 401 });
     if (!r.ok || !j?.ok) throw Object.assign(new Error(j?.error ?? `El servidor respondió ${r.status}.`), { estado: r.status });
@@ -80,18 +85,18 @@ async function alinearProyectos(j: any): Promise<number> {
 export type RefProyecto = { id?: string; nombre: string };
 
 export async function guardarProyectoDelEquipo(p: RefProyecto & { nuevoNombre: string; cliente: string; notas: string }): Promise<void> {
-  const j = await llamarProxy('/sistema', { accion: 'guardar_proyecto', id: p.id, nombreAnterior: p.nombre, nombre: p.nuevoNombre, cliente: p.cliente, notas: p.notas }, 20000);
+  const j = await llamarProxy('/sistema', { accion: 'guardar_proyecto', id: p.id, nombreAnterior: p.nombre, nombre: p.nuevoNombre, cliente: p.cliente, notas: p.notas }, 60000);
   if (Array.isArray(j.proyectos)) await conciliarProyectosInfo(j.proyectos);
 }
 
 export async function activarProyectoDelEquipo(p: RefProyecto, activo: boolean): Promise<void> {
-  const j = await llamarProxy('/sistema', { accion: 'activar_proyecto', id: p.id, nombre: p.nombre, activo }, 20000);
+  const j = await llamarProxy('/sistema', { accion: 'activar_proyecto', id: p.id, nombre: p.nombre, activo }, 60000);
   if (Array.isArray(j.proyectos)) await conciliarProyectosInfo(j.proyectos);
 }
 
 /** Elimina el proyecto para TODO el equipo: pestaña, filas y fotos de la hoja. */
 export async function eliminarProyectoDelEquipo(p: RefProyecto): Promise<void> {
-  await llamarProxy('/sistema', { accion: 'eliminar_proyecto', id: p.id, nombre: p.nombre }, 30000);
+  await llamarProxy('/sistema', { accion: 'eliminar_proyecto', id: p.id, nombre: p.nombre }, 120000);
 }
 
 /** Dirección del servidor de la empresa: la que trae la web publicada (servidor.json); si falta, se pide a mano al entrar. */
