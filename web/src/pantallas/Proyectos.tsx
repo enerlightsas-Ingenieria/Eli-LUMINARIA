@@ -6,9 +6,9 @@ import type { Proyecto } from '@compartido/types';
 import { avisar, confirmar } from '../componentes/dialogos';
 import { Boton, Cabecera, Campo, Ficha, Hoja, Seccion, Tarjeta } from '../componentes/ui';
 import { useApp } from '../contexto/App';
-import { borrarFotos, borrarProyecto, crearProyecto, editarProyecto } from '../servicios/almacen';
+import { borrarFotos, borrarProyecto, editarProyecto } from '../servicios/almacen';
 import { exportar, Formato } from '../servicios/exportar';
-import { activarProyectoDelEquipo, eliminarProyectoDelEquipo, guardarProyectoDelEquipo } from '../servicios/identidad';
+import { activarProyectoDelEquipo, crearProyectoDelEquipo, eliminarProyectoDelEquipo, guardarProyectoDelEquipo } from '../servicios/identidad';
 import { sincronizacion } from '../servicios/nucleo';
 
 function Barras({ datos, max }: { datos: { nombre: string; cantidad: number }[]; max: number }) {
@@ -37,9 +37,11 @@ export function Proyectos() {
     const e = editando;
     if (!e.id) {   // proyecto nuevo (solo administradores): aparece en la hoja al sincronizar
       if (!esAdmin) { await avisar('Sin permiso', 'Solo el administrador puede crear proyectos.'); return; }
-      setEditando(null);
-      await activar(await crearProyecto(e.nombre!, e.cliente ?? '', e.notas ?? ''));
-      await refrescar();
+      try {
+        const id = await crearProyectoDelEquipo({ nombre: e.nombre!.trim(), cliente: (e.cliente ?? '').trim(), notas: (e.notas ?? '').trim() });
+        setEditando(null);
+        if (id) await activar(id); else await refrescar();
+      } catch (err: any) { await avisar('No se pudo crear', `${err.message ?? err}\n\nNecesitas conexión: el proyecto se crea en la hoja de Google.`); }
       return;
     }
     if (!esAdmin) { await avisar('Sin permiso', 'Solo el administrador puede cambiar los datos de un proyecto.'); return; }

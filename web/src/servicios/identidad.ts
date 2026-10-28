@@ -3,6 +3,7 @@ import { codificar, type ConfigFlota } from '@compartido/lib/config';
 import { cargarAjustes, guardarAjustes } from './ajustes';
 import { dejarAviso, fijarClaveDeSesion, guardarVerificador, olvidarVerificador, verificarLocal } from './sesion';
 import { conciliarProyectos, conciliarProyectosInfo, ProyectoRemoto } from './almacen';
+import { listarProyectos } from './almacen';
 import { asegurarProyectos } from './configuracion';
 
 export interface Usuario { nombre: string; usuario: string; rol: Rol; clave: string; activo: boolean; terceros?: boolean; telefono?: string }
@@ -83,6 +84,14 @@ async function alinearProyectos(j: any): Promise<number> {
 
 /* Proyectos compartidos: solo el administrador los cambia (el servidor lo comprueba). Necesitan conexión: si no, el cambio se perdería o el proyecto reaparecería. */
 export type RefProyecto = { id?: string; nombre: string };
+
+/** Crea un proyecto en la hoja (la única forma de que exista uno nuevo) y lo trae a este dispositivo. Devuelve su id local. */
+export async function crearProyectoDelEquipo(p: { nombre: string; cliente: string; notas: string }): Promise<number | null> {
+  const j = await llamarProxy('/sistema', { accion: 'crear_proyecto', nombre: p.nombre, cliente: p.cliente, notas: p.notas }, 60000);
+  if (Array.isArray(j.proyectos)) await conciliarProyectosInfo(j.proyectos);
+  const creado = (await listarProyectos()).find((x) => x.nombre.trim().toLowerCase() === p.nombre.trim().toLowerCase());
+  return creado?.id ?? null;
+}
 
 export async function guardarProyectoDelEquipo(p: RefProyecto & { nuevoNombre: string; cliente: string; notas: string }): Promise<void> {
   const j = await llamarProxy('/sistema', { accion: 'guardar_proyecto', id: p.id, nombreAnterior: p.nombre, nombre: p.nuevoNombre, cliente: p.cliente, notas: p.notas }, 60000);

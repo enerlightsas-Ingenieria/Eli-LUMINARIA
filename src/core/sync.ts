@@ -21,6 +21,8 @@ export interface DepsSync {
     guardarKv(k: string, v: string): Promise<void>;
     listarProyectos(): Promise<Proyecto[]>;
   };
+  /** Se llama cuando el servidor dice que el proyecto ya no existe (lo eliminó el administrador): quitarlo de este dispositivo. */
+  alEliminarProyecto?(proyecto: Proyecto): Promise<void>;
   cargarAjustes(): Promise<Ajustes>;
   leerFoto(uri: string): Promise<string>;
   /** Foto pequeña (JPEG en base64) que viaja con el registro para que todos tengan una referencia; opcional. */
@@ -91,6 +93,16 @@ export function crearSincronizador(d: DepsSync) {
   async function sincronizar(proyecto: Proyecto, alProgreso?: (hechas: number, total: number) => void): Promise<ResultadoSync> {
     const a = await d.cargarAjustes();
     if (!a.syncUrl) throw new Error('Configura la URL de sincronización en Ajustes.');
+    try { return await sincronizarProyecto(a, proyecto, alProgreso); }
+    catch (e: any) {
+      if (!/PROYECTO_NO_EXISTE/.test(e?.message ?? '')) throw e;
+      // El administrador eliminó el proyecto (o nunca existió): nada ni nadie lo recrea. Se quita de este dispositivo.
+      await d.alEliminarProyecto?.(proyecto);
+      throw new Error(`El proyecto "${proyecto.nombre}" fue eliminado por el administrador y se quitó de este dispositivo.`);
+    }
+  }
+
+  async function sincronizarProyecto(a: Ajustes, proyecto: Proyecto, alProgreso?: (hechas: number, total: number) => void): Promise<ResultadoSync> {
     const subida = await enviar(a, proyecto, alProgreso);
     try {
       const bajada = await descargar(a, proyecto);

@@ -17,10 +17,16 @@ export const post = (a: Ajustes, cuerpo: object, timeoutMs?: number) => postServ
 
 export const analizarFotos = (base64s: string[], cancelar?: AbortSignal) => analizarFotosCon(cargarAjustes, base64s, cancelar);
 
-// Los proyectos desactivados no se sincronizan ni se muestran
-const almacenActivo = { ...almacen, listarProyectos: async () => (await almacen.listarProyectos()).filter((p) => p.activo !== false) };
+// Solo se sincronizan los proyectos que existen en la hoja (tienen id) y están activos: ni los desactivados ni uno sin id (nunca se crea nada al sincronizar)
+const almacenActivo = { ...almacen, listarProyectos: async () => (await almacen.listarProyectos()).filter((p) => p.activo !== false && !!p.idHoja) };
 
-export const sincronizacion = crearSincronizador({ almacen: almacenActivo, cargarAjustes, leerFoto: base64DeFoto, leerMiniatura: miniaturaDeFoto, post });
+/** El servidor dijo que el proyecto ya no existe: se borra de este dispositivo (con sus fotos) y la pantalla se actualiza. */
+async function quitarProyectoEliminado(p: import('@compartido/types').Proyecto) {
+  await almacen.borrarFotos(await almacen.borrarProyecto(p.id));
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('eli-proyectos'));
+}
+
+export const sincronizacion = crearSincronizador({ almacen: almacenActivo, alEliminarProyecto: quitarProyectoEliminado, cargarAjustes, leerFoto: base64DeFoto, leerMiniatura: miniaturaDeFoto, post });
 
 export const jornada = crearJornada({
   almacen,

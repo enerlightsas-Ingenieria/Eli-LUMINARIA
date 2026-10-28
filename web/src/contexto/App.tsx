@@ -81,6 +81,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     })().catch(() => {});
   }, [listo, ajustes.apiKey, cargar]);
 
+  // Si la sincronización descubre que un proyecto ya no existe y lo quita de este dispositivo, se actualiza la pantalla
+  useEffect(() => {
+    const f = () => { cargar(); };
+    window.addEventListener('eli-proyectos', f);
+    return () => window.removeEventListener('eli-proyectos', f);
+  }, [cargar]);
+
   // Al volver el internet se vuelve a preguntar quién es esta cuenta (así se notan bajas y cambios de rol hechos mientras no había señal).
   useEffect(() => {
     if (!listo || !ajustes.apiKey) return;

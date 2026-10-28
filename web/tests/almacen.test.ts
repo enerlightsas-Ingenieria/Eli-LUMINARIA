@@ -239,3 +239,13 @@ describe('conciliar proyectos con ids (renombrar, desactivar y eliminar sin dupl
     expect((await db.listarProyectos()).map((p) => p.nombre)).toEqual(['Otro']);
   });
 });
+
+describe('proyectos locales vacíos que la hoja no conoce', () => {
+  it('se quitan cuando el servidor ya trae los proyectos reales (nunca se crean al sincronizar); uno con registros se conserva', async () => {
+    await db.crearProyecto('Inventado');                 // vacío y sin id
+    const c = await db.crearProyecto('Con datos');
+    await db.guardarLuminaria(borrador(c));
+    await db.conciliarProyectosInfo([{ id: 'p1', nombre: 'Real', cliente: '', notas: '', activo: true }]);
+    expect((await db.listarProyectos()).map((p) => p.nombre).sort()).toEqual(['Con datos', 'Real']);   // General e Inventado sobran
+  });
+});

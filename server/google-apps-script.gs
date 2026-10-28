@@ -18,6 +18,7 @@
  */
 var TOKEN = 'CAMBIA-ESTE-TOKEN';           // el mismo que pondrás en la app (Ajustes → Token secreto)
 var CARPETA_FOTOS = 'ELI-LUMINARIA Fotos';  // carpeta de Drive para las fotos (se crea sola)
+var CREAR_AL_ENVIAR = false;                 // NO tocar: un envío o una descarga jamás crean proyectos (solo el administrador, con la acción proyecto_crear). Las pruebas lo cambian.
 var TOKEN_ADMIN = 'CAMBIA-ESTE-TOKEN-ADMIN'; // SOLO para ti: abre el mapa en vivo del equipo (distinto del token del equipo)
 var MINUTOS_SIN_SENAL = 15;                  // una jornada activa sin latidos por más de esto se muestra "Sin señal"
 // Auditoría de capturas (modo terceros): umbrales de las alertas de la columna "Alertas"
@@ -62,7 +63,7 @@ function doPost(e) {
   try {
     var d = JSON.parse(e.postData.contents);
     // 'equipo' y la administración de usuarios exigen TOKEN_ADMIN; todo lo demás, el token del equipo
-    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'proyecto_guardar', 'proyecto_activar', 'proyecto_eliminar', 'config_guardar', 'ia_clave_guardar', 'ia_claves'].indexOf(d.accion) >= 0;
+    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'proyecto_crear', 'proyecto_guardar', 'proyecto_activar', 'proyecto_eliminar', 'config_guardar', 'ia_clave_guardar', 'ia_claves'].indexOf(d.accion) >= 0;
     var esAdmin = soloAdmin && d.token === TOKEN_ADMIN;
     if (soloAdmin ? !esAdmin : d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' }); // las acciones de administración NO sirven con el token del equipo
     // Las consultas que solo leen usuarios o configuración NO esperan el candado: así no se hace cola detrás de los envíos y no se agota la espera.
@@ -81,11 +82,12 @@ function doPost(e) {
     if (d.accion === 'usuarios_listar') return salida({ ok: true, usuarios: listarUsuarios() });
     if (d.accion === 'usuarios_guardar') return salida(guardarUsuario(d));
     if (d.accion === 'usuarios_borrar') return salida(borrarUsuario(d));
+    if (d.accion === 'proyecto_crear') return salida(crearProyecto(d));
     if (d.accion === 'proyecto_guardar') return salida(guardarProyecto(d));
     if (d.accion === 'proyecto_activar') return salida(activarProyecto(d));
     if (d.accion === 'proyecto_eliminar') return salida(eliminarProyecto(d));
-    var hoja = obtenerHoja(d.proyecto, d.soloExistentes === true);
-    if (!hoja) return salida({ ok: false, error: 'El proyecto no existe (o fue eliminado). Solo el administrador crea proyectos: pídele que lo cree.' });
+    var hoja = obtenerHoja(d.proyecto, !CREAR_AL_ENVIAR);   // enviar o descargar NUNCA crea una pestaña: así un teléfono atrasado no puede recrear un proyecto eliminado
+    if (!hoja) return salida({ ok: false, codigo: 'PROYECTO_NO_EXISTE', error: 'PROYECTO_NO_EXISTE · El proyecto no existe o fue eliminado por el administrador. Pídele que lo cree.' });
 
     if (d.accion === 'listar') return salida({ ok: true, ahora: ahora, luminarias: listar(hoja, d.desde || '') });
 
@@ -781,6 +783,19 @@ function agregarFilaProyecto(nombre, cliente) {
   var filas = h.getLastRow() >= 2 ? h.getRange(2, 1, h.getLastRow() - 1, 5).getValues() : [];
   for (var i = 0; i < filas.length; i++) if (minusculas(filas[i][1]) === minusculas(nombre)) return;
   h.appendRow([nuevoIdProyecto(), nombre, String(cliente === undefined || cliente === null ? '' : cliente).substring(0, 120), '', 'si']);
+}
+
+/** Crea un proyecto (la ÚNICA forma de que exista una pestaña nueva): solo el administrador. */
+function crearProyecto(d) {
+  var nombre = nombreLimpio(d.nombre);
+  if (!nombre) return { ok: false, error: 'Escribe un nombre para el proyecto.' };
+  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  if (buscarHoja(libro, nombre)) return { ok: false, error: 'Ya existe un proyecto con ese nombre.' };
+  hojaProyectos();                                                    // para que la fila del proyecto se cree junto con la pestaña
+  obtenerHoja({ nombre: nombre, cliente: d.cliente }, false);
+  var p = buscarProyecto({ nombre: nombre });
+  if (p) hojaProyectos().getRange(p.fila, 3, 1, 2).setValues([[textoSeguro(String(d.cliente === undefined || d.cliente === null ? '' : d.cliente).substring(0, 120)), textoSeguro(String(d.notas === undefined || d.notas === null ? '' : d.notas).substring(0, 500))]]);
+  return { ok: true, proyectos: proyectosInfo().map(quitarFila) };
 }
 
 /** Cambia nombre, cliente y notas de un proyecto (el nombre cambia la pestaña: nadie crea un proyecto nuevo). */

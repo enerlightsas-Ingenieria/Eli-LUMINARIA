@@ -742,6 +742,9 @@ async function administrarSistema(request: Request, env: any, llamar: typeof fet
   if (c?.accion === 'eliminar_proyecto' && idOk(c.id) && txt(c.nombre, 120) && (c.id || (typeof c.nombre === 'string' && c.nombre.trim()))) {
     return haciaHojas({ accion: 'proyecto_eliminar', id: c.id, nombre: typeof c.nombre === 'string' ? c.nombre.trim() : undefined }, env.SYNC_TOKEN_ADMIN, env, llamar);
   }
+  if (c?.accion === 'crear_proyecto' && typeof c.nombre === 'string' && c.nombre.trim() && c.nombre.length <= 120 && txt(c.cliente, 120) && txt(c.notas, 500)) {
+    return haciaHojas({ accion: 'proyecto_crear', nombre: c.nombre.trim(), cliente: c.cliente, notas: c.notas }, env.SYNC_TOKEN_ADMIN, env, llamar);
+  }
   if (c?.accion === 'guardar_proyecto' && idOk(c.id) && txt(c.nombreAnterior, 120) && typeof c.nombre === 'string' && c.nombre.length <= 120 && txt(c.cliente, 120) && txt(c.notas, 500) && (c.id || typeof c.nombreAnterior === 'string')) {
     return haciaHojas({ accion: 'proyecto_guardar', id: c.id, nombreAnterior: c.nombreAnterior, nombre: c.nombre, cliente: c.cliente, notas: c.notas }, env.SYNC_TOKEN_ADMIN, env, llamar);
   }
@@ -816,7 +819,7 @@ async function sincronizar(request: Request, env: any, llamar: typeof fetch, qui
   delete c.token;                                  // el cliente no puede imponer el token del script
   delete c.por;                                    // ni declarar quién es: el autor lo sella el servidor
   if (c.accion === undefined) olvidarProyectos();   // un envío puede crear la pestaña de un proyecto
-  c.soloExistentes = quien.rol !== 'admin';        // solo los administradores crean proyectos (una pestaña nueva); el resto trabaja en los que ya existen
+  delete c.soloExistentes;                         // enviar o descargar nunca crea proyectos (lo decide el script): solo el administrador, con 'crear_proyecto' en /sistema
   if (c.accion === 'latido') c.tecnico = quien.nombre;   // la presencia se atribuye al dueño de la clave, no a lo que diga el cliente
   if (c.accion === undefined) {
     c.por = { usuario: quien.usuario, nombre: quien.nombre };
@@ -863,7 +866,7 @@ export const olvidarProyectos = () => { cacheProyectos = new WeakMap(); };
 interface InfoProyecto { id: string; nombre: string; cliente: string; notas: string; activo: boolean }
 async function proyectosDeLaHoja(env: any, llamar: typeof fetch): Promise<{ proyectos: string[]; proyectosInfo?: InfoProyecto[] } | {}> {
   if (!env.SYNC_URL || !env.SYNC_TOKEN) return {};
-  const ttl = Math.max(0, Number(env.PROYECTOS_CACHE_SEG ?? 20)) * 1000;
+  const ttl = Math.max(0, Number(env.PROYECTOS_CACHE_SEG ?? 10)) * 1000;
   const hit = cacheProyectos.get(env);
   if (ttl && hit && hit.hasta > Date.now()) return hit.v;
   const v = await proyectosDeLaHojaSinCache(env, llamar);

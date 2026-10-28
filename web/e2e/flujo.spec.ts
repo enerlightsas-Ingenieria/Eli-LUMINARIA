@@ -353,7 +353,7 @@ test('administración de la IA: se ven TODOS los modelos (se pueden alcanzar y e
 
 test('ingreso con usuario y clave (sin enlaces): el administrador crea la cuenta, la persona entra, ve los proyectos y puede salir', async ({ browser }) => {
   const b = crearBackend();
-  await b.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'listar', proyecto: { nombre: 'Barrio A' }, desde: '' }) });   // proyecto que ya existe en la hoja
+  await b.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN-ADMIN', accion: 'proyecto_crear', nombre: 'Barrio A' }) });   // proyecto que ya existe en la hoja
 
   const admin = await telefono(browser, b);
   await configurar(admin.page, enlace({ token: 'tokSup' }));
@@ -652,7 +652,7 @@ test('otras IAs: el administrador pega la clave de Groq desde la app, la elige c
 
 test('proyectos: solo el administrador los edita; renombrar no crea otro; desactivar los oculta a todos; eliminar borra la hoja', async ({ browser }) => {
   const b = crearBackend();
-  for (const nombre of ['Barrio A', 'Zona 2']) await b.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'listar', proyecto: { nombre }, desde: '' }) });   // proyectos que ya existen en la hoja
+  for (const nombre of ['Barrio A', 'Zona 2']) await b.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN-ADMIN', accion: 'proyecto_crear', nombre }) });   // proyectos que ya existen en la hoja
   const admin = await telefono(browser, b); const ana = await telefono(browser, b);
   await configurar(admin.page, enlace({ token: 'tokSup', proyectos: ['Barrio A', 'Zona 2'] }));
   await configurar(ana.page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A', 'Zona 2'] }));
@@ -698,4 +698,19 @@ test('proyectos: solo el administrador los edita; renombrar no crea otro; desact
   expect(b.gs.hoja('_Proyectos')!.filas.map((f: any[]) => f[1]).sort()).toEqual(['Nombre', 'Zona 2']);   // sin el eliminado
   await alDia(ana.page);
   await expect(ana.page.getByRole('button', { name: /Proyecto Barrio Nuevo/ })).toHaveCount(0);
+
+  // crear: solo el administrador, y se crea en la hoja (enviar datos nunca crea proyectos)
+  await admin.page.getByRole('button', { name: 'Nuevo proyecto' }).click();
+  await admin.page.getByLabel('Nombre', { exact: true }).fill('Zona 9');
+  await admin.page.getByLabel('Cliente / municipio').fill('Chía');
+  await admin.page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  await expect(admin.page.getByRole('button', { name: /Proyecto Zona 9/ })).toBeVisible();
+  expect(b.gs.hoja('Zona 9')).toBeDefined();
+  await alDia(ana.page);
+  await expect(ana.page.getByRole('button', { name: /Proyecto Zona 9/ })).toBeVisible();
+  await admin.page.getByRole('button', { name: 'Nuevo proyecto' }).click();                      // repetido: el servidor lo rechaza y no se duplica
+  await admin.page.getByLabel('Nombre', { exact: true }).fill('zona 9');
+  await admin.page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  await expect(dialogo(admin.page)).toContainText('Ya existe un proyecto con ese nombre');
+  await boton(admin.page, 'Entendido');
 });
