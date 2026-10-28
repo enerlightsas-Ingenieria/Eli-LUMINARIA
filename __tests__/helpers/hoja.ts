@@ -46,14 +46,30 @@ export class Hoja {
   }
 }
 
-/** `envioCrea`: las pruebas antiguas crean proyectos con solo enviar datos (el script de producción NO lo hace: CREAR_AL_ENVIAR = false). */
-export function crearServidor(rutaScript?: string, opciones: { envioCrea?: boolean } = {}) {
+/** `carpetaFotos`: usa la carpeta de fotos por ID (una por proyecto) como en producción; por defecto las pruebas antiguas usan la carpeta suelta.
+ *  `envioCrea`: las pruebas antiguas crean proyectos con solo enviar datos (el script de producción NO lo hace: CREAR_AL_ENVIAR = false). */
+export function crearServidor(rutaScript?: string, opciones: { envioCrea?: boolean; carpetaFotos?: boolean } = {}) {
   const hojas: Hoja[] = [];
   const fotosGuardadas: string[] = [];                            // archivos que el script mandó a Drive
+  // Drive simulado por ID (la carpeta "fotos" de producción y lo que cuelga de ella)
+  interface Arch { id: string; nombre: string; papelera: boolean }
+  interface Carp { id: string; nombre: string; papelera: boolean; carpetas: Carp[]; archivos: Arch[] }
+  const raices = new Map<string, Carp>(); const todosArchivos = new Map<string, Arch>(); let seq = 0;
+  const iter = <T>(l: T[]) => { let i = 0; return { hasNext: () => i < l.length, next: () => l[i++] }; };
+  const archivoApi = (a: Arch): any => ({ getId: () => a.id, getName: () => a.nombre, setName: (n: string) => { a.nombre = n; }, setTrashed: (v: boolean) => { a.papelera = v; }, getUrl: () => 'https://drive.google.com/file/d/' + a.id + '/view' });
+  const carpetaArbol = (c: Carp): any => ({
+    getId: () => c.id, getName: () => c.nombre, setName: (n: string) => { c.nombre = n; }, setTrashed: (v: boolean) => { c.papelera = v; },
+    getFoldersByName: (n: string) => iter(c.carpetas.filter((x) => !x.papelera && x.nombre === n).map(carpetaArbol)),
+    getFolders: () => iter(c.carpetas.filter((x) => !x.papelera).map(carpetaArbol)),
+    getFiles: () => iter(c.archivos.filter((x) => !x.papelera).map(archivoApi)),
+    createFolder: (n: string) => { const h: Carp = { id: 'c' + ++seq, nombre: n, papelera: false, carpetas: [], archivos: [] }; c.carpetas.push(h); return carpetaArbol(h); },
+    createFile: (b: { nombre: string }) => { const a: Arch = { id: 'archivo' + String(++seq).padStart(25, '0'), nombre: b.nombre, papelera: false }; c.archivos.push(a); todosArchivos.set(a.id, a); fotosGuardadas.push(b.nombre); return archivoApi(a); },
+  });
   const carpetaApi = (_c: any) => ({ getFilesByName: () => ({ hasNext: () => false }), createFile: (b: { nombre: string }) => { fotosGuardadas.push(b.nombre); return { getUrl: () => 'https://drive.test/' + b.nombre }; } });
   const carpetas: { nombre: string; papelera: boolean }[] = [];   // carpetas de Drive simuladas (las de fotos)
   const libro = { getSheets: () => hojas, insertSheet: (n: string) => { const h = new Hoja(n); hojas.push(h); return h; }, deleteSheet: (h: Hoja) => { hojas.splice(hojas.indexOf(h), 1); } };
   let fuente = fs.readFileSync(rutaScript ?? path.join(__dirname, '../../server/google-apps-script.gs'), 'utf8');
+  if (!opciones.carpetaFotos) fuente = fuente.replace(/var CARPETA_FOTOS_ID = '[^']*';/, "var CARPETA_FOTOS_ID = '';");
   if ((opciones.envioCrea ?? true) === true) fuente = fuente.replace('var CREAR_AL_ENVIAR = false;', 'var CREAR_AL_ENVIAR = true;');
   const html = { createHtmlOutput: (h: string) => ({ html: h, setTitle() { return this; }, addMetaTag() { return this; } }) };
   const propiedades = new Map<string, string>();                    // propiedades del script (donde se guardan las claves de las IAs)
@@ -65,6 +81,8 @@ export function crearServidor(rutaScript?: string, opciones: { envioCrea?: boole
     {
       getFoldersByName: (n: string) => { const l = carpetas.filter((c) => c.nombre === n); let i = 0; return { hasNext: () => i < l.length, next: () => { const c = l[i++]; return { setTrashed: () => { c.papelera = true; }, ...carpetaApi(c) }; } }; },
       createFolder: (n: string) => { const c = { nombre: n, papelera: false }; carpetas.push(c); return carpetaApi(c); },
+      getFolderById: (id: string) => { let r = raices.get(id); if (!r) { r = { id, nombre: 'fotos', papelera: false, carpetas: [], archivos: [] }; raices.set(id, r); } return carpetaArbol(r); },
+      getFileById: (id: string) => { const a = todosArchivos.get(id); if (!a) throw new Error('File not found'); return archivoApi(a); },
     },
     { getUuid: () => crypto.randomUUID(), newBlob: (_d: any, _t: string, nombre: string) => ({ nombre }), base64Decode: (x: string) => x }, html,
     { getScriptProperties: () => ({ setProperty: (k: string, v: string) => { propiedades.set(k, v); }, getProperty: (k: string) => propiedades.get(k) ?? null, deleteProperty: (k: string) => { propiedades.delete(k); } }) },
@@ -74,5 +92,6 @@ export function crearServidor(rutaScript?: string, opciones: { envioCrea?: boole
     return new Response(salida.t, { status: 200, headers: { 'content-type': 'application/json' } });
   };
   const hoja = (nombre: string) => hojas.find((h) => h.nombre === nombre);
-  return { hojas, llamar, hoja, gs, carpetas, fotosGuardadas, propiedades };
+  const arbol = () => [...raices.values()];
+  return { hojas, llamar, hoja, gs, carpetas, fotosGuardadas, propiedades, arbol, archivos: todosArchivos };
 }

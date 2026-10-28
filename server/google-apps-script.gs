@@ -17,7 +17,9 @@
  * El orden lo pone EL SERVIDOR (columna "Recibido"), no los relojes de los teléfonos.
  */
 var TOKEN = 'CAMBIA-ESTE-TOKEN';           // el mismo que pondrás en la app (Ajustes → Token secreto)
-var CARPETA_FOTOS = 'ELI-LUMINARIA Fotos';  // carpeta de Drive para las fotos (se crea sola)
+var CARPETA_FOTOS = 'ELI-LUMINARIA Fotos';  // carpeta suelta de Drive para las fotos si CARPETA_FOTOS_ID está vacío o no se puede abrir (se crea sola)
+// Carpeta "fotos" de ELI-LUMINARIA en Drive (el ID es lo que va después de /folders/ en su dirección). Dentro se crea una carpeta por proyecto.
+var CARPETA_FOTOS_ID = '1MaLf4fbZKC1m5r9IAv8rTmYyo3ZWUzBG';
 var CREAR_AL_ENVIAR = false;                 // NO tocar: un envío o una descarga jamás crean proyectos (solo el administrador, con la acción proyecto_crear). Las pruebas lo cambian.
 var TOKEN_ADMIN = 'CAMBIA-ESTE-TOKEN-ADMIN'; // SOLO para ti: abre el mapa en vivo del equipo (distinto del token del equipo)
 var MINUTOS_SIN_SENAL = 15;                  // una jornada activa sin latidos por más de esto se muestra "Sin señal"
@@ -100,17 +102,18 @@ function doPost(e) {
 
     (d.luminarias || []).forEach(function (l) {
       if (eliminadas[l.uuid]) return; // lo borrado gana: el teléfono lo recibirá como eliminado en su próxima descarga
-      if (l.foto) l.foto = guardarFoto(l);
+      var n = fila[l.uuid];
+      var previa = n ? hoja.getRange(n, 1, 1, COLUMNAS.length).getValues()[0] : null;
+      if (l.foto) l.foto = guardarFoto(l, hoja.getName(), previa ? previa[col('foto')] : '');
+      else if (previa) renombrarFoto(l, previa, hoja.getName());
       l.mapa = (l.latitud != null && l.longitud != null) ? 'https://maps.google.com/?q=' + l.latitud + ',' + l.longitud : '';
       l.eliminada = '';
       l.recibidoEn = ahora;
       l.ubicacionSimulada = l.ubicacionSimulada ? 'SÍ' : '';
       l.alertas = ''; // la auditoría las recalcula al final de este envío
-      var n = fila[l.uuid];
       // Quién registró: lo sella el proxy según la cuenta con la que se ingresó (el teléfono no puede declarar otro). Al editar, el autor original se conserva.
       if (n) {
         var iT = col('tecnico'), iUs = col('usuario');
-        var previa = hoja.getRange(n, 1, 1, COLUMNAS.length).getValues()[0];
         if (previa[iT] !== '' && previa[iT] !== undefined) l.tecnico = previa[iT];
         if (previa[iUs] !== '' && previa[iUs] !== undefined) l.usuario = previa[iUs]; else if (d.por && d.por.usuario) l.usuario = d.por.usuario;
       } else if (d.por && d.por.usuario) {
@@ -288,13 +291,72 @@ function textoSeguro(v) {
   return v;
 }
 
-function guardarFoto(l) {
-  var it = DriveApp.getFoldersByName(CARPETA_FOTOS);
-  var carpeta = it.hasNext() ? it.next() : DriveApp.createFolder(CARPETA_FOTOS);
-  var blob = Utilities.newBlob(Utilities.base64Decode(l.foto), 'image/jpeg', l.uuid + '.jpg');
-  var previos = carpeta.getFilesByName(l.uuid + '.jpg');
-  while (previos.hasNext()) previos.next().setTrashed(true);
-  return carpeta.createFile(blob).getUrl();
+/* ---------------- Fotos en Drive: una carpeta por proyecto, con nombres que dicen dónde es ---------------- */
+
+/** Quita lo que Drive o un nombre de archivo no admiten. */
+function nombreSeguro(t, max) {
+  return String(t === undefined || t === null ? '' : t).replace(/[\\\/:*?"<>|\[\]]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, max || 80);
+}
+
+/** Proyecto - Barrio - Código de la luminaria - Poste X - latitud_longitud [id corto].jpg */
+function nombreDeFoto(l, proyecto) {
+  var coord = (typeof l.latitud === 'number' && typeof l.longitud === 'number') ? l.latitud.toFixed(6) + '_' + l.longitud.toFixed(6) : '';
+  var partes = [nombreSeguro(proyecto, 40), nombreSeguro(l.barrio, 40), nombreSeguro(l.codigo, 30), l.codigoPoste ? 'Poste ' + nombreSeguro(l.codigoPoste, 30) : '', coord].filter(Boolean);
+  return (partes.join(' - ') || 'Luminaria').substring(0, 200) + ' [' + String(l.uuid).replace(/[^A-Za-z0-9]/g, '').substring(0, 6) + '].jpg';
+}
+
+/** La carpeta raíz de las fotos (por ID), o null si no está configurada o no se puede abrir (entonces se usa la carpeta suelta). */
+function raizDeFotos() {
+  if (!CARPETA_FOTOS_ID) return null;
+  try { return DriveApp.getFolderById(CARPETA_FOTOS_ID); } catch (e) { return null; }
+}
+
+function carpetaDeProyecto(raiz, proyecto, crear) {
+  var nombre = nombreSeguro(proyecto, 80) || 'General';
+  var it = raiz.getFoldersByName(nombre);
+  if (it.hasNext()) return it.next();
+  return crear ? raiz.createFolder(nombre) : null;
+}
+
+function idDeEnlace(url) { var m = String(url === undefined || url === null ? '' : url).match(/[-\w]{25,}/); return m ? m[0] : ''; }
+
+function guardarFoto(l, proyecto, enlacePrevio) {
+  var raiz = raizDeFotos();
+  var blob;
+  if (!raiz) {   // carpeta suelta (comportamiento anterior)
+    var it = DriveApp.getFoldersByName(CARPETA_FOTOS);
+    var carpeta = it.hasNext() ? it.next() : DriveApp.createFolder(CARPETA_FOTOS);
+    blob = Utilities.newBlob(Utilities.base64Decode(l.foto), 'image/jpeg', l.uuid + '.jpg');
+    var previos = carpeta.getFilesByName(l.uuid + '.jpg');
+    while (previos.hasNext()) previos.next().setTrashed(true);
+    return carpeta.createFile(blob).getUrl();
+  }
+  blob = Utilities.newBlob(Utilities.base64Decode(l.foto), 'image/jpeg', nombreDeFoto(l, proyecto));
+  var anterior = idDeEnlace(enlacePrevio);
+  if (anterior) { try { DriveApp.getFileById(anterior).setTrashed(true); } catch (e) {} }   // la foto nueva reemplaza a la anterior de esa luminaria
+  return carpetaDeProyecto(raiz, proyecto, true).createFile(blob).getUrl();
+}
+
+/** Si cambió algo que va en el nombre (barrio, códigos, coordenada), la foto ya guardada se renombra. */
+function renombrarFoto(l, previa, proyecto) {
+  var id = idDeEnlace(previa[col('foto')]);
+  if (!id || !raizDeFotos()) return;
+  var antes = { uuid: l.uuid, barrio: previa[col('barrio')], codigo: previa[col('codigo')], codigoPoste: previa[col('codigoPoste')], latitud: previa[col('latitud')], longitud: previa[col('longitud')] };
+  var nuevo = nombreDeFoto(l, proyecto);
+  if (nombreDeFoto(antes, proyecto) === nuevo) return;
+  try { DriveApp.getFileById(id).setName(nuevo); } catch (e) {}
+}
+
+/** Al renombrar un proyecto se renombra su carpeta de fotos y el comienzo del nombre de sus fotos (hasta 300 por vez). */
+function renombrarCarpetaDeFotos(viejo, nuevo) {
+  var raiz = raizDeFotos();
+  if (!raiz) return;
+  var c = carpetaDeProyecto(raiz, viejo, false);
+  if (!c) return;
+  var antes = nombreSeguro(viejo, 40) + ' - ', despues = nombreSeguro(nuevo, 40) + ' - ';
+  var archivos = c.getFiles(), n = 0;
+  while (archivos.hasNext() && n++ < 300) { var f = archivos.next(), nombre = f.getName(); if (nombre.indexOf(antes) === 0) f.setName(despues + nombre.substring(antes.length)); }
+  c.setName(nombreSeguro(nuevo, 80) || 'General');
 }
 
 function salida(obj) {
@@ -530,6 +592,8 @@ function reiniciarDatos(incluirUsuarios) {
   if (quitar.length >= libro.getSheets().length) libro.insertSheet('Inicio'); // Google exige al menos una pestaña
   quitar.forEach(function (h) { libro.deleteSheet(h); });
   var fotos = 0;
+  var raizR = raizDeFotos();
+  if (raizR) { var sub = raizR.getFolders(); while (sub.hasNext()) { sub.next().setTrashed(true); fotos++; } }   // las carpetas de los proyectos (la carpeta "fotos" se conserva)
   var it = DriveApp.getFoldersByName(CARPETA_FOTOS);
   while (it.hasNext()) { it.next().setTrashed(true); fotos++; }
   return { pestanas: quitar.length, carpetasDeFotos: fotos, usuarios: incluirUsuarios === true ? 'borrados' : 'conservados' };
@@ -825,6 +889,7 @@ function guardarProyecto(d) {
     if (buscarHoja(libro, nombre)) return { ok: false, error: 'Ya existe un proyecto con ese nombre.' };
     buscarHoja(libro, p.nombre).setName(nombre);
   } else if (nombre !== p.nombre) buscarHoja(libro, p.nombre).setName(nombre);   // solo cambian mayúsculas
+  if (nombre !== p.nombre) renombrarCarpetaDeFotos(p.nombre, nombre);
   var h = hojaProyectos();
   h.getRange(p.fila, 2, 1, 3).setValues([[nombre, textoSeguro(String(d.cliente === undefined || d.cliente === null ? '' : d.cliente).substring(0, 120)), textoSeguro(String(d.notas === undefined || d.notas === null ? '' : d.notas).substring(0, 500))]]);
   return { ok: true, proyectos: proyectosInfo().map(quitarFila) };
@@ -857,6 +922,8 @@ function eliminarProyecto(d) {
   });
   if (!hojas.length && !p) return { ok: true, eliminado: false };
   var fotos = 0, restantes = 0;
+  var raizP = raizDeFotos();
+  if (raizP) { var cp = carpetaDeProyecto(raizP, nombre, false); if (cp) { cp.setTrashed(true); fotos++; } }   // la carpeta del proyecto con todas sus fotos
   var it = DriveApp.getFoldersByName(CARPETA_FOTOS);
   if (it.hasNext()) {
     var carpeta = it.next();

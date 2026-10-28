@@ -1210,6 +1210,78 @@ describe('dirección de una coordenada y miniatura de la foto', () => {
   });
 });
 
+describe('fotos en Drive: una carpeta por proyecto y nombres que dicen dónde es', () => {
+  const { crearServidor } = require('./helpers/hoja');
+  const { olvidarDirecciones } = require('../server/worker');
+  const montar = () => {
+    const gs = crearServidor(undefined, { envioCrea: false, carpetaFotos: true });
+    const env: any = { APP_TOKENS: 'juan:tokJ', ADMIN_TOKENS: 'jefe:claveJefe99', SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0 };
+    const f = jest.fn(async (u: any, i: any) => gs.llamar(u, i));
+    const post = async (ruta: string, cuerpo: any, clave = 'tokJ') => { const r = await manejar(new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave }, body: JSON.stringify(cuerpo) }), env, f as any); return { status: r.status, j: await r.json() }; };
+    return { gs, post };
+  };
+  beforeEach(() => { vaciarCacheUsuarios(); vaciarCacheIA(); olvidarDirecciones(); });
+  const crear = (m: any, nombre: string) => m.post('/sistema', { accion: 'crear_proyecto', nombre }, 'claveJefe99');
+  const lum = (o: any = {}) => ({ uuid: 'abc123def', fabricante: 'F', latitud: 4.711, longitud: -74.0721, barrio: 'La Candelaria', codigo: 'LUM-0012', codigoPoste: 'P-045', foto: 'FOTO64', ...o });
+  const sube = (m: any, proyecto: string, l: any) => m.post('/sync', { proyecto: { nombre: proyecto }, luminarias: [l] });
+  const carpetas = (m: any) => m.gs.arbol()[0].carpetas.filter((c: any) => !c.papelera);
+  const archivos = (c: any) => c.archivos.filter((a: any) => !a.papelera).map((a: any) => a.nombre);
+
+  it('la foto va a la carpeta "fotos" > <proyecto>, con nombre: proyecto, barrio, códigos, coordenada y un id corto', async () => {
+    const m = montar();
+    await crear(m, 'Barrio Centro');
+    expect((await sube(m, 'Barrio Centro', lum())).j.ok).toBe(true);
+    expect(carpetas(m).map((c: any) => c.nombre)).toEqual(['Barrio Centro']);
+    expect(archivos(carpetas(m)[0])).toEqual(['Barrio Centro - La Candelaria - LUM-0012 - Poste P-045 - 4.711000_-74.072100 [abc123].jpg']);
+    const h = m.gs.hoja('Barrio Centro'); const url = h.filas[1][h.filas[0].indexOf('Foto')];
+    expect(url).toMatch(/^https:\/\/drive\.google\.com\/file\/d\/archivo\d+\/view$/);
+    // sin datos: queda un nombre válido; los caracteres que Drive no admite se limpian
+    await sube(m, 'Barrio Centro', lum({ uuid: 'zzz999', barrio: 'A/B:C*?', codigo: '', codigoPoste: '', latitud: null, longitud: null }));
+    expect(archivos(carpetas(m)[0])).toContain('Barrio Centro - A B C [zzz999].jpg');
+  });
+
+  it('cada proyecto tiene su carpeta; reenviar la foto reemplaza la anterior (queda una sola); solo se sube la primera foto', async () => {
+    const m = montar();
+    await crear(m, 'Zona 2'); await crear(m, 'Zona 3');
+    await sube(m, 'Zona 2', lum({ uuid: 'aaa111' })); await sube(m, 'Zona 3', lum({ uuid: 'bbb222' }));
+    expect(carpetas(m).map((c: any) => c.nombre).sort()).toEqual(['Zona 2', 'Zona 3']);
+    await sube(m, 'Zona 2', lum({ uuid: 'aaa111', foto: 'OTRA' }));
+    expect(archivos(carpetas(m).find((c: any) => c.nombre === 'Zona 2'))).toHaveLength(1);
+    expect(m.gs.fotosGuardadas).toHaveLength(3);
+  });
+
+  it('si cambian el barrio o los códigos, la foto ya guardada se renombra (sin volver a subirla); sin foto no se crea nada', async () => {
+    const m = montar();
+    await crear(m, 'Zona 2');
+    await sube(m, 'Zona 2', lum({ uuid: 'aaa111' }));
+    await sube(m, 'Zona 2', lum({ uuid: 'aaa111', foto: undefined, barrio: 'Centro Nuevo', codigo: 'LUM-0099' }));
+    expect(archivos(carpetas(m)[0])).toEqual(['Zona 2 - Centro Nuevo - LUM-0099 - Poste P-045 - 4.711000_-74.072100 [aaa111].jpg']);
+    expect(m.gs.fotosGuardadas).toHaveLength(1);
+    await sube(m, 'Zona 2', lum({ uuid: 'ccc333', foto: undefined }));
+    expect(archivos(carpetas(m)[0])).toHaveLength(1);
+  });
+
+  it('al renombrar el proyecto se renombra su carpeta y el comienzo del nombre de sus fotos; al eliminarlo se va a la papelera su carpeta entera', async () => {
+    const m = montar();
+    await crear(m, 'Zona 2');
+    const id = (await m.post('/yo', {}, 'claveJefe99')).j.proyectosInfo[0].id;
+    await sube(m, 'Zona 2', lum({ uuid: 'aaa111' }));
+    expect((await m.post('/sistema', { accion: 'guardar_proyecto', id, nombre: 'Zona Norte' }, 'claveJefe99')).j.ok).toBe(true);
+    expect(carpetas(m).map((c: any) => c.nombre)).toEqual(['Zona Norte']);
+    expect(archivos(carpetas(m)[0])).toEqual(['Zona Norte - La Candelaria - LUM-0012 - Poste P-045 - 4.711000_-74.072100 [aaa111].jpg']);
+    expect((await m.post('/sistema', { accion: 'eliminar_proyecto', id }, 'claveJefe99')).j).toMatchObject({ ok: true, eliminado: true });
+    expect(carpetas(m)).toHaveLength(0);                                                       // la carpeta del proyecto, con sus fotos, a la papelera
+    expect(m.gs.arbol()[0].papelera).toBe(false);                                              // la carpeta "fotos" NO se toca
+  });
+
+  it('reiniciar todo manda a la papelera las carpetas de los proyectos pero conserva la carpeta "fotos"', async () => {
+    const m = montar();
+    await crear(m, 'Zona 2'); await sube(m, 'Zona 2', lum());
+    m.gs.gs.reiniciarDatos(false);
+    expect(carpetas(m)).toHaveLength(0); expect(m.gs.arbol()[0].papelera).toBe(false);
+  });
+});
+
 describe('otras IAs (Groq, OpenRouter, Mistral, Qwen, Kimi, ChatGPT, otra): compatibles con la API de ChatGPT', () => {
   const { crearServidor } = require('./helpers/hoja');
   const {
