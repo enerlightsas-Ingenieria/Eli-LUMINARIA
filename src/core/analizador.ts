@@ -115,7 +115,7 @@ export async function analizarFotosCon(cargarAjustes: () => Promise<Ajustes>, ba
   }
   out.tecnologia = normalizarTecnologia(out.tecnologia);
   out.control = normalizarControl(out.control); out.montaje = normalizarMontaje(out.montaje);
-  out.materialPoste = /^poste\b/i.test(out.montaje) ? normalizarMaterialPoste(out.materialPoste) : '';
+  out.materialPoste = /^poste\b/i.test(out.montaje) ? normalizarMaterialPoste(out.materialPoste) || 'Concreto' : '';   // poste sin material legible: concreto por defecto
   const c = bloque.input?.confianza;
   return { caracteristicas: out, confianza: c === 'alta' || c === 'media' || c === 'baja' ? c : 'baja' };
 }

@@ -794,3 +794,54 @@ test('técnico con proyectos asignados: solo ve y trabaja en esos', async ({ bro
   await expect(tomas.page.getByRole('button', { name: /Proyecto Zona 2/ })).toBeVisible();
   await expect(tomas.page.getByRole('button', { name: /Proyecto Barrio A/ })).toHaveCount(0);       // el otro proyecto no existe para él
 });
+
+test('formulario manual: sugerencias de lo ya escrito, poste → concreto, actualizar la ubicación con el GPS y ajustarla en el mapa', async ({ browser }) => {
+  const b = crearBackend();
+  const { ctx, page } = await telefono(browser, b);
+  await configurar(page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A'] }));
+  await usarProyecto(page, 'Barrio A');
+  // primer registro: deja escrito un fabricante y un transformador
+  await capturar(page, 'manual');
+  await page.getByLabel('Fabricante', { exact: true }).fill('Philips');
+  await page.getByLabel('N.º del transformador', { exact: true }).fill('T-123');
+  await guardar(page);
+  await expect(page.getByText('Philips')).toBeVisible();
+
+  // segundo registro: propone lo ya escrito (selección rápida y mientras se escribe)
+  await capturar(page, 'manual');
+  await expect(page.getByRole('group', { name: 'Usados antes en Fabricante' }).getByRole('button', { name: 'Philips' })).toBeVisible();
+  await page.getByLabel('Fabricante', { exact: true }).fill('phi');
+  await page.getByRole('group', { name: 'Usados antes en Fabricante' }).getByRole('button', { name: 'Philips' }).click();
+  await expect(page.getByLabel('Fabricante', { exact: true })).toHaveValue('Philips');
+  await expect(page.getByRole('group', { name: 'Usados antes en Fabricante' })).toHaveCount(0);           // ya está escrito: no se vuelve a ofrecer
+  await page.getByRole('group', { name: 'Usados antes en N.º del transformador' }).getByRole('button', { name: 'T-123' }).click();
+  await expect(page.getByLabel('N.º del transformador', { exact: true })).toHaveValue('T-123');
+
+  // montaje poste → material concreto por defecto
+  await expect(page.getByLabel('Material del poste', { exact: true })).toHaveCount(0);
+  await page.getByRole('group', { name: 'Opciones para Montaje' }).getByRole('button', { name: 'Poste', exact: true }).click();
+  await expect(page.getByLabel('Material del poste', { exact: true })).toHaveValue('Concreto');
+
+  // actualizar con el GPS: cambia latitud, longitud y precisión
+  await expect(page.getByLabel('Latitud', { exact: true })).toHaveValue('4.711');
+  await ctx.setGeolocation({ latitude: 4.8, longitude: -74.2, accuracy: 3 });
+  await page.getByRole('button', { name: 'Actualizar ubicación (GPS)' }).click();
+  await expect(page.getByLabel('Latitud', { exact: true })).toHaveValue('4.8', { timeout: 20_000 });
+  await expect(page.getByLabel('Longitud', { exact: true })).toHaveValue('-74.2');
+  await expect(page.getByText(/Precisión GPS ≈ 3 m/)).toBeVisible();
+
+  // ajustar en el mapa: se mueve el mapa bajo la mira y se confirma (sin precisión de GPS)
+  await page.getByRole('button', { name: 'Ajustar en el mapa' }).click();
+  const selector = page.getByRole('dialog', { name: 'Ajustar ubicación en el mapa' });
+  await expect(selector.getByTestId('selector-coordenada')).toContainText('4.8');
+  const caja = (await selector.locator('.leaflet-container').boundingBox())!;
+  await page.mouse.move(caja.x + caja.width / 2, caja.y + caja.height / 2);
+  await page.mouse.down(); await page.mouse.move(caja.x + caja.width / 2 + 120, caja.y + caja.height / 2 + 90, { steps: 8 }); await page.mouse.up();
+  const antes = await page.getByLabel('Latitud', { exact: true }).inputValue();
+  await selector.getByRole('button', { name: 'Usar esta ubicación' }).click();
+  await expect(selector).toHaveCount(0);
+  expect(await page.getByLabel('Latitud', { exact: true }).inputValue()).not.toBe(antes);                  // el punto se movió
+  await expect(page.getByText(/Precisión GPS/)).toHaveCount(0);                                            // ya no es una lectura del GPS
+  await guardar(page);
+  await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(2);
+});

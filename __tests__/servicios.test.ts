@@ -31,6 +31,16 @@ describe('analizarFotos', () => {
     expect(f.mock.calls[0][1].headers['x-api-key']).toBe('sk-test');
   });
 
+  it('si la IA ve un poste sin poder leer el material, queda concreto por defecto; si lee otro material, se respeta; sin poste no hay material', async () => {
+    const analiza = async (input: any) => {
+      (global as any).fetch = jest.fn().mockResolvedValue(resp(200, { content: [{ type: 'tool_use', input: { confianza: 'alta', ...input } }] }));
+      return (await analizarFotos(['AAA'])).caracteristicas;
+    };
+    expect(await analiza({ montaje: 'Poste' })).toMatchObject({ montaje: 'Poste', materialPoste: 'Concreto' });
+    expect(await analiza({ montaje: 'poste', materialPoste: 'madera' })).toMatchObject({ materialPoste: 'Madera' });
+    expect(await analiza({ montaje: 'Fachada', materialPoste: 'Concreto' })).toMatchObject({ montaje: 'Fachada', materialPoste: '' });
+  });
+
   it('el proxy acepta exactamente la petición real que arma la app', async () => {
     const f = jest.fn().mockResolvedValue(resp(200, { content: [{ type: 'tool_use', input: { confianza: 'alta' } }] }));
     (global as any).fetch = f;

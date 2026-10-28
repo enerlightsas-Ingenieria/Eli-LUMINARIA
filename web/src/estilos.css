@@ -136,3 +136,16 @@ code { background: var(--superficie2); padding: 1px 5px; border-radius: 4px; }
 .cabecera { top: 0; }
 .acceso { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 12px 0; padding: 12px; border: 1px solid var(--borde); border-radius: var(--radio); background: var(--superficie2); }
 .acceso dt { color: var(--muted); font-weight: 600; } .acceso dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; user-select: all; }
+
+/* Ajustar ubicación en el mapa (pantalla completa) */
+.selector-ubicacion { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: flex; flex-direction: column; }
+.selector-barra { padding: 10px 14px; font-size: 14px; border-bottom: 1px solid var(--borde); background: var(--superficie); }
+.selector-mapa { position: relative; flex: 1; isolation: isolate; }
+.selector-mapa .boton-mapa { position: absolute; right: 12px; bottom: 12px; z-index: 500; width: 52px; height: 52px; border-radius: 26px; background: var(--primario); color: var(--sobre-primario); border: 0; display: grid; place-items: center; cursor: pointer; box-shadow: 0 3px 10px rgba(0,0,0,.35); }
+.selector-mapa .mira { position: absolute; left: 50%; top: 50%; width: 0; height: 0; z-index: 450; pointer-events: none; }
+.selector-mapa .mira i { position: absolute; left: -22px; top: -1px; width: 44px; height: 2px; background: #ff3b30; box-shadow: 0 0 0 1px rgba(255,255,255,.9); }
+.selector-mapa .mira b { position: absolute; left: -1px; top: -22px; width: 2px; height: 44px; background: #ff3b30; box-shadow: 0 0 0 1px rgba(255,255,255,.9); }
+.selector-pie { padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--borde); background: var(--superficie); display: grid; gap: 8px; }
+.sugerencias { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 0 0; }
+.sugerencias small { color: var(--muted); font-size: 12px; margin-right: 2px; }
+.sugerencias .ficha { min-height: 30px; padding: 0 12px; font-size: 14px; }

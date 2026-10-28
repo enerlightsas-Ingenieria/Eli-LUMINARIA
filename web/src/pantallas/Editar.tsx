@@ -1,21 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { analizarFotosCon } from '@compartido/core/analizador';
 import { coordenadaValida, enlaceMapa, masCercano } from '@compartido/lib/geo';
 import { galeriaPermitida } from '@compartido/lib/politicas';
-import { CAMPOS, LuminariaBorrador, SECTORES } from '@compartido/types';
+import { CAMPOS, type Luminaria, LuminariaBorrador, SECTORES } from '@compartido/types';
 import { Camara } from '../componentes/Camara';
 import { avisar, confirmar, dialogo } from '../componentes/dialogos';
 import { Foto } from '../componentes/Foto';
+import { SelectorUbicacion } from '../componentes/SelectorUbicacion';
 import { Icono } from '../componentes/Icono';
 import { Boton, Campo, Cabecera, Ficha, Seccion } from '../componentes/ui';
 import { useApp } from '../contexto/App';
 import { ir, volver } from '../router';
 import { cargarAjustes } from '../servicios/ajustes';
-import { borrarFotos, borrarLuminaria, guardarFoto, guardarKv, guardarLuminaria, leerKv } from '../servicios/almacen';
+import { borrarFotos, borrarLuminaria, guardarFoto, guardarKv, guardarLuminaria, leerKv, listarTodasLasLuminarias } from '../servicios/almacen';
 import { base64DeFoto } from '../servicios/fotos';
-import { obtenerPosicion } from '../servicios/gps';
+import { obtenerMejorPosicion } from '../servicios/gps';
 import { direccionDelPunto } from '../servicios/identidad';
 import { hayConexion } from '../servicios/red';
+import { textoDeOtro, valoresUsados } from '../servicios/sugerencias';
 
 const num = (t: string): number | null => { const n = parseFloat(t.replace(',', '.')); return Number.isFinite(n) ? n : null; };
 
@@ -32,6 +34,9 @@ export function Editar({ id }: { id: string }) {
   const [camara, setCamara] = useState(false);
   const guardado = useRef(false);
   const direccionBuscada = useRef(false);
+  const [todas, setTodas] = useState<Luminaria[]>([]);
+  const [mapaAbierto, setMapaAbierto] = useState(false);
+  const [precisionVista, setPrecisionVista] = useState<number | null>(null);
   const cargado = useRef(false);
   const originales = useRef<string[]>([]);
   const lRef = useRef<LuminariaBorrador | null>(null);
@@ -80,14 +85,23 @@ export function Editar({ id }: { id: string }) {
     setL((p) => (p ? { ...p, direccion: d.direccion || p.direccion, barrio: d.barrio || p.barrio } : p));
   };
 
-  // La coordenada es obligatoria: si faltó (GPS apagado o sin permiso), se puede tomar aquí con el GPS del teléfono
+  // Actualiza la coordenada con el GPS: escucha unos segundos y se queda con la lectura más precisa (también actualiza latitud, longitud y precisión)
   const usarUbicacionActual = async () => {
-    setOcupado('Buscando la ubicación…');
-    const p = await obtenerPosicion('alta');
-    setOcupado(null);
+    setOcupado('Buscando la ubicación…'); setPrecisionVista(null);
+    const p = await obtenerMejorPosicion(12000, 5, (m) => setPrecisionVista(m));
+    setOcupado(null); setPrecisionVista(null);
     if (!p) { await avisar('Sin ubicación', 'No se pudo obtener la ubicación. Activa el GPS del teléfono, permite la ubicación para este sitio e inténtalo de nuevo.'); return; }
     setCoordTxt({ lat: String(p.latitud), lng: String(p.longitud) });
     setL((q) => (q ? { ...q, latitud: p.latitud, longitud: p.longitud, precisionM: p.precisionM } : q));
+    direccionBuscada.current = false;
+  };
+
+  // Ubicación puesta a mano en el mapa (no es una lectura del GPS: no hay precisión)
+  const fijarEnMapa = (lat: number, lng: number) => {
+    setMapaAbierto(false);
+    const redondo = (n: number) => Math.round(n * 1e6) / 1e6;
+    setCoordTxt({ lat: String(redondo(lat)), lng: String(redondo(lng)) });
+    setL((q) => (q ? { ...q, latitud: redondo(lat), longitud: redondo(lng), precisionM: null } : q));
     direccionBuscada.current = false;
   };
 
@@ -96,8 +110,26 @@ export function Editar({ id }: { id: string }) {
     if (esNuevo && !guardado.current && lRef.current) { borrarFotos(lRef.current.fotos); guardarKv('borrador', ''); }
   }, [esNuevo]);
 
+  // Lo que ya se escribió antes en este dispositivo (de cualquier proyecto), para proponerlo mientras se escribe
+  useEffect(() => { let vivo = true; listarTodasLasLuminarias().then((x) => { if (vivo) setTodas(x); }).catch(() => {}); return () => { vivo = false; }; }, []);
+  const sug = useMemo<Record<string, string[]>>(() => ({
+    fabricante: valoresUsados(todas, (x) => x.fabricante),
+    numeroTransformador: valoresUsados(todas, (x) => x.numeroTransformador ?? ''),
+    barrio: valoresUsados(todas, (x) => x.barrio ?? ''),
+    tecnologia: valoresUsados(todas, (x) => textoDeOtro(x.tecnologia)).map((v) => `Otra: ${v}`),
+    control: valoresUsados(todas, (x) => textoDeOtro(x.control ?? '')).map((v) => `Otro: ${v}`),
+    montaje: valoresUsados(todas, (x) => textoDeOtro(x.montaje)).map((v) => `Otro: ${v}`),
+    materialPoste: valoresUsados(todas, (x) => textoDeOtro(x.materialPoste ?? '')).map((v) => `Otro: ${v}`),
+  }), [todas]);
+
   if (!l) return <Cabecera titulo="Luminaria" atras={volver} />;
-  const set = <K extends keyof LuminariaBorrador>(k: K, v: LuminariaBorrador[K]) => setL((p) => (p ? { ...p, [k]: v } : p));
+  const set = <K extends keyof LuminariaBorrador>(k: K, v: LuminariaBorrador[K]) => setL((p) => {
+    if (!p) return p;
+    const n = { ...p, [k]: v };
+    if (k === 'montaje' && /^poste\b/i.test(String(v).trim()) && !p.materialPoste) n.materialPoste = 'Concreto';   // al elegir poste, el material por defecto es concreto
+    return n;
+  });
+
 
   const agregarFoto = async (blob: Blob) => {
     setCamara(false);
@@ -141,7 +173,7 @@ export function Editar({ id }: { id: string }) {
       return;
     }
     if (!coordenadaValida(l.latitud, l.longitud)) {   // lo más importante de un registro: sin coordenada no se guarda
-      await avisar('Falta la coordenada', 'No se puede guardar una luminaria sin coordenada. Pulsa "Usar mi ubicación actual" (con el GPS activado) o escribe la latitud y la longitud.');
+      await avisar('Falta la coordenada', 'No se puede guardar una luminaria sin coordenada. Pulsa "Actualizar ubicación (GPS)" (con el GPS activado), "Ajustar en el mapa" o escribe la latitud y la longitud.');
       return;
     }
     if (coordenadaValida(l.latitud, l.longitud)) {
@@ -210,9 +242,12 @@ export function Editar({ id }: { id: string }) {
       </div>
       {terceros && <p className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 8 }}>Modo terceros: la coordenada la registra el GPS y no se edita a mano.</p>}
       {l.precisionM != null && <p className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 10 }}>Precisión GPS ≈ {Math.round(l.precisionM)} m</p>}
-      {!coordenadaValida(l.latitud, l.longitud) && <Boton texto="Usar mi ubicación actual" variante="secundario" icono="gps" cargando={ocupado === 'Buscando la ubicación…'} onClick={usarUbicacionActual} />}
+      <div className="pila" style={{ marginBottom: 6 }}>
+        <Boton texto={ocupado === 'Buscando la ubicación…' ? `Buscando señal… ${precisionVista != null ? `±${Math.round(precisionVista)} m` : ''}` : 'Actualizar ubicación (GPS)'} variante="secundario" icono="gps" cargando={ocupado === 'Buscando la ubicación…'} onClick={usarUbicacionActual} />
+        {!terceros && <Boton texto="Ajustar en el mapa" variante="secundario" icono="mapa" onClick={() => setMapaAbierto(true)} />}
+      </div>
       <Campo etiqueta="Dirección / referencia" valor={l.direccion} alCambiar={(t) => set('direccion', t)} pista="Se propone sola con la ubicación; corrígela si hace falta" />
-      <Campo etiqueta="Barrio" valor={l.barrio ?? ''} alCambiar={(t) => set('barrio', t)} pista="Se propone solo con la ubicación" />
+      <Campo etiqueta="Barrio" valor={l.barrio ?? ''} alCambiar={(t) => set('barrio', t)} pista="Se propone solo con la ubicación" sugerencias={sug.barrio} />
       {coordenadaValida(l.latitud, l.longitud) && <Boton texto="Buscar dirección y barrio del punto" variante="secundario" icono="mapa" cargando={ocupado === 'Buscando la dirección…'} onClick={buscarDireccion} />}
       <Campo etiqueta="Sector" valor={l.sector ?? ''} alCambiar={(t) => set('sector', t)} opciones={SECTORES} soloOpciones />
       {coordenadaValida(l.latitud, l.longitud) && (
@@ -221,7 +256,7 @@ export function Editar({ id }: { id: string }) {
 
       <Seccion>Características</Seccion>
       {CAMPOS.filter((f) => !f.visibleSi || f.visibleSi(l)).map((f) => (
-        <Campo key={f.key} etiqueta={f.label} pista={f.hint} multilinea={f.multiline} numerico={f.numeric} opciones={f.opciones} soloOpciones={f.soloOpciones} valor={l[f.key]} alCambiar={(t) => set(f.key, t)} />
+        <Campo key={f.key} etiqueta={f.label} pista={f.hint} multilinea={f.multiline} numerico={f.numeric} opciones={f.opciones} soloOpciones={f.soloOpciones} sugerencias={sug[f.key]} valor={l[f.key]} alCambiar={(t) => set(f.key, t)} />
       ))}
 
       <div className="pila" style={{ marginTop: 8 }}>
@@ -230,6 +265,12 @@ export function Editar({ id }: { id: string }) {
         {!esNuevo && <Boton texto="Eliminar" variante="peligro" onClick={eliminar} />}
       </div>
 
+      {mapaAbierto && (
+        <SelectorUbicacion
+          inicial={coordenadaValida(l.latitud, l.longitud) ? { lat: l.latitud!, lng: l.longitud! } : null}
+          vecinas={items.filter((x) => x.id !== l.id && coordenadaValida(x.latitud, x.longitud)).map((x) => ({ lat: x.latitud!, lng: x.longitud! })).slice(0, 300)}
+          alConfirmar={fijarEnMapa} alCerrar={() => setMapaAbierto(false)} />
+      )}
       {camara && <Camara titulo="Foto adicional" permitirArchivo={galeriaPermitida(terceros)} alCapturar={(b) => agregarFoto(b)} alCerrar={() => setCamara(false)} />}
     </>
   );

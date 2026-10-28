@@ -1,6 +1,7 @@
 import { ReactNode, useEffect } from 'react';
 import { Icono } from './Icono';
 import { esOpcionAbierta, PREFIJO_OTRA, PREFIJO_OTRO } from '@compartido/types';
+import { filtrarSugerencias } from '../servicios/sugerencias';
 
 export function Boton({ texto, onClick, variante = 'primario', deshabilitado, cargando, icono, bloque = true, tipo = 'button' }: {
   texto: string; onClick?: () => void; variante?: 'primario' | 'secundario' | 'peligro'; deshabilitado?: boolean; cargando?: boolean;
@@ -15,16 +16,18 @@ export function Boton({ texto, onClick, variante = 'primario', deshabilitado, ca
 }
 
 /** Campo de texto con opciones rápidas (un toque) para llenar a mano más rápido. */
-export function Campo({ etiqueta, valor, alCambiar, pista, multilinea, numerico, conSigno, secreto, soloLectura, opciones, soloOpciones, tipo, autoComplete }: {
+export function Campo({ etiqueta, valor, alCambiar, pista, multilinea, numerico, conSigno, secreto, soloLectura, opciones, soloOpciones, sugerencias, tipo, autoComplete }: {
   etiqueta: string; valor: string; alCambiar: (t: string) => void; pista?: string; multilinea?: boolean; numerico?: boolean;
   conSigno?: boolean; secreto?: boolean; soloLectura?: boolean; opciones?: string[]; tipo?: string; autoComplete?: string;
   /** Se elige solo entre las opciones (no se muestra la caja de texto). */
   soloOpciones?: boolean;
+  /** Lo que ya se escribió antes en este campo: se propone mientras se escribe (lista del teclado y botones de selección rápida). */
+  sugerencias?: string[];
 }) {
   const id = `c-${etiqueta.replace(/\W+/g, '-').toLowerCase()}`;
   const comun = {
     id, value: valor, placeholder: pista, readOnly: soloLectura, autoCapitalize: secreto || numerico || conSigno || tipo === 'url' ? 'none' : 'sentences',
-    autoCorrect: 'off', spellCheck: false, autoComplete, onChange: (e: { target: { value: string } }) => alCambiar(e.target.value),
+    autoCorrect: 'off', spellCheck: false, autoComplete, list: sugerencias?.length ? `${id}-sug` : undefined, onChange: (e: { target: { value: string } }) => alCambiar(e.target.value),
   } as const;
   return (
     <div className="campo">
@@ -32,6 +35,20 @@ export function Campo({ etiqueta, valor, alCambiar, pista, multilinea, numerico,
       {soloOpciones ? null : multilinea
         ? <textarea {...comun} rows={3} />
         : <input {...comun} type={secreto ? 'password' : tipo ?? 'text'} inputMode={conSigno ? 'text' : numerico ? 'decimal' : tipo === 'url' ? 'url' : undefined} />}
+      {!!sugerencias?.length && (
+        <>
+          <datalist id={`${id}-sug`}>{sugerencias.map((s) => <option key={s} value={s} />)}</datalist>
+          {(() => {
+            const propuestas = filtrarSugerencias(sugerencias, valor).filter((s) => s.toLowerCase() !== valor.trim().toLowerCase());
+            return propuestas.length > 0 && (
+              <div className="sugerencias" role="group" aria-label={`Usados antes en ${etiqueta}`}>
+                <small>Usados antes:</small>
+                {propuestas.map((s) => <button key={s} type="button" className="ficha" onClick={() => alCambiar(s)}>{s}</button>)}
+              </div>
+            );
+          })()}
+        </>
+      )}
       {!!opciones?.length && (
         <div className="fichas" role="group" aria-label={`Opciones para ${etiqueta}`}>
           {opciones.map((o) => {

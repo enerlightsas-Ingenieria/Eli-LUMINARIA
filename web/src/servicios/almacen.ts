@@ -181,6 +181,12 @@ export async function conciliarProyectos(enHoja: string[]): Promise<number> {
   return quitados;
 }
 
+/** Todas las luminarias de este dispositivo (de todos los proyectos): sirve para proponer lo que ya se ha escrito antes. */
+export async function listarTodasLasLuminarias(): Promise<Luminaria[]> {
+  const db = await abrir();
+  return ((await pedir(db.transaction('luminarias').objectStore('luminarias').getAll())) as Luminaria[]).map(completar);
+}
+
 /* ---------- luminarias ---------- */
 export async function listarLuminarias(proyectoId: number): Promise<Luminaria[]> {
   const db = await abrir();
