@@ -5,7 +5,7 @@ describe('sincronizar un proyecto que el administrador eliminó', () => {
   const proyecto: any = { id: 1, uuid: 'pu', idHoja: 'p1', nombre: 'Barrio A', cliente: '', notas: '', creadoEn: '' };
   const montar = (error: string) => {
     const quitados: any[] = [];
-    const post = jest.fn(async () => { throw new Error(error); });
+    const post = jest.fn(async (_a: any, _c: any): Promise<any> => { throw new Error(error); });
     const s = crearSincronizador({
       almacen: {
         pendientesDeSync: async () => [], marcarSincronizadas: async () => {}, borradasPendientes: async () => [], limpiarBorradas: async () => {},

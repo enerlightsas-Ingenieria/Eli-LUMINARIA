@@ -30,6 +30,7 @@ export function AdminUsuarios() {
   const [ocupado, setOcupado] = useState(false);
   const [acceso, setAcceso] = useState<{ usuario: Usuario; url: string } | null>(null);
   const [pais, setPais] = useState('57');
+  const [verBajas, setVerBajas] = useState(false);
   useEffect(() => { codigoPaisDeLaEmpresa().then(setPais); }, []);
 
   const cargar = useCallback(async () => {
@@ -62,13 +63,21 @@ export function AdminUsuarios() {
     finally { setOcupado(false); }
   };
 
-  const eliminar = async () => {
-    const u = edicion?.original;
+  /** Eliminación definitiva: la cuenta desaparece (sus registros se conservan en la hoja con su nombre). Dos confirmaciones. */
+  const eliminar = async (u: Usuario | undefined = edicion?.original) => {
     if (!u) return;
-    if (!(await confirmar('Eliminar usuario', `Se eliminará la cuenta de ${u.nombre} (${u.usuario}) y ya no podrá entrar. Sus registros se conservan en la hoja con su nombre. Esta acción no se puede deshacer.\n\nSi solo quieres que no entre por ahora, es mejor darle de baja.`, 'Eliminar', true))) return;
+    if (!(await confirmar('Eliminar definitivamente', `Se eliminará para siempre la cuenta de ${u.nombre} (${u.usuario}): ya no podrá entrar y no se podrá recuperar. Sus registros se conservan en la hoja con su nombre.\n\nSi solo quieres quitarle el acceso por ahora, usa "Dar de baja" (desmarca "Con acceso").`, 'Continuar', true))) return;
+    if (!(await confirmar('¿Seguro?', `Última confirmación: eliminar definitivamente a ${u.nombre} (${u.usuario}).`, 'Sí, eliminar', true))) return;
     setOcupado(true);
     try { await eliminarUsuario(u.usuario); setEdicion(null); await cargar(); }
     catch (e: any) { await avisar('No se pudo eliminar', e.message ?? String(e)); }
+    finally { setOcupado(false); }
+  };
+
+  const reactivar = async (u: Usuario) => {
+    setOcupado(true);
+    try { await guardarUsuario({ nombre: u.nombre, usuario: u.usuario, telefono: u.telefono ?? '', rol: u.rol, activo: true, terceros: u.rol === 'tecnico' && !!u.terceros, claveNueva: false }); await cargar(); }
+    catch (e: any) { await avisar('No se pudo reactivar', e.message ?? String(e)); }
     finally { setOcupado(false); }
   };
 
@@ -106,7 +115,7 @@ export function AdminUsuarios() {
         </div>
       )}
       <div className="pila">
-        {lista?.map((u) => (
+        {lista?.filter((u) => u.activo).map((u) => (
           <button key={u.nombre} type="button" className="tarjeta item" style={{ opacity: u.activo ? 1 : 0.6 }} aria-label={`${u.nombre}, ${TEXTO_ROL[u.rol]}${u.activo ? '' : ', de baja'}`}
             onClick={() => setEdicion({ original: u, nombre: u.nombre, usuario: u.usuario, telefono: u.telefono ?? '', usuarioTocado: true, rol: u.rol, activo: u.activo, terceros: !!u.terceros, clave: '' })}>
             <div style={{ flex: 1 }}>
@@ -117,6 +126,26 @@ export function AdminUsuarios() {
           </button>
         ))}
       </div>
+
+      {(lista?.some((u) => !u.activo)) && (
+        <div style={{ marginTop: 14 }}>
+          <Boton texto={verBajas ? 'Ocultar usuarios dados de baja' : `Ver usuarios dados de baja (${lista!.filter((u) => !u.activo).length})`} variante="secundario" onClick={() => setVerBajas((v) => !v)} />
+          {verBajas && (
+            <div className="pila" style={{ marginTop: 10 }} data-testid="usuarios-baja">
+              {lista!.filter((u) => !u.activo).map((u) => (
+                <div key={u.nombre} className="tarjeta" aria-label={`${u.nombre}, dado de baja`} style={{ opacity: 0.85 }}>
+                  <div className="t" style={{ fontWeight: 700 }}>{u.nombre}</div>
+                  <div className="s muted">Usuario: {u.usuario} · {TEXTO_ROL[u.rol]} · sin acceso</div>
+                  <div className="fila" style={{ marginTop: 8, gap: 8 }}>
+                    <Boton texto="Reactivar" variante="secundario" bloque={false} deshabilitado={ocupado} onClick={() => reactivar(u)} />
+                    <Boton texto="Eliminar definitivamente" variante="peligro" bloque={false} deshabilitado={ocupado} onClick={() => eliminar(u)} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <Hoja abierta={!!edicion} alCerrar={() => setEdicion(null)} titulo={edicion?.original ? 'Editar usuario' : 'Nuevo usuario'}>
         <Campo etiqueta="Nombre completo" valor={edicion?.nombre ?? ''} alCambiar={(t) => setEdicion((e) => e && { ...e, nombre: t, usuario: e.original || e.usuarioTocado ? e.usuario : sugerirUsuario(t) })} pista="Ej. Juan Pérez" />
@@ -130,7 +159,7 @@ export function AdminUsuarios() {
         <div className="pila">
           <Boton texto={edicion?.original ? 'Guardar y ver datos de acceso' : 'Crear y ver datos de acceso'} cargando={ocupado} onClick={() => guardar(false)} />
           {!!edicion?.original && <Boton texto="Generar clave nueva" variante="secundario" deshabilitado={ocupado} onClick={() => guardar(true)} />}
-          {!!edicion?.original && <Boton texto="Eliminar usuario" variante="peligro" deshabilitado={ocupado} onClick={eliminar} />}
+          {!!edicion?.original && <Boton texto="Eliminar definitivamente" variante="peligro" deshabilitado={ocupado} onClick={() => eliminar()} />}
         </div>
       </Hoja>
 

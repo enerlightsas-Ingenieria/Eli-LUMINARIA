@@ -402,16 +402,23 @@ test('ingreso con usuario y clave (sin enlaces): el administrador crea la cuenta
   await admin.page.getByRole('button', { name: /Darío Ruiz, Técnico/ }).click();
   await admin.page.getByLabel(/Con acceso/).uncheck();
   await admin.page.getByRole('button', { name: 'Guardar y ver datos de acceso' }).click();
-  await expect(admin.page.getByRole('button', { name: /Darío Ruiz, Técnico, de baja/ })).toBeVisible();
+  await expect(admin.page.getByRole('button', { name: /Darío Ruiz/ })).toHaveCount(0);           // los dados de baja no aparecen en la lista principal
+  await admin.page.getByRole('button', { name: /Ver usuarios dados de baja \(1\)/ }).click();
+  await expect(admin.page.getByTestId('usuarios-baja')).toContainText('Darío Ruiz');
   await dario.page.getByLabel('Clave', { exact: true }).fill('clave-dario-1');            // el usuario ya viene escrito (se acuerda del último)
   await dario.page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await expect(dario.page.getByRole('alert')).toContainText('Usuario o clave incorrectos');
 
-  // y luego lo elimina del todo: desaparece de la lista y de la hoja de usuarios
-  await admin.page.getByRole('button', { name: /Darío Ruiz, Técnico, de baja/ }).click();
-  await admin.page.getByRole('button', { name: 'Eliminar usuario' }).click();
-  await dialogo(admin.page).getByRole('button', { name: 'Eliminar', exact: true }).click();
-  await expect(admin.page.getByRole('button', { name: /Darío Ruiz/ })).toHaveCount(0);
+  // reactivar lo devuelve a la lista; y luego lo elimina definitivamente (dos confirmaciones): desaparece de la lista y de la hoja de usuarios
+  await admin.page.getByRole('button', { name: 'Reactivar' }).click();
+  await expect(admin.page.getByRole('button', { name: /Darío Ruiz, Técnico/ })).toBeVisible();
+  await admin.page.getByRole('button', { name: /Darío Ruiz, Técnico/ }).click();
+  await admin.page.getByLabel(/Con acceso/).uncheck();
+  await admin.page.getByRole('button', { name: 'Guardar y ver datos de acceso' }).click();
+  await admin.page.getByRole('button', { name: 'Eliminar definitivamente' }).click();   // la sección de dados de baja sigue abierta
+  await boton(admin.page, 'Continuar');
+  await boton(admin.page, 'Sí, eliminar');
+  await expect(admin.page.getByText('Darío Ruiz')).toHaveCount(0);
   expect(b.gs.hoja('_Usuarios')!.filas.some((f: any[]) => f[5] === 'druiz')).toBe(false);
 });
 
