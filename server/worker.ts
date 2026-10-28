@@ -76,12 +76,21 @@ export function identificar(token: string, tokens: string | undefined): string |
 }
 
 export type Rol = 'tecnico' | 'supervisor' | 'admin';
-export type Identidad = { nombre: string; usuario: string; rol: Rol; terceros?: boolean };
+/** Qué supervisa un supervisor: ids de proyectos y usuarios de técnicos (con sus nombres). Una lista vacía = sin restricción en eso. */
+export type Alcance = { proyectos: string[]; tecnicos: string[]; nombres: string[] };
+export type Identidad = { nombre: string; usuario: string; rol: Rol; terceros?: boolean; alcance?: Alcance };
 
 /** Identidad que devuelve la hoja (nombre completo + usuario para entrar). Si no hay usuario aparte, es el nombre. */
 function deLaHoja(u: any): Identidad | null {
   if (!u || typeof u.nombre !== 'string' || !u.nombre) return null;
-  return { nombre: u.nombre, usuario: typeof u.usuario === 'string' && u.usuario ? u.usuario : u.nombre, rol: ROLES.includes(u.rol) ? u.rol : 'tecnico', ...(typeof u.terceros === 'boolean' ? { terceros: u.terceros } : {}) };
+  const rol: Rol = ROLES.includes(u.rol) ? u.rol : 'tecnico';
+  const lista = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x).slice(0, 200) : []) as string[];
+  const alcance: Alcance = { proyectos: lista(u.proyectos), tecnicos: lista(u.tecnicos), nombres: lista(u.tecnicosNombres) };
+  return {
+    nombre: u.nombre, usuario: typeof u.usuario === 'string' && u.usuario ? u.usuario : u.nombre, rol,
+    ...(typeof u.terceros === 'boolean' ? { terceros: u.terceros } : {}),
+    ...(rol === 'supervisor' && (alcance.proyectos.length || alcance.tecnicos.length) ? { alcance } : {}),
+  };
 }
 const ROLES: Rol[] = ['tecnico', 'supervisor', 'admin'];
 
@@ -795,6 +804,25 @@ async function direccionDeCoordenada(request: Request, env: any, llamar: typeof 
   return json(200, { ok: true, ...v });
 }
 
+/* ---------- supervisores: solo ven los proyectos y técnicos que supervisan ---------- */
+
+/** Proyectos que ve esta persona: todos, salvo un supervisor con proyectos asignados (solo esos). */
+function proyectosPara(quien: Identidad, p: any): any {
+  const ids = quien.alcance?.proyectos ?? [];
+  if (quien.rol !== 'supervisor' || !ids.length || !Array.isArray(p?.proyectosInfo)) return p;
+  const info = p.proyectosInfo.filter((x: InfoProyecto) => ids.includes(x.id));
+  return { proyectos: info.filter((x: InfoProyecto) => x.activo).map((x: InfoProyecto) => x.nombre), proyectosInfo: info };
+}
+
+/** ¿Este registro lo puede ver el supervisor? Sí si lo hizo un técnico asignado (por usuario o, en registros antiguos, por nombre) o él mismo. */
+function registroVisible(quien: Identidad, l: any): boolean {
+  const a = quien.alcance;
+  if (!a || !a.tecnicos.length) return true;
+  const u = norm(l?.usuario), t = norm(l?.tecnico);
+  return a.tecnicos.some((x) => norm(x) === u) || a.nombres.some((x) => norm(x) === t) || (!!u && u === norm(quien.usuario)) || (!!t && t === norm(quien.nombre));
+}
+
+
 const ACCIONES_SYNC = [undefined, 'listar', 'latido'];
 
 /** Reenvía al script de Google poniendo AQUÍ el token del script (el navegador nunca lo conoce). */
@@ -832,7 +860,20 @@ async function sincronizar(request: Request, env: any, llamar: typeof fetch, qui
       }
     }
   }
-  return haciaHojas(c, env.SYNC_TOKEN, env, llamar);
+  // Un supervisor con proyectos asignados solo trabaja en esos; y si tiene técnicos asignados, solo recibe lo que ellos (y él) registraron.
+  const ids = quien.alcance?.proyectos ?? [];
+  if (quien.rol === 'supervisor' && ids.length && (c.accion === undefined || c.accion === 'listar')) {
+    const info: InfoProyecto[] = ((await proyectosDeLaHoja(env, llamar)) as any).proyectosInfo ?? [];
+    const p = c.proyecto ?? {};
+    const permitido = info.some((x) => ids.includes(x.id) && (p.id ? p.id === x.id : norm(x.nombre) === norm(p.nombre)));
+    if (!permitido) return json(200, { ok: false, codigo: 'SIN_ACCESO_PROYECTO', error: 'No tienes asignado este proyecto. Pídele al administrador que te lo asigne.' });
+  }
+  const r = await haciaHojas(c, env.SYNC_TOKEN, env, llamar);
+  if (quien.rol === 'supervisor' && quien.alcance?.tecnicos.length && c.accion === 'listar') {
+    const j: any = await r.clone().json().catch(() => null);
+    if (j?.ok && Array.isArray(j.luminarias)) return json(200, { ...j, luminarias: j.luminarias.filter((l: any) => registroVisible(quien, l)) });
+  }
+  return r;
 }
 
 const norm = (s: unknown) => String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -907,13 +948,13 @@ async function ingresar(request: Request, env: any, llamar: typeof fetch): Promi
     return json(401, { ok: false, error: 'Usuario o clave incorrectos.' });
   }
   intentos.delete(llave);
-  return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), ...(await proyectosDeLaHoja(env, llamar)) });
+  return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), ...proyectosPara(quien, await proyectosDeLaHoja(env, llamar)) });
 }
 
 /** Menú de administración: listar y crear/editar personas. El token del administrador del script se pone AQUÍ. */
 async function administrarUsuarios(request: Request, env: any, llamar: typeof fetch, quien: Identidad): Promise<Response> {
   const texto = await request.text();
-  if (texto.length > 2000) return json(413, { ok: false, error: 'Payload too large' });
+  if (texto.length > 8000) return json(413, { ok: false, error: 'Payload too large' });
   let c: any;
   try { c = JSON.parse(texto); } catch { return json(400, { ok: false, error: 'JSON inválido' }); }
   if (!c || typeof c !== 'object' || Array.isArray(c)) return json(400, { ok: false, error: 'Cuerpo inválido' });
@@ -937,7 +978,9 @@ async function administrarUsuarios(request: Request, env: any, llamar: typeof fe
     if (c.clave !== undefined && c.clave !== '' && (typeof c.clave !== 'string' || !/^\S{8,64}$/.test(c.clave))) return json(400, { ok: false, error: 'La clave debe tener entre 8 y 64 caracteres, sin espacios.' });
     if (c.usuario !== undefined && (typeof c.usuario !== 'string' || c.usuario.trim().length < 2 || c.usuario.length > 40 || /^[=+\-@_]/.test(c.usuario.trim()))) return json(400, { ok: false, error: 'Usuario inválido' });
     if (c.telefono !== undefined && (typeof c.telefono !== 'string' || !/^[0-9 +()\-]{0,25}$/.test(c.telefono))) return json(400, { ok: false, error: 'Teléfono inválido (solo números, espacios, + - y paréntesis).' });
-    const r = await haciaHojas({ accion: 'usuarios_guardar', nombre: c.nombre, ...(typeof c.telefono === 'string' ? { telefono: c.telefono.trim() } : {}), ...(typeof c.usuario === 'string' ? { usuario: c.usuario.trim() } : {}), rol: c.rol, activo: c.activo !== false, claveNueva: c.claveNueva === true, terceros: c.terceros === true, ...(c.clave ? { clave: c.clave } : {}), por: quien.usuario }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    const lista = (v: unknown) => Array.isArray(v) && v.length <= 200 && v.every((x) => typeof x === 'string' && /^[^,]{1,60}$/.test(x));
+    if ((c.proyectos !== undefined && !lista(c.proyectos)) || (c.tecnicos !== undefined && !lista(c.tecnicos))) return json(400, { ok: false, error: 'Lista de proyectos o técnicos inválida' });
+    const r = await haciaHojas({ accion: 'usuarios_guardar', nombre: c.nombre, ...(c.proyectos !== undefined ? { proyectos: c.proyectos } : {}), ...(c.tecnicos !== undefined ? { tecnicos: c.tecnicos } : {}), ...(typeof c.telefono === 'string' ? { telefono: c.telefono.trim() } : {}), ...(typeof c.usuario === 'string' ? { usuario: c.usuario.trim() } : {}), rol: c.rol, activo: c.activo !== false, claveNueva: c.claveNueva === true, terceros: c.terceros === true, ...(c.clave ? { clave: c.clave } : {}), por: quien.usuario }, env.SYNC_TOKEN_ADMIN, env, llamar);
     vaciarCacheUsuarios();   // los cambios se notan al instante en este servidor (en otros, tras USUARIOS_CACHE_SEG)
     return r;
   }
@@ -958,17 +1001,35 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   catch { return json(502, { error: 'No se pudo verificar el usuario (la hoja de Google no respondió).' }); }
   if (!quien) return json(401, { error: 'Unauthorized' });
 
-  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), ...(await proyectosDeLaHoja(env, llamar)) });
+  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), ...proyectosPara(quien, await proyectosDeLaHoja(env, llamar)) });
   if (ruta === '/equipo') {
     if (quien.rol === 'tecnico') return json(401, { error: 'Unauthorized' });
-    return haciaHojas({ accion: 'equipo' }, env.SYNC_TOKEN_ADMIN, env, llamar);
+    let alcance: any;
+    if (quien.rol === 'supervisor' && quien.alcance) {   // el supervisor ve solo sus técnicos y proyectos (el filtro se aplica en la hoja)
+      const info: InfoProyecto[] = ((await proyectosDeLaHoja(env, llamar)) as any).proyectosInfo ?? [];
+      alcance = {
+        proyectos: info.filter((x) => quien.alcance!.proyectos.includes(x.id)).map((x) => x.nombre), tecnicos: quien.alcance.tecnicos, nombres: quien.alcance.nombres,
+        yo: { usuario: quien.usuario, nombre: quien.nombre },
+      };
+      if (quien.alcance.proyectos.length && !alcance.proyectos.length) alcance.proyectos = ['\u0000ninguno'];   // sus proyectos asignados ya no existen: no ve ninguno
+    }
+    return haciaHojas({ accion: 'equipo', ...(alcance ? { alcance } : {}) }, env.SYNC_TOKEN_ADMIN, env, llamar);
   }
   if (ruta === '/contactos') {
     // Un técnico solo ve a quienes lo supervisan; supervisores y administradores ven a todos. Nunca claves.
     const r = await haciaHojas({ accion: 'contactos' }, env.SYNC_TOKEN, env, llamar);
     const j: any = await r.json().catch(() => null);
     if (!j?.ok) return json(502, { ok: false, error: 'No se pudieron leer los contactos.' });
-    const mios = (j.contactos as any[]).filter((u) => norm(u.usuario) !== norm(quien.usuario) && (quien.rol !== 'tecnico' || u.rol !== 'tecnico'));
+    // técnico: quienes lo supervisan (administradores y supervisores que lo tienen asignado o supervisan a todos); supervisor: administradores y SUS técnicos; administrador: todos
+    const visible = (u: any) => {
+      if (quien.rol === 'admin') return true;
+      if (quien.rol === 'tecnico') return u.rol === 'admin' || (u.rol === 'supervisor' && (!Array.isArray(u.supervisa) || !u.supervisa.length || u.supervisa.some((x: string) => norm(x) === norm(quien.usuario))));
+      const a = quien.alcance;
+      if (u.rol === 'admin') return true;
+      if (u.rol === 'tecnico') return !a || !a.tecnicos.length || a.tecnicos.some((x) => norm(x) === norm(u.usuario));
+      return false;
+    };
+    const mios = (j.contactos as any[]).filter((u) => norm(u.usuario) !== norm(quien.usuario) && visible(u));
     return json(200, { ok: true, contactos: mios.map((u) => ({ nombre: u.nombre, usuario: u.usuario, rol: u.rol, telefono: u.telefono })) });
   }
   if (ruta === '/sistema') {

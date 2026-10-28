@@ -16,7 +16,8 @@ import { useEnLinea } from '../servicios/red';
 type Filtro = 'todas' | 'pendientes' | 'sinGps';
 
 export function Registros() {
-  const { items, proyecto, pendientes, ajustes, refrescar, salir } = useApp();
+  const { items, proyecto, proyectos, pendientes, ajustes, refrescar, salir, activar } = useApp();
+  const [elegirProyecto, setElegirProyecto] = useState(false);
   const [q, setQ] = useState('');
   const [filtro, setFiltro] = useState<Filtro>('todas');
   const [menuExportar, setMenuExportar] = useState(false);
@@ -65,7 +66,7 @@ export function Registros() {
 
   return (
     <>
-      <Cabecera titulo="ELI-LUMINARIA" subtitulo={proyecto ? `${proyecto.nombre} · ${items.length} luminarias` : ' '} onSubtitulo={() => ir('/proyectos')}
+      <Cabecera titulo="ELI-LUMINARIA" subtitulo={proyecto ? `${proyecto.nombre} · ${items.length} luminarias` : ' '} onSubtitulo={() => setElegirProyecto(true)}
         acciones={[
           { icono: sincronizando ? 'actualizar' : 'nube', etiqueta: 'Sincronizar', onClick: sync, insignia: pendientes },
           { icono: 'compartir', etiqueta: 'Exportar', onClick: () => setMenuExportar(true) },
@@ -124,6 +125,11 @@ export function Registros() {
         </div>
       )}
       <button type="button" className="fab" onClick={() => ir('/capturar')} aria-label="Nueva luminaria"><Icono nombre="camara" />Nueva</button>
+      <Hoja abierta={elegirProyecto} alCerrar={() => setElegirProyecto(false)} titulo="Elegir proyecto" subtitulo="Los registros que ves son los de este proyecto"
+        opciones={[
+          ...proyectos.map((p) => ({ texto: `${p.id === proyecto?.id ? '✓ ' : ''}${p.nombre} · ${p.cantidad} luminaria${p.cantidad === 1 ? '' : 's'}`, onClick: () => { activar(p.id); } })),
+          { texto: 'Ver y administrar proyectos', onClick: () => ir('/proyectos') },
+        ]} />
       <Hoja abierta={menuExportar} alCerrar={() => setMenuExportar(false)} titulo="Exportar proyecto" subtitulo={`${items.length} luminarias`}
         opciones={formatos.map(({ f, texto }) => ({ texto, onClick: () => { exportar(f, items, proyecto ?? undefined).catch((e) => avisar('No se pudo exportar', e.message ?? String(e))); } }))} />
     </>

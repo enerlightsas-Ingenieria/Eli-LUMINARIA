@@ -69,7 +69,7 @@ function doPost(e) {
     // Las consultas que solo leen usuarios o configuración NO esperan el candado: así no se hace cola detrás de los envíos y no se agota la espera.
     if (['usuario', 'ingresar', 'contactos', 'config', 'ia_claves', 'usuarios_listar'].indexOf(d.accion) < 0) { lock.waitLock(45000); conLock = true; }
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
-    if (d.accion === 'equipo') { var datos = datosEquipo(TOKEN_ADMIN); datos.ok = true; return salida(datos); }
+    if (d.accion === 'equipo') { var datos = datosEquipo(TOKEN_ADMIN, d.alcance); datos.ok = true; return salida(datos); }
     if (d.accion === 'latido') return salida(registrarLatido(d, ahora));
     if (d.accion === 'usuario') return salida({ ok: true, usuario: buscarUsuario(d.clave) });
     if (d.accion === 'ingresar') return salida({ ok: true, usuario: ingresarUsuario(d.usuario, d.clave) });
@@ -608,13 +608,14 @@ function guardarConfig(d) {
 
 /* ---------------- Usuarios (pestaña _Usuarios: el administrador crea personas y roles aquí) ---------------- */
 
-var COLUMNAS_USUARIOS = [['nombre', 'Nombre'], ['rol', 'Rol (tecnico, supervisor o administrador)'], ['clave', 'Clave'], ['activo', 'Activo (si/no)'], ['terceros', 'Contratista (si/no)'], ['usuario', 'Usuario (para entrar)'], ['telefono', 'Teléfono (WhatsApp)']];
+var COLUMNAS_USUARIOS = [['nombre', 'Nombre'], ['rol', 'Rol (tecnico, supervisor o administrador)'], ['clave', 'Clave'], ['activo', 'Activo (si/no)'], ['terceros', 'Contratista (si/no)'], ['usuario', 'Usuario (para entrar)'], ['telefono', 'Teléfono (WhatsApp)'],
+  ['proyectos', 'Proyectos que supervisa (ids; vacío = todos)'], ['tecnicos', 'Técnicos que supervisa (usuarios; vacío = todos)']];
 
 /** Crea la pestaña si no existe y la deja lista. También se puede ejecutar a mano. */
 function prepararUsuarios() {
   var nueva = !buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
-  var hoja = hojaSistema(HOJA_USUARIOS, COLUMNAS_USUARIOS, ['nombre', 'rol', 'clave', 'activo', 'terceros', 'usuario', 'telefono']);
-  if (nueva) { hoja.appendRow(['Ejemplo Técnico', 'tecnico', '', 'no', 'no', 'ejemplo', '']); return hoja; }
+  var hoja = hojaSistema(HOJA_USUARIOS, COLUMNAS_USUARIOS, ['nombre', 'rol', 'clave', 'activo', 'terceros', 'usuario', 'telefono', 'proyectos', 'tecnicos']);
+  if (nueva) { hoja.appendRow(['Ejemplo Técnico', 'tecnico', '', 'no', 'no', 'ejemplo', '', '', '']); return hoja; }
   // pestañas creadas con una versión anterior: se completan los encabezados de las columnas que faltan (contratista, usuario, teléfono)
   for (var i = 4; i < COLUMNAS_USUARIOS.length; i++) {
     if (String(hoja.getRange(1, i + 1).getValue()) === '') {
@@ -681,22 +682,37 @@ function buscarUsuario(clave) {
   if (!clave) return null;
   var hoja = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
   if (!hoja || hoja.getLastRow() < 2) return null;
-  var datos = hoja.getRange(2, 1, hoja.getLastRow() - 1, 6).getValues();
+  var datos = hoja.getRange(2, 1, hoja.getLastRow() - 1, 9).getValues();
   for (var i = 0; i < datos.length; i++) {
     var r = datos[i];
     if (String(r[2]).trim() !== clave) continue;
     if (usuarioInactivo(r[3])) return null;
     var nombre = String(r[0]).trim();
     if (!nombre) return null;
-    return { nombre: nombre, usuario: loginDe(r), rol: rolDe(r[1]), terceros: esAfirmativo(r[4]) };
+    var u = { nombre: nombre, usuario: loginDe(r), rol: rolDe(r[1]), terceros: esAfirmativo(r[4]) };
+    if (u.rol === 'supervisor') {   // qué supervisa (vacío = todo): proyectos por id y técnicos por usuario, con sus nombres para reconocer registros antiguos
+      u.proyectos = listaDe(r[7]); u.tecnicos = listaDe(r[8]);
+      u.tecnicosNombres = u.tecnicos.map(function (login) {
+        for (var k = 0; k < datos.length; k++) if (String(datos[k][0]).trim() && normNombre(loginDe(datos[k])) === normNombre(login)) return String(datos[k][0]).trim();
+        return login;
+      });
+    }
+    return u;
   }
   return null;
+}
+
+/** "a, b,c" → ['a','b','c'] (sin vacíos ni repetidos). */
+function listaDe(v) {
+  var vistos = {}, res = [];
+  String(v === undefined || v === null ? '' : v).split(',').forEach(function (x) { x = x.trim(); if (x && !vistos[x]) { vistos[x] = true; res.push(x); } });
+  return res;
 }
 
 /** Personas activas con teléfono, para que quien las necesite les escriba por WhatsApp. Sin claves. */
 function contactosUsuarios() {
   return listarUsuarios().filter(function (u) { return u.activo && u.telefono; })
-    .map(function (u) { return { nombre: u.nombre, usuario: u.usuario, rol: u.rol, telefono: u.telefono }; });
+    .map(function (u) { return { nombre: u.nombre, usuario: u.usuario, rol: u.rol, telefono: u.telefono, supervisa: u.rol === 'supervisor' ? u.tecnicos : undefined }; });
 }
 
 /** Con qué se entra: la columna Usuario; si está vacía (cuentas antiguas), el nombre. */
@@ -866,9 +882,9 @@ function eliminarProyecto(d) {
 function listarUsuarios() {
   var hoja = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_USUARIOS);
   if (!hoja || hoja.getLastRow() < 2) return [];
-  return hoja.getRange(2, 1, hoja.getLastRow() - 1, 7).getValues()
+  return hoja.getRange(2, 1, hoja.getLastRow() - 1, 9).getValues()
     .filter(function (r) { return String(r[0]).trim(); })
-    .map(function (r) { return { nombre: String(r[0]).trim(), usuario: loginDe(r), rol: rolDe(r[1]), clave: String(r[2]).trim(), activo: !usuarioInactivo(r[3]), terceros: esAfirmativo(r[4]), telefono: String(r[6] === undefined ? '' : r[6]).trim() }; });
+    .map(function (r) { return { nombre: String(r[0]).trim(), usuario: loginDe(r), rol: rolDe(r[1]), clave: String(r[2]).trim(), activo: !usuarioInactivo(r[3]), terceros: esAfirmativo(r[4]), proyectos: listaDe(r[7]), tecnicos: listaDe(r[8]), telefono: String(r[6] === undefined ? '' : r[6]).trim() }; });
 }
 
 /** Elimina una cuenta por su usuario. Los registros que hizo se conservan en la hoja (llevan su nombre y usuario). No puedes eliminarte a ti mismo. */
@@ -910,7 +926,7 @@ function guardarUsuario(d) {
 
   var hoja = prepararUsuarios();
   var n = hoja.getLastRow();
-  var datos = n > 1 ? hoja.getRange(2, 1, n - 1, 7).getValues() : [];
+  var datos = n > 1 ? hoja.getRange(2, 1, n - 1, 9).getValues() : [];
   var fila = 0;
   datos.forEach(function (r, i) { if (!fila && normNombre(loginDe(r)) === normNombre(login)) fila = i + 2; });
   // la fila de ejemplo que crea el sistema (inactiva y sin clave) se reutiliza en vez de dejarla ahí
@@ -927,10 +943,14 @@ function guardarUsuario(d) {
   // teléfono (WhatsApp): si no se envía, se conserva el que ya tenía
   var telefono = fila ? String(hoja.getRange(fila, 7).getValue()).trim() : '';
   if (d.telefono !== undefined && d.telefono !== null) telefono = String(d.telefono).trim();
-  var valores = [textoSeguro(nombre), rol, clave, activo ? 'si' : 'no', terceros ? 'si' : 'no', textoSeguro(login), telefono ? textoSeguro(telefono) : ''];
-  if (fila) hoja.getRange(fila, 1, 1, 7).setValues([valores]);
+  // qué supervisa (solo supervisores): si no se envía, se conserva; vacío = todo
+  var previoP = fila ? listaDe(hoja.getRange(fila, 8).getValue()) : [], previoT = fila ? listaDe(hoja.getRange(fila, 9).getValue()) : [];
+  var proyectos = rol !== 'supervisor' ? [] : Array.isArray(d.proyectos) ? listaDe(d.proyectos.join(',')) : previoP;
+  var tecnicos = rol !== 'supervisor' ? [] : Array.isArray(d.tecnicos) ? listaDe(d.tecnicos.join(',')) : previoT;
+  var valores = [textoSeguro(nombre), rol, clave, activo ? 'si' : 'no', terceros ? 'si' : 'no', textoSeguro(login), telefono ? textoSeguro(telefono) : '', proyectos.join(','), tecnicos.join(',')];
+  if (fila) hoja.getRange(fila, 1, 1, 9).setValues([valores]);
   else { hoja.appendRow(valores); }
-  return { ok: true, usuario: { nombre: nombre, usuario: login, rol: rol, clave: clave, activo: activo, terceros: terceros, telefono: telefono } };
+  return { ok: true, usuario: { nombre: nombre, usuario: login, rol: rol, clave: clave, activo: activo, terceros: terceros, telefono: telefono, proyectos: proyectos, tecnicos: tecnicos } };
 }
 
 /** Un latido por teléfono con jornada: sobrescribe SU fila (solo se guarda la última posición, sin historial de rutas). */
@@ -981,8 +1001,28 @@ function registrarLatido(d, ahora) {
 }
 
 /** Datos para el mapa en vivo (los consume la página con google.script.run). Exige TOKEN_ADMIN. */
-function datosEquipo(token) {
+/**
+ * Filtro de un supervisor: { proyectos: [nombres de pestaña], tecnicos: [usuarios], nombres: [nombres de esos técnicos], yo: { usuario, nombre } }.
+ * Una lista vacía no restringe. Devuelve funciones que dicen si un proyecto, un técnico o un registro se ve.
+ */
+function filtroAlcance(a) {
+  if (!a) return { proyecto: function () { return true; }, persona: function () { return true; }, hay: false };
+  var ps = {}, ls = {}, ns = {};
+  (a.proyectos || []).forEach(function (x) { ps[minusculas(x)] = true; });
+  (a.tecnicos || []).forEach(function (x) { ls[normNombre(x)] = true; });
+  (a.nombres || []).forEach(function (x) { ns[normNombre(x)] = true; });
+  if (a.yo) { ls[normNombre(a.yo.usuario)] = true; ns[normNombre(a.yo.nombre)] = true; }   // lo que registra el propio supervisor siempre lo ve
+  var conP = (a.proyectos || []).length > 0, conT = (a.tecnicos || []).length > 0;
+  return {
+    hay: conP || conT,
+    proyecto: function (nombre) { return !conP || !!ps[minusculas(nombre)]; },
+    persona: function (usuario, nombre) { return !conT || !!ls[normNombre(usuario)] || !!ns[normNombre(nombre)]; },
+  };
+}
+
+function datosEquipo(token, alcance) {
   if (token !== TOKEN_ADMIN) throw new Error('Acceso denegado');
+  var filtro = filtroAlcance(alcance);
   var libro = SpreadsheetApp.getActiveSpreadsheet();
   var ahora = new Date();
   var iso = function (v) { return v instanceof Date ? v.toISOString() : v; };
@@ -992,6 +1032,8 @@ function datosEquipo(token) {
   if (hE && hE.getLastRow() > 1) {
     hE.getRange(2, 1, hE.getLastRow() - 1, COL_EQUIPO.length).getValues().forEach(function (r) {
       if (!r[0]) return;
+      // supervisor con técnicos asignados: solo ellos; con solo proyectos asignados: quienes trabajan en esos proyectos
+      if (filtro.hay && !(alcance.tecnicos && alcance.tecnicos.length ? filtro.persona('', r[1]) : filtro.proyecto(r[7]))) return;
       var senal = r[3] instanceof Date ? r[3] : new Date(r[3]);
       var estado = String(r[2]);
       var efectivo = estado === 'En jornada' && (ahora - senal) / 60000 > MINUTOS_SIN_SENAL ? 'Sin señal' : estado;
@@ -1006,9 +1048,11 @@ function datosEquipo(token) {
   var iLat = col('latitud'), iLng = col('longitud'), iTec = col('tecnico'), iFab = col('fabricante'), iTecn = col('tecnologia'), iEli = col('eliminada');
   libro.getSheets().forEach(function (h) {
     if (h.getName().charAt(0) === '_' || h.getLastRow() < 2 || luminarias.length >= 5000) return;
+    if (!filtro.proyecto(h.getName())) return;
     prepararLectura(h);
     leerFilas(h).forEach(function (r) {
       if (luminarias.length >= 5000 || !r[0] || String(r[iEli]).toUpperCase().indexOf('S') === 0) return;
+      if (!filtro.persona(r[col('usuario')], r[iTec])) return;
       var q = calidad[r[iTec]] = calidad[r[iTec]] || { total: 0, conAlertas: 0, codigos: {} };
       q.total++;
       if (r[iAl]) { q.conAlertas++; String(r[iAl]).split(', ').forEach(function (c) { q.codigos[c] = (q.codigos[c] || 0) + 1; }); }

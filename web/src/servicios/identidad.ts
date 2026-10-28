@@ -6,7 +6,7 @@ import { conciliarProyectos, conciliarProyectosInfo, ProyectoRemoto } from './al
 import { listarProyectos } from './almacen';
 import { asegurarProyectos } from './configuracion';
 
-export interface Usuario { nombre: string; usuario: string; rol: Rol; clave: string; activo: boolean; terceros?: boolean; telefono?: string }
+export interface Usuario { nombre: string; usuario: string; rol: Rol; clave: string; activo: boolean; terceros?: boolean; telefono?: string; proyectos?: string[]; tecnicos?: string[] }
 export interface Contacto { nombre: string; usuario: string; rol: Rol; telefono: string }
 
 const ANTHROPIC = 'api.anthropic.com';
@@ -187,7 +187,7 @@ export async function eliminarUsuario(usuario: string): Promise<void> { await ll
 export const estadoSistema = (): Promise<{ fotos: boolean }> => llamarProxy('/sistema', { accion: 'estado' });
 export const guardarFotosEnDrive = (fotos: boolean): Promise<{ fotos: boolean }> => llamarProxy('/sistema', { accion: 'guardar', fotos });
 
-export async function guardarUsuario(u: { nombre: string; usuario?: string; telefono?: string; rol: Rol; activo: boolean; claveNueva?: boolean; clave?: string; terceros?: boolean }): Promise<Usuario> {
+export async function guardarUsuario(u: { nombre: string; usuario?: string; telefono?: string; rol: Rol; activo: boolean; claveNueva?: boolean; clave?: string; terceros?: boolean; proyectos?: string[]; tecnicos?: string[] }): Promise<Usuario> {
   return (await llamarProxy('/usuarios', { accion: 'guardar', ...u })).usuario as Usuario;
 }
 

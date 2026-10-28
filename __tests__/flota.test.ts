@@ -1005,6 +1005,70 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
     expect(m.gs.hoja('_Proyectos')!.filas.map((f: any[]) => f[1])).toEqual(['Nombre', 'Barrio A']);
   });
 
+  it('el supervisor ve SOLO los proyectos y técnicos que supervisa (registros, proyectos, panel del equipo y contactos); sin asignación ve todo', async () => {
+    const m = montar();
+    const adm = 'claveJefe99';
+    const info = async (clave: string) => (await m.post('/yo', {}, clave)).j;
+    for (const n of ['Proyecto 1', 'Proyecto 2', 'Proyecto 3']) await m.post('/sistema', { accion: 'crear_proyecto', nombre: n }, adm);
+    const id = Object.fromEntries((await info(adm)).proyectosInfo.map((p: any) => [p.nombre, p.id]));
+    // cinco técnicos: t1 y t2 en el proyecto 1, t3 en el 2, t4 y t5 en el 3 (t4 también trabajó en el 1)
+    const claves: Record<string, string> = {};
+    for (const t of ['t1', 't2', 't3', 't4', 't5']) claves[t] = (await m.crear({ nombre: 'Tec ' + t, usuario: t, rol: 'tecnico', telefono: '300 111 000' + t.slice(1) })).j.usuario.clave;
+    const registro = (t: string, proyecto: string, uuid: string) => m.post('/sync', { proyecto: { id: id[proyecto], nombre: proyecto }, luminarias: [{ uuid, fabricante: 'F-' + t, latitud: 4.7, longitud: -74, creadoEn: '2026-03-01T10:00:00.000Z' }] }, claves[t]);
+    for (const [t, p] of [['t1', 'Proyecto 1'], ['t2', 'Proyecto 1'], ['t3', 'Proyecto 2'], ['t4', 'Proyecto 3'], ['t5', 'Proyecto 3'], ['t4', 'Proyecto 1']] as const) expect((await registro(t, p, `${t}-${p}`)).j.ok).toBe(true);
+    for (const t of ['t1', 't2', 't3', 't4', 't5']) {   // todos con jornada activa
+      const r = await m.post('/sync', { accion: 'latido', estado: 'activa', dispositivo: 'disp-' + t, tecnico: 'Tec ' + t, latitud: 4.7, longitud: -74, proyecto: t === 't3' ? 'Proyecto 2' : t === 't4' || t === 't5' ? 'Proyecto 3' : 'Proyecto 1' }, claves[t]);
+      expect(r.j.ok).toBe(true);
+    }
+    const sara = (await m.crear({ nombre: 'Sara Sup', usuario: 'sara', rol: 'supervisor', telefono: '300 999 0000', proyectos: [id['Proyecto 1'], id['Proyecto 2']], tecnicos: ['t1', 't2', 't3'] })).j;
+    expect(sara.usuario).toMatchObject({ proyectos: [id['Proyecto 1'], id['Proyecto 2']], tecnicos: ['t1', 't2', 't3'] });
+    const libre = (await m.crear({ nombre: 'Luis Libre', usuario: 'luis', rol: 'supervisor' })).j.usuario.clave;   // sin asignación: ve todo
+    const S = sara.usuario.clave;
+
+    // proyectos: solo el 1 y el 2
+    const yo = await info(S);
+    expect(yo.proyectos).toEqual(['Proyecto 1', 'Proyecto 2']);
+    expect(yo.proyectosInfo.map((p: any) => p.nombre)).toEqual(['Proyecto 1', 'Proyecto 2']);
+    expect((await info(libre)).proyectos).toEqual(['Barrio A', 'Proyecto 1', 'Proyecto 2', 'Proyecto 3']);   // sin asignación ve todos (incluido el que ya existía)
+    expect((await info(adm)).proyectos).toHaveLength(4);
+    expect((await m.post('/ingresar', { usuario: 'sara', clave: S })).j.proyectos).toEqual(['Proyecto 1', 'Proyecto 2']);
+
+    // registros: del proyecto 1 solo los de t1 y t2 (el de t4, que no supervisa, no); el proyecto 3 no se puede ni leer ni escribir
+    const baja = async (clave: string, proyecto: string) => (await m.post('/sync', { accion: 'listar', proyecto: { id: id[proyecto], nombre: proyecto }, desde: '' }, clave)).j;
+    expect((await baja(S, 'Proyecto 1')).luminarias.map((l: any) => l.uuid).sort()).toEqual(['t1-Proyecto 1', 't2-Proyecto 1']);
+    expect((await baja(S, 'Proyecto 2')).luminarias.map((l: any) => l.uuid)).toEqual(['t3-Proyecto 2']);
+    expect((await baja(libre, 'Proyecto 1')).luminarias).toHaveLength(3);
+    expect((await baja(S, 'Proyecto 3'))).toMatchObject({ ok: false, codigo: 'SIN_ACCESO_PROYECTO' });
+    expect((await m.post('/sync', { proyecto: { nombre: 'proyecto 3' }, luminarias: [{ uuid: 'x1', fabricante: 'X', latitud: 1, longitud: 1 }] }, S)).j.ok).toBe(false);   // ni por nombre
+    expect((await m.post('/sync', { proyecto: { id: id['Proyecto 3'], nombre: 'Proyecto 1' }, luminarias: [{ uuid: 'x2', fabricante: 'X', latitud: 1, longitud: 1 }] }, S)).j.ok).toBe(false);   // ni mezclando nombre e id
+    // lo que registra el propio supervisor sí lo ve
+    expect((await m.post('/sync', { proyecto: { id: id['Proyecto 1'], nombre: 'Proyecto 1' }, luminarias: [{ uuid: 'sara-1', fabricante: 'Mío', latitud: 4.7, longitud: -74 }] }, S)).j.ok).toBe(true);
+    expect((await baja(S, 'Proyecto 1')).luminarias.map((l: any) => l.uuid).sort()).toEqual(['sara-1', 't1-Proyecto 1', 't2-Proyecto 1']);
+
+    // panel del equipo: solo t1, t2 y t3 (y sus luminarias); el administrador y el supervisor libre ven a los cinco
+    const equipo = async (clave: string) => (await m.post('/equipo', {}, clave)).j;
+    expect((await equipo(S)).tecnicos.map((t: any) => t.tecnico).sort()).toEqual(['Tec t1', 'Tec t2', 'Tec t3']);
+    expect(Object.keys((await equipo(S)).calidad).sort()).toEqual(['Sara Sup', 'Tec t1', 'Tec t2', 'Tec t3']);
+    expect((await equipo(S)).luminarias.map((l: any) => l.tec).sort()).toEqual(['Sara Sup', 'Tec t1', 'Tec t2', 'Tec t3']);
+    expect((await equipo(libre)).tecnicos).toHaveLength(5);
+    expect((await equipo(adm)).tecnicos).toHaveLength(5);
+
+    // contactos: sus técnicos (no los demás); el técnico ve a quien lo supervisa; el libre ve a todos los técnicos
+    const contactos = async (clave: string) => (await m.post('/contactos', {}, clave)).j.contactos.map((c: any) => c.usuario).sort();
+    expect(await contactos(S)).toEqual(['t1', 't2', 't3']);
+    expect(await contactos(claves.t1)).toContain('sara');
+    expect(await contactos(claves.t4)).not.toContain('sara');                // t4 no está a cargo de Sara
+    expect(await contactos(libre)).toEqual(['t1', 't2', 't3', 't4', 't5']);          // un supervisor ve a los técnicos (todos, si no tiene asignación) y a los administradores
+
+    // editar sin enviar las listas las conserva; dejar de ser supervisor las borra; solo proyectos asignados: ve a quienes trabajan en ellos
+    expect((await m.crear({ nombre: 'Sara Sup', usuario: 'sara', rol: 'supervisor', telefono: '300 999 0001' })).j.usuario).toMatchObject({ tecnicos: ['t1', 't2', 't3'] });
+    expect((await m.crear({ nombre: 'Sara Sup', usuario: 'sara', rol: 'supervisor', proyectos: [id['Proyecto 3']], tecnicos: [] })).j.usuario).toMatchObject({ proyectos: [id['Proyecto 3']], tecnicos: [] });
+    expect((await equipo(S)).tecnicos.map((t: any) => t.tecnico).sort()).toEqual(['Tec t4', 'Tec t5']);
+    expect((await baja(S, 'Proyecto 3')).luminarias).toHaveLength(2);
+    expect((await m.crear({ nombre: 'Sara Sup', usuario: 'sara', rol: 'tecnico' })).j.usuario).toMatchObject({ proyectos: [], tecnicos: [] });
+    for (const mala of [{ proyectos: 'x' }, { tecnicos: [1] }, { tecnicos: ['a,b'] }, { proyectos: Array(201).fill('p') }]) expect((await m.crear({ nombre: 'Sara Sup', usuario: 'sara', rol: 'supervisor', ...mala })).status).toBe(400);
+  });
+
   it('un script viejo en el servidor (sin información de proyectos): solo van los nombres', async () => {
     const m = montar();
     const tec = (await m.crear({ nombre: 'Ana', usuario: 'ana', rol: 'tecnico' })).j.usuario.clave;

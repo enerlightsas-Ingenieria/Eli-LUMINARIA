@@ -11,7 +11,7 @@ import { codigoPaisDeLaEmpresa, enlaceWa } from '../servicios/whatsapp';
 const ROLES: { valor: Rol; texto: string }[] = [{ valor: 'tecnico', texto: 'Técnico' }, { valor: 'supervisor', texto: 'Supervisor' }, { valor: 'admin', texto: 'Administrador' }];
 const TEXTO_ROL: Record<Rol, string> = { tecnico: 'Técnico', supervisor: 'Supervisor', admin: 'Administrador' };
 
-interface Edicion { original?: Usuario; nombre: string; usuario: string; telefono: string; usuarioTocado: boolean; rol: Rol; activo: boolean; terceros: boolean; clave: string }
+interface Edicion { original?: Usuario; nombre: string; usuario: string; telefono: string; usuarioTocado: boolean; rol: Rol; activo: boolean; terceros: boolean; clave: string; proyectos: string[]; tecnicos: string[] }
 
 /** Propuesta de usuario a partir del nombre: inicial del primer nombre + último apellido, en minúsculas y sin tildes (Juan Pérez → jperez). */
 export const sugerirUsuario = (nombre: string) => {
@@ -22,7 +22,7 @@ export const sugerirUsuario = (nombre: string) => {
 
 /** Administración de usuarios: crea personas con usuario y clave, define su rol, da de baja y entrega sus datos de acceso. Solo administradores. */
 export function AdminUsuarios() {
-  const { ajustes, proyectos } = useApp();
+  const { ajustes, proyectos, inactivos } = useApp();
   const [lista, setLista] = useState<Usuario[] | null>(null);
   const [superusuarios, setSuperusuarios] = useState<string[]>([]);
   const [error, setError] = useState('');
@@ -40,6 +40,9 @@ export function AdminUsuarios() {
 
   if (rolDe(ajustes) !== 'admin') return <><Cabecera titulo="Usuarios" atras={() => ir('/admin')} /><p className="muted">Solo los administradores pueden gestionar usuarios.</p></>;
 
+  const todosProyectos = [...proyectos, ...inactivos].filter((p) => !!p.idHoja);
+  const tecnicosActivos = (lista ?? []).filter((u) => u.rol === 'tecnico' && u.activo);
+  const alternar = (l: string[], v: string) => (l.includes(v) ? l.filter((x) => x !== v) : [...l, v]);
   const direccion = `${location.origin}${location.pathname}`;
   const mostrarAcceso = async (u: Usuario) => setAcceso({ usuario: u, url: await enlaceDeAcceso(u, { proyectos: proyectos.map((p) => p.nombre), terceros: !!u.terceros && u.rol === 'tecnico' }) });
   const mensajeDeAcceso = (u: Usuario) => `ELI-LUMINARIA\nEntra aquí: ${direccion}\nUsuario: ${u.usuario}\nClave: ${u.clave}\n(Es personal: no la compartas.)`;
@@ -55,7 +58,7 @@ export function AdminUsuarios() {
     if (claveNueva && !(await confirmar('Generar clave nueva', 'La clave anterior dejará de funcionar y tendrás que entregarle la nueva.', 'Generar'))) return;
     setOcupado(true);
     try {
-      const u = await guardarUsuario({ nombre, usuario, telefono: edicion.telefono.trim(), rol: edicion.rol, activo: edicion.activo, terceros: edicion.rol === 'tecnico' && edicion.terceros, claveNueva: claveNueva && !clave, ...(clave ? { clave } : {}) });
+      const u = await guardarUsuario({ nombre, usuario, telefono: edicion.telefono.trim(), rol: edicion.rol, activo: edicion.activo, terceros: edicion.rol === 'tecnico' && edicion.terceros, claveNueva: claveNueva && !clave, ...(clave ? { clave } : {}), ...(edicion.rol === 'supervisor' ? { proyectos: edicion.proyectos, tecnicos: edicion.tecnicos } : {}) });
       setEdicion(null);
       await cargar();
       if (u.activo) await mostrarAcceso(u);
@@ -95,7 +98,7 @@ export function AdminUsuarios() {
   return (
     <>
       <Cabecera titulo="Usuarios" subtitulo="Personas con acceso y su rol" atras={() => ir('/admin')}
-        acciones={[{ icono: 'mas', etiqueta: 'Nuevo usuario', onClick: () => setEdicion({ nombre: '', usuario: '', telefono: '', usuarioTocado: false, rol: 'tecnico', activo: true, terceros: false, clave: '' }) }]} />
+        acciones={[{ icono: 'mas', etiqueta: 'Nuevo usuario', onClick: () => setEdicion({ nombre: '', usuario: '', telefono: '', usuarioTocado: false, rol: 'tecnico', activo: true, terceros: false, clave: '', proyectos: [], tecnicos: [] }) }]} />
       <p className="muted" style={{ marginBottom: 12 }}>
         Cada persona entra a la web con su <b>usuario</b> (su nombre) y su <b>clave</b>. <b>Técnico:</b> captura y ve sus registros. <b>Supervisor:</b> además ve el panel del equipo. <b>Administrador:</b> además crea y da de baja usuarios.
       </p>
@@ -117,7 +120,7 @@ export function AdminUsuarios() {
       <div className="pila">
         {lista?.filter((u) => u.activo).map((u) => (
           <button key={u.nombre} type="button" className="tarjeta item" style={{ opacity: u.activo ? 1 : 0.6 }} aria-label={`${u.nombre}, ${TEXTO_ROL[u.rol]}${u.activo ? '' : ', de baja'}`}
-            onClick={() => setEdicion({ original: u, nombre: u.nombre, usuario: u.usuario, telefono: u.telefono ?? '', usuarioTocado: true, rol: u.rol, activo: u.activo, terceros: !!u.terceros, clave: '' })}>
+            onClick={() => setEdicion({ original: u, nombre: u.nombre, usuario: u.usuario, telefono: u.telefono ?? '', usuarioTocado: true, rol: u.rol, activo: u.activo, terceros: !!u.terceros, clave: '', proyectos: u.proyectos ?? [], tecnicos: u.tecnicos ?? [] })}>
             <div style={{ flex: 1 }}>
               <div className="t">{u.nombre}</div>
               <div className="s">Usuario: {u.usuario}{u.telefono ? ` · ${u.telefono}` : ''}</div>
@@ -154,6 +157,21 @@ export function AdminUsuarios() {
         <Campo etiqueta={edicion?.original ? 'Clave nueva (opcional)' : 'Clave (opcional)'} valor={edicion?.clave ?? ''} alCambiar={(t) => setEdicion((e) => e && { ...e, clave: t })} pista={edicion?.original ? 'Déjala vacía para conservar la actual' : 'Vacía = el sistema genera una fácil de teclear'} />
         <p className="muted" style={{ margin: '4px 0' }}>Rol</p>
         <Segmentado valor={edicion?.rol ?? 'tecnico'} alCambiar={(rol) => setEdicion((e) => e && { ...e, rol })} opciones={ROLES} />
+        {edicion?.rol === 'supervisor' && (
+          <div data-testid="alcance" style={{ marginTop: 12 }}>
+            <p className="muted" style={{ margin: '4px 0' }}><b>¿Qué supervisa?</b> Marca solo lo que debe ver. Si no marcas nada en una lista, ve todo.</p>
+            <p className="muted" style={{ margin: '8px 0 2px', fontWeight: 700 }}>Proyectos</p>
+            {todosProyectos.map((p) => (
+              <label key={p.idHoja} className="interruptor"><input type="checkbox" checked={edicion.proyectos.includes(p.idHoja!)} onChange={() => setEdicion((x) => x && { ...x, proyectos: alternar(x.proyectos, p.idHoja!) })} /> {p.nombre}</label>
+            ))}
+            {!todosProyectos.length && <p className="muted">Aún no hay proyectos.</p>}
+            <p className="muted" style={{ margin: '8px 0 2px', fontWeight: 700 }}>Técnicos</p>
+            {tecnicosActivos.map((t) => (
+              <label key={t.usuario} className="interruptor"><input type="checkbox" checked={edicion.tecnicos.includes(t.usuario)} onChange={() => setEdicion((x) => x && { ...x, tecnicos: alternar(x.tecnicos, t.usuario) })} /> {t.nombre} ({t.usuario})</label>
+            ))}
+            {!tecnicosActivos.length && <p className="muted">Aún no hay técnicos.</p>}
+          </div>
+        )}
         <label className="interruptor" style={{ marginTop: 12 }}><input type="checkbox" checked={edicion?.activo ?? true} onChange={(e) => setEdicion((x) => x && { ...x, activo: e.target.checked })} /> Con acceso (desmarca para dar de baja)</label>
         {edicion?.rol === 'tecnico' && <label className="interruptor"><input type="checkbox" checked={edicion.terceros} onChange={(e) => setEdicion((x) => x && { ...x, terceros: e.target.checked })} /> Contratista (modo terceros: solo con jornada, cámara y GPS preciso)</label>}
         <div className="pila">
