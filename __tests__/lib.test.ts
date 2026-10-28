@@ -1,7 +1,7 @@
 import { aCsv, aGeoJson, aKml } from '../src/lib/formats';
 import { distanciaM, masCercano, coordenadaValida } from '../src/lib/geo';
 import { normalizaTecnologia, resumir } from '../src/lib/stats';
-import { CAMPOS, caracteristicasVacias, Luminaria, normalizarFotocelda, normalizarMaterialPoste, normalizarMontaje, normalizarTecnologia, TECNOLOGIAS } from '../src/types';
+import { CAMPOS, caracteristicasVacias, Luminaria, normalizarControl, normalizarMaterialPoste, normalizarMontaje, normalizarTecnologia, TECNOLOGIAS } from '../src/types';
 
 const base = (o: Partial<Luminaria> = {}): Luminaria => ({
   ...caracteristicasVacias(), id: 1, uuid: 'u1', proyectoId: 1, creadoEn: '2026-01-01T00:00:00Z',
@@ -57,7 +57,7 @@ describe('stats', () => {
     expect(normalizaTecnologia('')).toBe('Sin identificar');
   });
   it('resume potencia y conteos', () => {
-    const r = resumir([base({ potenciaW: '150', tecnologia: 'LED', fotocelda: 'Sí' }), base({ id: 2, potenciaW: '70,5', tecnologia: 'led', sincronizado: true })]);
+    const r = resumir([base({ potenciaW: '150', tecnologia: 'LED', control: 'Fotocelda' }), base({ id: 2, potenciaW: '70,5', tecnologia: 'led', sincronizado: true })]);
     expect(r.total).toBe(2); expect(r.potenciaTotalKw).toBeCloseTo(0.221, 2);
     expect(r.porTecnologia[0]).toEqual({ nombre: 'LED', cantidad: 2 });
     expect(r.sincronizadas).toBe(1);
@@ -97,9 +97,12 @@ describe('campos de la luminaria (alumbrado público)', () => {
   });
 });
 
-describe('campos nuevos: fotocelda Sí/No, montaje, material del poste, sector y transformador', () => {
-  it('fotocelda es binaria: lo antiguo y lo que diga la IA se lleva a Sí/No', () => {
-    for (const [e, r] of [['', ''], ['Sí', 'Sí'], ['si', 'Sí'], ['No', 'No'], ['Sin fotocelda', 'No'], ['ninguna', 'No'], ['NEMA / twist-lock', 'Sí'], ['Integrada', 'Sí'], ['Externa', 'Sí']]) expect(normalizarFotocelda(e)).toBe(r);
+describe('campos nuevos: control, montaje, material del poste, sector y transformador', () => {
+  it('control: Fotocelda, Telegestión, Sin control u Otro; lo antiguo (Sí/No) y lo que diga la IA se lleva a esas opciones', () => {
+    for (const [e, r] of [['', ''], ['Fotocelda', 'Fotocelda'], ['Sí', 'Fotocelda'], ['si', 'Fotocelda'], ['NEMA / twist-lock', 'Fotocelda'], ['Integrada', 'Fotocelda'], ['Externa', 'Fotocelda'],
+      ['No', 'Sin control'], ['Sin fotocelda', 'Sin control'], ['ninguna', 'Sin control'], ['Sin control', 'Sin control'],
+      ['Telegestión', 'Telegestión'], ['telegestion', 'Telegestión'], ['módulo de telecontrol', 'Telegestión'],
+      ['Otro', 'Otro'], ['otro: reloj astronómico', 'Otro: reloj astronómico'], ['Otra: x', 'Otro: x'], ['reloj astronómico', 'Otro: reloj astronómico']]) expect(normalizarControl(e)).toBe(r);
   });
   it('montaje: Poste, Fachada u Otro: <cuál>; un dato antiguo (Brazo) queda como Otro', () => {
     for (const [e, r] of [['', ''], ['poste', 'Poste'], ['Fachada', 'Fachada'], ['Brazo', 'Otro: Brazo'], ['Suspendida', 'Otro: Suspendida'], ['Otro', 'Otro'], ['otro: en torre', 'Otro: en torre'], ['Otra: x', 'Otro: x']]) expect(normalizarMontaje(e)).toBe(r);
@@ -111,8 +114,8 @@ describe('campos nuevos: fotocelda Sí/No, montaje, material del poste, sector y
   it('los campos retirados ya no existen y los nuevos sí; el material solo se muestra con montaje en poste', () => {
     const claves = CAMPOS.map((c) => c.key as string);
     for (const k of ['modelo', 'tensionV', 'pinesFotocelda', 'temperaturaColorK', 'ip']) expect(claves).not.toContain(k);
-    expect(claves).toEqual(['fabricante', 'tecnologia', 'potenciaW', 'fotocelda', 'montaje', 'materialPoste', 'numeroTransformador', 'estado', 'observaciones']);
-    expect(CAMPOS.find((c) => c.key === 'fotocelda')).toMatchObject({ opciones: ['Sí', 'No'], soloOpciones: true });
+    expect(claves).toEqual(['fabricante', 'tecnologia', 'potenciaW', 'control', 'montaje', 'materialPoste', 'numeroTransformador', 'estado', 'observaciones']);
+    expect(CAMPOS.find((c) => c.key === 'control')).toMatchObject({ label: 'Control', opciones: ['Fotocelda', 'Telegestión', 'Sin control', 'Otro (¿cuál?)'] });
     expect(CAMPOS.find((c) => c.key === 'materialPoste')!.opciones).toEqual(['Concreto', 'Madera', 'Metálico', 'Fibra de vidrio', 'Fibra de vidrio traslúcido', 'Otro (¿cuál?)']);
     const v = CAMPOS.find((c) => c.key === 'materialPoste')!.visibleSi!;
     expect(v({ ...caracteristicasVacias(), montaje: 'Poste' })).toBe(true);
@@ -122,7 +125,7 @@ describe('campos nuevos: fotocelda Sí/No, montaje, material del poste, sector y
   it('la hoja devuelve sector y transformador y la app los normaliza', () => {
     const { normalizarRemota } = require('../src/lib/fusion');
     const x = normalizarRemota({ uuid: 'a', sector: 'rural', numeroTransformador: 55, fotocelda: 'Integrada', montaje: 'Brazo', materialPoste: 'concreto' });
-    expect(x.datos).toMatchObject({ sector: 'Rural', numeroTransformador: '55', fotocelda: 'Sí', montaje: 'Otro: Brazo', materialPoste: 'Concreto' });
+    expect(x.datos).toMatchObject({ sector: 'Rural', numeroTransformador: '55', control: 'Fotocelda', montaje: 'Otro: Brazo', materialPoste: 'Concreto' });
     expect(normalizarRemota({ uuid: 'b', sector: 'otro' }).datos.sector).toBe('');
   });
 });

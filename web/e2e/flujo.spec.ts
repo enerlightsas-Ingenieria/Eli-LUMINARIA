@@ -57,7 +57,7 @@ test('técnico: configura por enlace, captura con IA, guarda y se sincroniza a l
   expect(imagenes[0].source.data.length).toBeGreaterThan(500);                      // una foto real de la cámara simulada
 
   await expect(page.getByLabel('Fabricante', { exact: true })).toHaveValue('Philips');   // la IA rellenó el formulario
-  await expect(page.getByRole('group', { name: 'Opciones para Fotocelda' }).getByRole('button', { name: 'Sí', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByRole('group', { name: 'Opciones para Control' }).getByRole('button', { name: 'Fotocelda', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByLabel('Material del poste', { exact: true })).toHaveValue('Concreto');   // con montaje en poste aparece el material
   await expect(page.getByLabel('Modelo', { exact: true })).toHaveCount(0);                            // campos retirados
   await expect(page.getByLabel('Tensión (V)', { exact: true })).toHaveCount(0);
@@ -74,7 +74,7 @@ test('técnico: configura por enlace, captura con IA, guarda y se sincroniza a l
   await expect(page.getByText('P-001 · Philips')).toBeVisible();
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);   // sincronización automática (3 s después de guardar)
   const fila = filas(b, 'Barrio A')[0];
-  expect(fila).toMatchObject({ Fabricante: 'Philips', 'Código de la luminaria': 'P-001', Técnico: 'Ana', Tecnología: 'LED', Fotocelda: 'Sí', Montaje: 'Poste', 'Material del poste': 'Concreto', Sector: 'Rural', 'N.º transformador': 'T-123', Dirección: 'Carrera 7 12-30, Bogotá', Barrio: 'La Candelaria', Latitud: 4.711, Longitud: -74.0721, 'Origen de la foto': 'camara' });
+  expect(fila).toMatchObject({ Fabricante: 'Philips', 'Código de la luminaria': 'P-001', Técnico: 'Ana', Tecnología: 'LED', Control: 'Fotocelda', Montaje: 'Poste', 'Material del poste': 'Concreto', Sector: 'Rural', 'N.º transformador': 'T-123', Dirección: 'Carrera 7 12-30, Bogotá', Barrio: 'La Candelaria', Latitud: 4.711, Longitud: -74.0721, 'Origen de la foto': 'camara' });
   await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);                          // ya no figura como pendiente
 });
 
@@ -120,7 +120,7 @@ test('sin conexión: captura manual con opciones rápidas y se envía sola al vo
   await capturar(page, 'manual');
   await page.getByLabel('Fabricante', { exact: true }).fill('Schréder');
   await page.getByRole('group', { name: 'Opciones para Tecnología' }).getByRole('button', { name: 'LED', exact: true }).click();
-  await page.getByRole('group', { name: 'Opciones para Fotocelda' }).getByRole('button', { name: 'No', exact: true }).click();
+  await page.getByRole('group', { name: 'Opciones para Control' }).getByRole('button', { name: 'Sin control', exact: true }).click();
   await page.getByRole('group', { name: 'Opciones para Montaje' }).getByRole('button', { name: 'Fachada', exact: true }).click();
   await expect(page.getByLabel('Material del poste', { exact: true })).toHaveCount(0);                // fachada: no hay material de poste
   await expect(page.getByLabel('Tecnología', { exact: true })).toHaveValue('LED');
@@ -131,7 +131,7 @@ test('sin conexión: captura manual con opciones rápidas y se envía sola al vo
 
   await ctx.setOffline(false);                                                       // vuelve la señal
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);
-  expect(filas(b, 'Barrio A')[0]).toMatchObject({ Fabricante: 'Schréder', Tecnología: 'LED', Fotocelda: 'No', Montaje: 'Fachada', 'Material del poste': '' });
+  expect(filas(b, 'Barrio A')[0]).toMatchObject({ Fabricante: 'Schréder', Tecnología: 'LED', Control: 'Sin control', Montaje: 'Fachada', 'Material del poste': '' });
   await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);
 });
 
@@ -648,4 +648,53 @@ test('otras IAs: el administrador pega la clave de Groq desde la app, la elige c
   await dialogo(admin.page).getByRole('button', { name: 'Quitar', exact: true }).click();
   await expect(groq).toContainText('❌ Sin clave');
   expect(b.gs.propiedades.has('IA_KEY_groq')).toBe(false);
+});
+
+test('proyectos: solo el administrador los edita; renombrar no crea otro; desactivar los oculta a todos; eliminar borra la hoja', async ({ browser }) => {
+  const b = crearBackend();
+  for (const nombre of ['Barrio A', 'Zona 2']) await b.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'listar', proyecto: { nombre }, desde: '' }) });   // proyectos que ya existen en la hoja
+  const admin = await telefono(browser, b); const ana = await telefono(browser, b);
+  await configurar(admin.page, enlace({ token: 'tokSup', proyectos: ['Barrio A', 'Zona 2'] }));
+  await configurar(ana.page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A', 'Zona 2'] }));
+  const alDia = async (p: Page) => { await p.evaluate(() => window.dispatchEvent(new Event('online'))); await p.waitForTimeout(1500); };   // la app vuelve a preguntar al servidor
+  for (const p of [admin.page, ana.page]) await p.getByRole('link', { name: 'Proyectos' }).click();
+
+  // un técnico no ve cómo editar proyectos (sí puede crear uno nuevo)
+  await expect(ana.page.getByRole('button', { name: /Editar/ })).toHaveCount(0);
+  await expect(ana.page.getByRole('button', { name: 'Nuevo proyecto' })).toBeVisible();
+
+  // el administrador cambia nombre y cliente: es la MISMA pestaña, no aparece un proyecto nuevo con el nombre viejo
+  await admin.page.getByRole('button', { name: 'Editar Barrio A' }).click();
+  await admin.page.getByLabel('Nombre', { exact: true }).fill('Barrio Nuevo');
+  await admin.page.getByLabel('Cliente / municipio').fill('Soacha');
+  await admin.page.getByRole('button', { name: 'Guardar', exact: true }).click();
+  await expect(admin.page.getByRole('button', { name: /Proyecto Barrio Nuevo/ })).toBeVisible();
+  await expect(admin.page.getByRole('button', { name: /Proyecto Barrio A\b/ })).toHaveCount(0);
+  expect(b.gs.hoja('Barrio A')).toBeUndefined(); expect(b.gs.hoja('Barrio Nuevo')).toBeDefined();
+  await alDia(ana.page);
+  await expect(ana.page.getByRole('button', { name: /Proyecto Barrio Nuevo/ })).toBeVisible();
+  await expect(ana.page.getByRole('button', { name: /Proyecto Barrio A\b/ })).toHaveCount(0);
+  await expect(ana.page.getByRole('button', { name: /^Proyecto / })).toHaveCount(3);        // General (local), Barrio Nuevo y Zona 2: ninguno duplicado
+
+  // desactivar: desaparece para Ana; el administrador lo ve en "Desactivados" y puede activarlo
+  await admin.page.getByRole('button', { name: 'Editar Barrio Nuevo' }).click();
+  await admin.page.getByRole('button', { name: 'Desactivar proyecto' }).click();
+  await boton(admin.page, 'Desactivar');
+  await expect(admin.page.getByTestId('proyecto-inactivo')).toContainText('Barrio Nuevo');
+  await alDia(ana.page);
+  await expect(ana.page.getByRole('button', { name: /Proyecto Barrio Nuevo/ })).toHaveCount(0);
+  await admin.page.getByRole('button', { name: 'Activar', exact: true }).click();
+  await alDia(ana.page);
+  await expect(ana.page.getByRole('button', { name: /Proyecto Barrio Nuevo/ })).toBeVisible();
+
+  // eliminar: dos confirmaciones; se borra la pestaña del archivo y desaparece de todos
+  await admin.page.getByRole('button', { name: 'Editar Barrio Nuevo' }).click();
+  await admin.page.getByRole('button', { name: 'Eliminar proyecto' }).click();
+  await boton(admin.page, 'Continuar');
+  await boton(admin.page, 'Sí, eliminar todo');
+  await expect(admin.page.getByRole('button', { name: /Proyecto Barrio Nuevo/ })).toHaveCount(0);
+  expect(b.gs.hoja('Barrio Nuevo')).toBeUndefined();
+  expect(b.gs.hoja('_Proyectos')!.filas.map((f: any[]) => f[1]).sort()).toEqual(['General', 'Nombre', 'Zona 2']);   // sin el eliminado (General nace al sincronizar el proyecto local)
+  await alDia(ana.page);
+  await expect(ana.page.getByRole('button', { name: /Proyecto Barrio Nuevo/ })).toHaveCount(0);
 });

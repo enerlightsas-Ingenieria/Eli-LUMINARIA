@@ -21,7 +21,7 @@ import type { RootStackParams } from '../navigation';
 const RANURAS = [
   { titulo: 'General', ayuda: 'La luminaria completa, con el poste y el brazo' },
   { titulo: 'Placa / etiqueta', ayuda: 'Acércate a la placa con fabricante, modelo y potencia' },
-  { titulo: 'Fotocelda', ayuda: 'El receptáculo de la fotocelda, para contar sus pines' },
+  { titulo: 'Control', ayuda: 'La fotocelda o el módulo de control, si lo hay' },
 ];
 
 export function CapturarScreen() {
@@ -162,7 +162,7 @@ export function CapturarScreen() {
     <View style={{ flex: 1, backgroundColor: c.bg }}>
     <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
       <Text style={{ color: c.muted, lineHeight: 20, marginBottom: 14 }}>
-        Con una foto general basta. Si añades la <Text style={{ color: c.text, fontWeight: '700' }}>placa</Text> y la <Text style={{ color: c.text, fontWeight: '700' }}>fotocelda</Text>, la IA identifica mucho mejor fabricante, potencia y pines.
+        Con una foto general basta. Si añades la <Text style={{ color: c.text, fontWeight: '700' }}>placa</Text> y la <Text style={{ color: c.text, fontWeight: '700' }}>control</Text>, la IA identifica mucho mejor fabricante, potencia y pines.
       </Text>
 
       {cfg.modoTerceros && !evaluacion.ok && <Text style={{ color: c.warn, marginBottom: 10, lineHeight: 19 }}>{evaluacion.mensaje}</Text>}

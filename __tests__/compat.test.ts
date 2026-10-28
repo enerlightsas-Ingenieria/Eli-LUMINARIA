@@ -45,13 +45,14 @@ describe('pestañas creadas con una versión anterior del script (27 columnas)',
   it('al enviar, completa los encabezados nuevos al final y no mueve ni pisa los datos existentes', async () => {
     const r = await post(srv, { proyecto: { nombre: 'Barrio A' }, luminarias: [{ uuid: 'u3', fabricante: 'Nueva', tecnico: 'Beto', creadoEn: '2026-03-10T08:00:00.000Z', origen: 'camara', jornadaId: 'j', latitud: 4.8, longitud: -74.1, ubicacionSimulada: false }] });
     expect(r.ok).toBe(true);
-    expect(vieja.maxColumnas).toBeGreaterThanOrEqual(31);
-    expect(vieja.filas[0].slice(27, 31)).toEqual(['Origen de la foto', 'Ubicación simulada', 'ID jornada', 'Alertas']);
-    expect(vieja.filas[0].slice(0, 27)).toEqual(ENCABEZADO_ANTIGUO);
-    expect(vieja.filas[1].slice(0, 27)).toEqual(filaAntigua('u1', 'Vieja'));          // fila vieja intacta (salvo columnas nuevas)
-    expect(vieja.filas[2][25]).toBe('SÍ');                                              // la eliminada sigue marcada
+    // las columnas de campos retirados (modelo, tensión, pines, temperatura, IP) se borran; "Fotocelda" pasa a "Control"; lo demás no se mueve de orden
+    const sinRetiradas = ENCABEZADO_ANTIGUO.filter((h) => !['Modelo', 'Tensión (V)', 'Pines fotocelda', 'Temp. color (K)', 'IP'].includes(h)).map((h) => (h === 'Fotocelda' ? 'Control' : h));
+    expect(vieja.filas[0].slice(0, 22)).toEqual(sinRetiradas);
+    expect(vieja.filas[0].slice(22, 26)).toEqual(['Origen de la foto', 'Ubicación simulada', 'ID jornada', 'Alertas']);
+    expect(vieja.filas[1][0]).toBe('u1'); expect(vieja.filas[1][10]).toBe('Vieja');   // la fila vieja conserva sus datos
+    expect(vieja.filas[2][20]).toBe('SÍ');                                              // la eliminada sigue marcada
     expect(vieja.filas[3][0]).toBe('u3');
-    expect(vieja.filas[3][27]).toBe('camara');                                          // origen en la columna 28
+    expect(vieja.filas[3][22]).toBe('camara');                                          // origen en la columna 23
     const otra = await post(srv, { proyecto: { nombre: 'Barrio A' }, luminarias: [{ uuid: 'u2', fabricante: 'Intento de revivir' }] });
     expect(otra.ok).toBe(true);
     expect(vieja.filas[2][10]).toBe('Borrada');                                          // lo eliminado sigue ganando
@@ -65,8 +66,8 @@ describe('pestañas creadas con una versión anterior del script (27 columnas)',
 
   it('auditarTodo también funciona sobre pestañas antiguas', () => {
     expect(() => srv.gs.auditarTodo()).not.toThrow();
-    expect(vieja.filas[0][30]).toBe('Alertas');                                         // columna Alertas creada
-    expect(vieja.filas[1][30] ?? '').toBe('');
+    expect(vieja.filas[0][25]).toBe('Alertas');                                         // columna Alertas creada (ya sin las columnas retiradas)
+    expect(vieja.filas[1][25] ?? '').toBe('');
   });
 });
 
@@ -100,9 +101,9 @@ describe('auditoría en hojas grandes', () => {
     for (let i = 0; i < 3001; i++) { const f = filaAntigua('g' + i, 'M' + i); f.push('galeria', '', 'j', ''); f[5] = 'T' + (i % 50); f[6] = 4 + i * 0.001; h.filas.push(f); }
     srv.hojas.push(h);
     await post(srv, { proyecto: { nombre: 'Grande' }, luminarias: [{ uuid: 'nueva', fabricante: 'X', tecnico: 'Z', origen: 'galeria', creadoEn: '2026-03-10T08:00:00.000Z' }] });
-    expect(h.filas[1][30]).toBe('');                                                    // no se auditó en línea
+    expect(h.filas[1][25]).toBe('');                                                    // no se auditó en línea
     srv.gs.auditarTodo();
-    expect(h.filas[1][30]).toContain('GALERIA');                                        // el activador por tiempo sí
+    expect(h.filas[1][25]).toContain('GALERIA');                                        // el activador por tiempo sí
   });
 });
 

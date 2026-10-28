@@ -79,14 +79,14 @@ describe('almacén web (IndexedDB)', () => {
     expect(await db.listarLuminarias(general.id)).toHaveLength(1);
   });
 
-  it('editar un proyecto reabre sus luminarias como pendientes (el nombre viaja al servidor)', async () => {
+  it('editar un proyecto cambia solo sus datos locales: no reabre las luminarias como pendientes (el nombre lo renombra el administrador en el servidor)', async () => {
     const [p] = await db.listarProyectos();
     await db.guardarLuminaria(borrador(p.id));
     const [l] = await db.listarLuminarias(p.id);
     await db.marcarSincronizadas([{ uuid: l.uuid, actualizadoEn: l.actualizadoEn }]);
     await db.editarProyecto(p.id, ' Nuevo nombre ', 'Cliente', '');
     expect((await db.listarProyectos())[0]).toMatchObject({ nombre: 'Nuevo nombre', cliente: 'Cliente' });
-    expect(await db.pendientesDeSync(p.id)).toHaveLength(1);
+    expect(await db.pendientesDeSync(p.id)).toHaveLength(0);
   });
 
   it('kv guarda y sobrescribe', async () => {
@@ -200,5 +200,42 @@ describe('reenviar una vez lo ya enviado para que lleve su miniatura', () => {
     expect(despues.find((l) => l.id === a)!.sincronizado).toBe(false);
     expect(despues.find((l) => l.id === b)!.sincronizado).toBe(true);
     expect(despues.find((l) => l.id === c)!.sincronizado).toBe(false);
+  });
+});
+
+describe('conciliar proyectos con ids (renombrar, desactivar y eliminar sin duplicados)', () => {
+  const r = (id: string, nombre: string, o: any = {}) => ({ id, nombre, cliente: '', notas: '', activo: true, ...o });
+
+  it('un proyecto renombrado en el servidor se renombra aquí (no se crea otro con el nombre viejo); cliente, notas y estado también llegan', async () => {
+    await db.crearProyecto('Barrio A');
+    expect(await db.conciliarProyectosInfo([r('p1', 'General'), r('p2', 'Barrio A')])).toBeGreaterThan(0);   // se les asigna su id por nombre
+    const antes = (await db.listarProyectos()).find((p) => p.idHoja === 'p2')!;
+    expect(await db.conciliarProyectosInfo([r('p1', 'General'), r('p2', 'Barrio Nuevo', { cliente: 'Soacha', notas: 'Fase 1' })])).toBe(1);
+    const lista = await db.listarProyectos();
+    expect(lista.map((p) => p.nombre).sort()).toEqual(['Barrio Nuevo', 'General']);
+    expect(lista.find((p) => p.idHoja === 'p2')).toMatchObject({ id: antes.id, nombre: 'Barrio Nuevo', cliente: 'Soacha', notas: 'Fase 1', activo: true });
+    expect(await db.conciliarProyectosInfo([r('p1', 'General'), r('p2', 'Barrio Nuevo', { cliente: 'Soacha', notas: 'Fase 1' })])).toBe(0);   // nada que cambiar
+  });
+
+  it('desactivar marca el proyecto (no se borra); activarlo lo devuelve', async () => {
+    await db.conciliarProyectosInfo([r('p1', 'General')]);
+    await db.conciliarProyectosInfo([r('p1', 'General', { activo: false })]);
+    expect((await db.listarProyectos())[0]).toMatchObject({ nombre: 'General', activo: false });
+    await db.conciliarProyectosInfo([r('p1', 'General')]);
+    expect((await db.listarProyectos())[0].activo).toBe(true);
+  });
+
+  it('un proyecto que desaparece del servidor se quita si no tiene nada pendiente; uno con registros sin enviar se conserva; los nuevos se crean', async () => {
+    await db.conciliarProyectosInfo([r('p1', 'General'), r('p2', 'Zona 2'), r('p3', 'Zona 3')]);
+    const z3 = (await db.listarProyectos()).find((p) => p.idHoja === 'p3')!;
+    await db.guardarLuminaria(borrador(z3.id));                                   // sin enviar
+    expect(await db.conciliarProyectosInfo([r('p1', 'General'), r('p4', 'Zona 4')])).toBe(2);   // se quita Zona 2 y se crea Zona 4
+    expect((await db.listarProyectos()).map((p) => p.nombre).sort()).toEqual(['General', 'Zona 3', 'Zona 4']);
+  });
+
+  it('si se quitan todos, queda un proyecto General', async () => {
+    await db.conciliarProyectosInfo([r('p1', 'General')]);
+    await db.conciliarProyectosInfo([r('p9', 'Otro')]);
+    expect((await db.listarProyectos()).map((p) => p.nombre)).toEqual(['Otro']);
   });
 });

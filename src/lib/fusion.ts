@@ -1,4 +1,4 @@
-import { Caracteristicas, caracteristicasVacias, Confianza, Luminaria, normalizarFotocelda, normalizarMaterialPoste, normalizarMontaje } from '../types';
+import { Caracteristicas, caracteristicasVacias, Confianza, Luminaria, normalizarControl, normalizarMaterialPoste, normalizarMontaje } from '../types';
 
 /** Campos que viajan en la sincronización (todo lo de la luminaria salvo fotos locales e ids locales). */
 export type DatosRemotos = Omit<Luminaria, 'id' | 'proyectoId' | 'fotos' | 'sincronizado'>;
@@ -25,7 +25,8 @@ export function normalizarRemota(fila: Record<string, unknown>): Remota | null {
   if (!uuid) return null;
   const car = caracteristicasVacias();
   for (const k of Object.keys(car) as (keyof Caracteristicas)[]) car[k] = texto(fila[k]);
-  car.fotocelda = normalizarFotocelda(car.fotocelda); car.montaje = normalizarMontaje(car.montaje); car.materialPoste = normalizarMaterialPoste(car.materialPoste);
+  car.control = normalizarControl(car.control || texto(fila.fotocelda));   // 'fotocelda' = nombre antiguo del campo
+   car.montaje = normalizarMontaje(car.montaje); car.materialPoste = normalizarMaterialPoste(car.materialPoste);
   const sector = texto(fila.sector).toLowerCase();
   const conf = texto(fila.confianza);
   const ahora = new Date().toISOString();

@@ -3,7 +3,7 @@
  * compartido (sincronización, jornada) funcione igual: luminarias, proyectos, borrados pendientes, kv y fotos (Blob).
  */
 import { decidir, Remota } from '@compartido/lib/fusion';
-import { caracteristicasVacias, Luminaria, LuminariaBorrador, Proyecto } from '@compartido/types';
+import { caracteristicasVacias, Luminaria, LuminariaBorrador, normalizarControl, Proyecto } from '@compartido/types';
 
 const NOMBRE_DB = 'eli-luminaria';
 const VERSION_DB = 1;
@@ -89,13 +89,12 @@ export async function crearProyecto(nombre: string, cliente = '', notas = ''): P
   return id;
 }
 
+/** Cambia los datos del proyecto en ESTE dispositivo. (Renombrar un proyecto compartido lo hace el administrador en el servidor.) */
 export async function editarProyecto(id: number, nombre: string, cliente: string, notas: string): Promise<void> {
   const db = await abrir();
-  const t = db.transaction(['proyectos', 'luminarias'], 'readwrite');
+  const t = db.transaction('proyectos', 'readwrite');
   const p = (await pedir(t.objectStore('proyectos').get(id))) as Proyecto | undefined;
   if (p) t.objectStore('proyectos').put({ ...p, nombre: nombre.trim(), cliente: cliente.trim(), notas: notas.trim() });
-  const ls = (await pedir(t.objectStore('luminarias').index('proyectoId').getAll(id))) as Luminaria[];
-  for (const l of ls) t.objectStore('luminarias').put({ ...l, sincronizado: false }); // el nombre del proyecto viaja en la sincronización
   await terminar(t);
 }
 
@@ -118,6 +117,50 @@ export async function borrarProyecto(id: number): Promise<string[]> {
  * proyecto que la hoja ya conocía (se vio en su lista o tiene registros sincronizados) y que no tiene nada pendiente de enviar.
  * Devuelve cuántos quitó. `enHoja` = nombres que informa el servidor (si el servidor no respondió, no se llama a esta función).
  */
+export interface ProyectoRemoto { id: string; nombre: string; cliente: string; notas: string; activo: boolean }
+
+/**
+ * Alinea los proyectos de este dispositivo con la lista del servidor (con ids): los cambios de nombre, cliente, notas y estado se aplican
+ * aquí, los proyectos nuevos se crean y los eliminados desaparecen (salvo que tengan algo sin enviar). Nunca crea un proyecto por un nombre viejo.
+ * Devuelve cuántos cambios hizo.
+ */
+export async function conciliarProyectosInfo(remotos: ProyectoRemoto[]): Promise<number> {
+  const db = await abrir();
+  const locales = await listarProyectos();
+  const idsRemotos = new Set(remotos.map((r) => r.id));
+  const usados = new Set<number>();
+  let cambios = 0;
+  for (const r of remotos) {
+    const nombre = r.nombre.trim().toLowerCase();
+    const p = locales.find((x) => x.idHoja === r.id)
+      ?? locales.find((x) => !usados.has(x.id) && (!x.idHoja || !idsRemotos.has(x.idHoja)) && x.nombre.trim().toLowerCase() === nombre);   // uno local aún sin id (o con uno que ya no existe)
+    const t = db.transaction('proyectos', 'readwrite');
+    if (p) {
+      usados.add(p.id);
+      if (p.idHoja !== r.id || p.nombre !== r.nombre || p.cliente !== r.cliente || p.notas !== r.notas || (p.activo !== false) !== r.activo) {
+        t.objectStore('proyectos').put({ ...p, idHoja: r.id, nombre: r.nombre, cliente: r.cliente, notas: r.notas, activo: r.activo });
+        cambios++;
+      }
+    } else {
+      t.objectStore('proyectos').add({ uuid: nuevoUuid(), idHoja: r.id, nombre: r.nombre, cliente: r.cliente, notas: r.notas, activo: r.activo, creadoEn: new Date().toISOString() });
+      cambios++;
+    }
+    await terminar(t);
+  }
+  let quitados = 0;
+  for (const p of locales) {
+    if (usados.has(p.id)) continue;
+    const ls = await listarLuminarias(p.id);
+    const pendiente = ls.some((l) => !l.sincronizado) || (await borradasPendientes(p.id)).length > 0;
+    const conocido = !!p.idHoja || (await leerKv(`enHoja:${p.uuid}`)) === '1' || ls.some((l) => l.sincronizado);   // la hoja ya lo tuvo y ahora no está: lo eliminó el administrador
+    if (!conocido || pendiente) continue;
+    await borrarFotos(await borrarProyecto(p.id));
+    quitados++;
+  }
+  if (quitados && !(await listarProyectos()).length) await crearProyecto('General');
+  return cambios + quitados;
+}
+
 export async function conciliarProyectos(enHoja: string[]): Promise<number> {
   const nombres = new Set(enHoja.map((n) => n.trim().toLowerCase()));
   let quitados = 0;
@@ -144,8 +187,8 @@ export async function listarLuminarias(proyectoId: number): Promise<Luminaria[]>
 
 /** Registros guardados antes de que existieran el código del poste, el sector, el material del poste o el transformador. */
 const completar = (l: Luminaria): Luminaria => (
-  l.codigoPoste === undefined || l.sector === undefined || l.barrio === undefined || l.materialPoste === undefined || l.numeroTransformador === undefined
-    ? { ...l, codigoPoste: l.codigoPoste ?? '', sector: l.sector ?? '', barrio: l.barrio ?? '', materialPoste: l.materialPoste ?? '', numeroTransformador: l.numeroTransformador ?? '' } : l);
+  (l as any).control === undefined || l.codigoPoste === undefined || l.sector === undefined || l.barrio === undefined || l.materialPoste === undefined || l.numeroTransformador === undefined
+    ? { ...l, control: (l as any).control ?? normalizarControl(String((l as any).fotocelda ?? '')), codigoPoste: l.codigoPoste ?? '', sector: l.sector ?? '', barrio: l.barrio ?? '', materialPoste: l.materialPoste ?? '', numeroTransformador: l.numeroTransformador ?? '' } : l);
 
 export async function obtenerLuminaria(id: number): Promise<Luminaria | undefined> {
   const db = await abrir();

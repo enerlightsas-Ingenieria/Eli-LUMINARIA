@@ -8,7 +8,7 @@ import { Boton, Cabecera, Campo, Ficha, Hoja, Seccion, Tarjeta } from '../compon
 import { useApp } from '../contexto/App';
 import { borrarFotos, borrarProyecto, crearProyecto, editarProyecto } from '../servicios/almacen';
 import { exportar, Formato } from '../servicios/exportar';
-import { eliminarProyectoDelEquipo } from '../servicios/identidad';
+import { activarProyectoDelEquipo, eliminarProyectoDelEquipo, guardarProyectoDelEquipo } from '../servicios/identidad';
 import { sincronizacion } from '../servicios/nucleo';
 
 function Barras({ datos, max }: { datos: { nombre: string; cantidad: number }[]; max: number }) {
@@ -25,7 +25,7 @@ function Barras({ datos, max }: { datos: { nombre: string; cantidad: number }[];
 }
 
 export function Proyectos() {
-  const { proyectos, proyecto, items, ajustes, activar, refrescar } = useApp();
+  const { proyectos, inactivos, proyecto, items, ajustes, activar, refrescar } = useApp();
   const esAdmin = rolDe(ajustes) === 'admin';
   const [sincronizando, setSincronizando] = useState(false);
   const [menuExportar, setMenuExportar] = useState(false);
@@ -35,22 +35,47 @@ export function Proyectos() {
   const guardar = async () => {
     if (!editando?.nombre?.trim()) { await avisar('Falta el nombre', 'Escribe un nombre para el proyecto.'); return; }
     const e = editando;
+    if (!e.id) {   // proyecto nuevo (lo puede crear cualquier cuenta): aparece en la hoja al sincronizar su primer registro
+      setEditando(null);
+      await activar(await crearProyecto(e.nombre!, e.cliente ?? '', e.notas ?? ''));
+      await refrescar();
+      return;
+    }
+    if (!esAdmin) { await avisar('Sin permiso', 'Solo el administrador puede cambiar los datos de un proyecto.'); return; }
+    // Nombre, cliente y notas se cambian en el servidor (la misma pestaña de la hoja): así todos los equipos reciben el cambio y no se crea ningún proyecto nuevo
+    const original = [...proyectos, ...inactivos].find((x) => x.id === e.id)!;
+    try {
+      await guardarProyectoDelEquipo({ id: original.idHoja, nombre: original.nombre, nuevoNombre: e.nombre!.trim(), cliente: (e.cliente ?? '').trim(), notas: (e.notas ?? '').trim() });
+    } catch (err: any) {
+      if (!/No se encontr/.test(err?.message ?? '')) { await avisar('No se pudo guardar', `${err.message ?? err}\n\nNecesitas conexión para cambiar los datos de un proyecto.`); return; }
+      await editarProyecto(e.id, e.nombre!, e.cliente ?? '', e.notas ?? '');   // todavía no existe en la hoja (sin registros enviados): solo este dispositivo
+    }
     setEditando(null);
-    if (e.id) await editarProyecto(e.id, e.nombre!, e.cliente ?? '', e.notas ?? '');
-    else await activar(await crearProyecto(e.nombre!, e.cliente ?? '', e.notas ?? ''));
     await refrescar();
+  };
+
+  const cambiarEstado = async (p: Proyecto, activo: boolean) => {
+    if (!esAdmin) { await avisar('Sin permiso', 'Solo el administrador puede activar o desactivar proyectos.'); return; }
+    if (!activo && proyectos.length <= 1) { await avisar('No se puede', 'Debe quedar al menos un proyecto activo.'); return; }
+    if (!activo && !(await confirmar('Desactivar proyecto', `"${p.nombre}" dejará de mostrarse a todo el equipo y no se sincronizará. Sus datos se conservan y puedes activarlo cuando quieras.`, 'Desactivar', true))) return;
+    try { await activarProyectoDelEquipo({ id: p.idHoja, nombre: p.nombre }, activo); }
+    catch (e: any) { await avisar('No se pudo cambiar', `${e.message ?? e}\n\nNecesitas conexión.`); return; }
+    setEditando(null);
+    await refrescar();
+    if (!activo && proyecto?.id === p.id) await activar(proyectos.find((x) => x.id !== p.id)!.id);
   };
 
   const eliminar = async (p: Proyecto) => {
     if (!esAdmin) { await avisar('Sin permiso', 'Solo el administrador puede eliminar proyectos.'); return; }
-    if (proyectos.length <= 1) { await avisar('No se puede', 'Debe existir al menos un proyecto.'); return; }
-    if (!(await confirmar('Eliminar proyecto', `Vas a eliminar "${p.nombre}" para TODO el equipo: desaparecerá de todos los dispositivos y de la lista de proyectos (la hoja de Google conserva una copia archivada hasta que la limpies).`, 'Continuar', true))) return;
-    if (!(await confirmar('¿Seguro?', `Última confirmación: "${p.nombre}" y sus luminarias se quitarán de todos los equipos. Esta acción no se puede deshacer desde la app.`, 'Sí, eliminar', true))) return;
-    try { await eliminarProyectoDelEquipo(p.nombre); }
+    if (proyectos.length + inactivos.length <= 1) { await avisar('No se puede', 'Debe existir al menos un proyecto.'); return; }
+    if (!(await confirmar('Eliminar proyecto', `Vas a eliminar "${p.nombre}" para TODO el equipo: se borran todos sus datos, su hoja en el archivo de Google y sus fotos de Drive. Si solo quieres ocultarlo, usa "Desactivar".`, 'Continuar', true))) return;
+    if (!(await confirmar('¿Seguro?', `Última confirmación: "${p.nombre}" y todas sus luminarias se borrarán de todos los equipos y de la hoja. Esta acción no se puede deshacer.`, 'Sí, eliminar todo', true))) return;
+    try { await eliminarProyectoDelEquipo({ id: p.idHoja, nombre: p.nombre }); }
     catch (e: any) { await avisar('No se pudo eliminar', `${e.message ?? e}\n\nNecesitas conexión: si no se elimina en el servidor, el proyecto volvería a aparecer.`); return; }
     setEditando(null);
     await borrarFotos(await borrarProyecto(p.id));
-    await activar(proyectos.find((x) => x.id !== p.id)!.id);
+    const queda = proyectos.find((x) => x.id !== p.id);
+    if (queda) await activar(queda.id); else await refrescar();
   };
 
   const sincronizarTodo = async () => {
@@ -90,12 +115,29 @@ export function Proyectos() {
                   <div className="muted">{[p.cliente, `${p.cantidad} luminaria${p.cantidad === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}</div>
                 </button>
                 {activo && <div style={{ flex: 'none' }}><Ficha texto="Activo" color="primario" /></div>}
-                <button type="button" className="icono-btn" style={{ flex: 'none' }} aria-label={`Editar ${p.nombre}`} onClick={() => setEditando(p)}>✎</button>
+                {esAdmin && <button type="button" className="icono-btn" style={{ flex: 'none' }} aria-label={`Editar ${p.nombre}`} onClick={() => setEditando(p)}>✎</button>}
               </div>
             </div>
           );
         })}
       </div>
+
+      {esAdmin && inactivos.length > 0 && (
+        <>
+          <Seccion>Desactivados</Seccion>
+          <div className="pila">
+            {inactivos.map((p) => (
+              <div key={p.id} className="tarjeta" data-testid="proyecto-inactivo">
+                <div className="fila" style={{ alignItems: 'center' }}>
+                  <div style={{ flex: 1 }}><b>{p.nombre}</b><div className="muted">{[p.cliente, `${p.cantidad} luminaria${p.cantidad === 1 ? '' : 's'}`].filter(Boolean).join(' · ')}</div></div>
+                  <div style={{ flex: 'none' }}><Boton texto="Activar" variante="secundario" bloque={false} onClick={() => cambiarEstado(p, true)} /></div>
+                  <button type="button" className="icono-btn" style={{ flex: 'none' }} aria-label={`Editar ${p.nombre}`} onClick={() => setEditando(p)}>✎</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {proyecto && (
         <>
@@ -107,7 +149,7 @@ export function Proyectos() {
             {r.total === 0 ? <p className="muted">Aún no hay datos para este proyecto.</p> : (
               <>
                 <p className="muted" style={{ fontWeight: 700, margin: '8px 0' }}>POR TECNOLOGÍA</p><Barras datos={r.porTecnologia} max={r.porTecnologia[0].cantidad} />
-                <p className="muted" style={{ fontWeight: 700, margin: '16px 0 8px' }}>FOTOCELDA</p><Barras datos={r.porFotocelda} max={r.porFotocelda[0].cantidad} />
+                <p className="muted" style={{ fontWeight: 700, margin: '16px 0 8px' }}>CONTROL</p><Barras datos={r.porControl} max={r.porControl[0].cantidad} />
               </>
             )}
           </Tarjeta>
@@ -118,7 +160,12 @@ export function Proyectos() {
         <Campo etiqueta="Nombre" valor={editando?.nombre ?? ''} alCambiar={(t) => setEditando((e) => ({ ...e, nombre: t }))} pista="Ej. Barrio La Esperanza" />
         <Campo etiqueta="Cliente / municipio" valor={editando?.cliente ?? ''} alCambiar={(t) => setEditando((e) => ({ ...e, cliente: t }))} />
         <Campo etiqueta="Notas" valor={editando?.notas ?? ''} alCambiar={(t) => setEditando((e) => ({ ...e, notas: t }))} multilinea />
-        <div className="pila"><Boton texto="Guardar" onClick={guardar} />{!!editando?.id && esAdmin && <Boton texto="Eliminar proyecto" variante="peligro" onClick={() => eliminar(editando as Proyecto)} />}</div>
+        <div className="pila"><Boton texto="Guardar" onClick={guardar} />{!!editando?.id && esAdmin && (
+          <>
+            <Boton texto={editando.activo === false ? 'Activar proyecto' : 'Desactivar proyecto'} variante="secundario" onClick={() => cambiarEstado(editando as Proyecto, editando.activo === false)} />
+            <Boton texto="Eliminar proyecto" variante="peligro" onClick={() => eliminar(editando as Proyecto)} />
+          </>
+        )}</div>
       </Hoja>
       <Hoja abierta={menuExportar} alCerrar={() => setMenuExportar(false)} titulo="Exportar proyecto" subtitulo={proyecto ? `${proyecto.nombre} · ${items.length} luminarias` : ''}
         opciones={formatos.map(({ f, texto }) => ({ texto, onClick: () => { exportar(f, items, proyecto ?? undefined).catch((e) => avisar('No se pudo exportar', e.message ?? String(e))); } }))} />

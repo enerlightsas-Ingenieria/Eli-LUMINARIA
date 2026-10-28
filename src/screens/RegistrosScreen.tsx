@@ -121,7 +121,7 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
             <Ionicons name="bulb-outline" size={64} color={c.primary} />
             <Text style={{ color: c.text, fontSize: 18, fontWeight: '700', marginTop: 12 }}>{items.length ? 'Sin resultados' : 'Aún no hay luminarias'}</Text>
             <Text style={{ color: c.muted, textAlign: 'center', marginTop: 6, paddingHorizontal: 30, lineHeight: 20 }}>
-              {items.length ? 'Prueba con otro texto o filtro.' : 'Toma una foto y la app identificará fabricante, tecnología, potencia, fotocelda y más, junto con la coordenada.'}
+              {items.length ? 'Prueba con otro texto o filtro.' : 'Toma una foto y la app identificará fabricante, tecnología, potencia, control y más, junto con la coordenada.'}
             </Text>
           </View>
         }
@@ -132,7 +132,7 @@ export function RegistrosScreen({ irAProyectos }: { irAProyectos: () => void }) 
             <View style={{ flex: 1 }}>
               <Text style={s.t} numberOfLines={1}>{l.codigo || `#${l.id}`} · {l.fabricante || 'Sin identificar'}</Text>
               <Text style={s.sub} numberOfLines={1}>
-                {[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.fotocelda === 'Sí' && 'con fotocelda'].filter(Boolean).join(' · ') || '—'}
+                {[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.control && l.control !== 'Sin control' && l.control].filter(Boolean).join(' · ') || '—'}
               </Text>
               {!!l.tecnico && <Text style={[s.sub, { fontSize: 12 }]} numberOfLines={1}>Por {l.tecnico}</Text>}
               <Text style={s.coord} numberOfLines={1}>

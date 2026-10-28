@@ -1,4 +1,4 @@
-import { Luminaria, normalizarFotocelda } from '../types';
+import { Luminaria, normalizarControl } from '../types';
 
 export interface Resumen {
   total: number;
@@ -6,7 +6,7 @@ export interface Resumen {
   sincronizadas: number;
   potenciaTotalKw: number;
   porTecnologia: { nombre: string; cantidad: number }[];
-  porFotocelda: { nombre: string; cantidad: number }[];
+  porControl: { nombre: string; cantidad: number }[];
 }
 
 const num = (t: string) => {
@@ -41,6 +41,6 @@ export function resumir(items: Luminaria[]): Resumen {
     sincronizadas: items.filter((l) => l.sincronizado).length,
     potenciaTotalKw: Math.round(items.reduce((a, l) => a + num(l.potenciaW), 0)) / 1000,
     porTecnologia: cuenta(items.map((l) => normalizaTecnologia(l.tecnologia))),
-    porFotocelda: cuenta(items.map((l) => (normalizarFotocelda(l.fotocelda) === 'Sí' ? 'Con fotocelda' : normalizarFotocelda(l.fotocelda) === 'No' ? 'Sin fotocelda' : 'Sin dato'))),
+    porControl: cuenta(items.map((l) => { const c = normalizarControl(l.control ?? ''); return c.startsWith('Otro') ? 'Otro' : c || 'Sin dato'; })),
   };
 }

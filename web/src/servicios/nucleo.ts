@@ -17,7 +17,10 @@ export const post = (a: Ajustes, cuerpo: object, timeoutMs?: number) => postServ
 
 export const analizarFotos = (base64s: string[], cancelar?: AbortSignal) => analizarFotosCon(cargarAjustes, base64s, cancelar);
 
-export const sincronizacion = crearSincronizador({ almacen, cargarAjustes, leerFoto: base64DeFoto, leerMiniatura: miniaturaDeFoto, post });
+// Los proyectos desactivados no se sincronizan ni se muestran
+const almacenActivo = { ...almacen, listarProyectos: async () => (await almacen.listarProyectos()).filter((p) => p.activo !== false) };
+
+export const sincronizacion = crearSincronizador({ almacen: almacenActivo, cargarAjustes, leerFoto: base64DeFoto, leerMiniatura: miniaturaDeFoto, post });
 
 export const jornada = crearJornada({
   almacen,

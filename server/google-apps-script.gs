@@ -30,15 +30,14 @@ var AGRUPADAS_MIN = 4;
 var AGRUPADAS_VENTANA_MIN = 10;   // ...dentro de esta ventana de tiempo
 var TOLERANCIA_JORNADA_MIN = 2;   // margen al comprobar que la captura cae dentro de su jornada
 var AUDITORIA_EN_LINEA_MAX_FILAS = 3000; // en pestañas más grandes la auditoría la hace solo el activador por tiempo (auditarTodo), no cada envío
-var HOJA_EQUIPO = '_Equipo', HOJA_JORNADAS = '_Jornadas', HOJA_USUARIOS = '_Usuarios', HOJA_CONFIG = '_Config'; // pestañas del sistema (los proyectos no pueden empezar por "_")
+var HOJA_EQUIPO = '_Equipo', HOJA_JORNADAS = '_Jornadas', HOJA_USUARIOS = '_Usuarios', HOJA_CONFIG = '_Config', HOJA_PROYECTOS = '_Proyectos'; // pestañas del sistema (los proyectos no pueden empezar por "_")
 
 var COLUMNAS = [
   ['uuid', 'UUID'], ['id', 'ID (local del teléfono)'], ['codigoPoste', 'Código del poste'], ['codigo', 'Código de la luminaria'], ['creadoEn', 'Fecha'],
   ['tecnico', 'Técnico'], ['latitud', 'Latitud'], ['longitud', 'Longitud'], ['precisionM', 'Precisión (m)'],
-  ['direccion', 'Dirección'], ['fabricante', 'Fabricante'], ['modelo', 'Modelo'],
+  ['direccion', 'Dirección'], ['fabricante', 'Fabricante'],
   ['tecnologia', 'Tecnología'], ['potenciaW', 'Potencia (W)'],
-  ['tensionV', 'Tensión (V)'], ['fotocelda', 'Fotocelda'], ['pinesFotocelda', 'Pines fotocelda'],
-  ['temperaturaColorK', 'Temp. color (K)'], ['ip', 'IP'], ['montaje', 'Montaje'],
+  ['control', 'Control'], ['montaje', 'Montaje'],
   ['estado', 'Estado'], ['confianza', 'Confianza IA'], ['observaciones', 'Observaciones'],
   ['mapa', 'Enlace mapa'], ['foto', 'Foto'], ['eliminada', 'Eliminada'], ['recibidoEn', 'Recibido'],
   // Las columnas nuevas se AÑADEN SIEMPRE AL FINAL: todo el script lee por posición y así las pestañas ya creadas siguen siendo válidas.
@@ -46,13 +45,15 @@ var COLUMNAS = [
   ['sector', 'Sector'], ['materialPoste', 'Material del poste'], ['numeroTransformador', 'N.º transformador'],
   ['barrio', 'Barrio'], ['miniatura', 'Miniatura (no editar)']
 ];
-// Campos que la app ya no pide (modelo, tensión, pines, temperatura de color y grado IP) y la miniatura de la foto: sus columnas se conservan para no mover las demás, pero se ocultan.
-var COLUMNAS_RETIRADAS = ['modelo', 'tensionV', 'pinesFotocelda', 'temperaturaColorK', 'ip', 'miniatura'];   // 'miniatura' = foto pequeña que se reparte a los teléfonos: va oculta
+// La miniatura es la foto pequeña que se reparte a los teléfonos: su columna va oculta.
+var COLUMNAS_OCULTAS = ['miniatura'];
+// Columnas de campos que la app ya no pide (modelo, tensión, pines, temperatura de color, grado IP): se BORRAN de las pestañas que las traigan.
+var COLUMNAS_BORRAR = ['Modelo', 'Tensión (V)', 'Pines fotocelda', 'Temp. color (K)', 'IP'];
 // Encabezados de la versión anterior (con Marca, Tipo de luminaria, Flujo y Altura): esas pestañas se archivan, no se mezclan.
 var ENCABEZADOS_RETIRADOS = ['Marca', 'Tipo de luminaria', 'Flujo (lm)', 'Altura (m)', 'Código activo'];
 // Columnas que se dejan como número (para sumar/graficar); el resto se fuerza a texto para que Sheets no
 // convierta modelos como "1-2" en fechas ni recorte ceros.
-var NUMERICAS = ['id', 'latitud', 'longitud', 'precisionM', 'potenciaW', 'tensionV', 'pinesFotocelda', 'temperaturaColorK'];
+var NUMERICAS = ['id', 'latitud', 'longitud', 'precisionM', 'potenciaW'];
 
 function col(clave) { for (var i = 0; i < COLUMNAS.length; i++) if (COLUMNAS[i][0] === clave) return i; return -1; }
 
@@ -62,7 +63,7 @@ function doPost(e) {
     lock.waitLock(30000);
     var d = JSON.parse(e.postData.contents);
     // 'equipo' y la administración de usuarios exigen TOKEN_ADMIN; todo lo demás, el token del equipo
-    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'proyecto_eliminar', 'config_guardar', 'ia_clave_guardar', 'ia_claves'].indexOf(d.accion) >= 0;
+    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'proyecto_guardar', 'proyecto_activar', 'proyecto_eliminar', 'config_guardar', 'ia_clave_guardar', 'ia_claves'].indexOf(d.accion) >= 0;
     var esAdmin = soloAdmin && d.token === TOKEN_ADMIN;
     if (soloAdmin ? !esAdmin : d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' }); // las acciones de administración NO sirven con el token del equipo
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
@@ -70,7 +71,7 @@ function doPost(e) {
     if (d.accion === 'latido') return salida(registrarLatido(d, ahora));
     if (d.accion === 'usuario') return salida({ ok: true, usuario: buscarUsuario(d.clave) });
     if (d.accion === 'ingresar') return salida({ ok: true, usuario: ingresarUsuario(d.usuario, d.clave) });
-    if (d.accion === 'proyectos') return salida({ ok: true, proyectos: nombresProyectos() });
+    if (d.accion === 'proyectos') { var infoP = proyectosInfo(); return salida({ ok: true, proyectos: infoP.filter(function (x) { return x.activo; }).map(function (x) { return x.nombre; }), info: infoP.map(quitarFila) }); }
     if (d.accion === 'contactos') return salida({ ok: true, contactos: contactosUsuarios() });
     if (d.accion === 'config') return salida({ ok: true, config: leerConfig() });
     if (d.accion === 'config_guardar') return salida(guardarConfig(d));
@@ -79,8 +80,10 @@ function doPost(e) {
     if (d.accion === 'usuarios_listar') return salida({ ok: true, usuarios: listarUsuarios() });
     if (d.accion === 'usuarios_guardar') return salida(guardarUsuario(d));
     if (d.accion === 'usuarios_borrar') return salida(borrarUsuario(d));
+    if (d.accion === 'proyecto_guardar') return salida(guardarProyecto(d));
+    if (d.accion === 'proyecto_activar') return salida(activarProyecto(d));
     if (d.accion === 'proyecto_eliminar') return salida(eliminarProyecto(d));
-    var hoja = obtenerHoja(d.proyecto && d.proyecto.nombre);
+    var hoja = obtenerHoja(d.proyecto);
 
     if (d.accion === 'listar') return salida({ ok: true, ahora: ahora, luminarias: listar(hoja, d.desde || '') });
 
@@ -148,15 +151,19 @@ function doGet(e) {
   return salida({ ok: true, servicio: 'ELI-LUMINARIA' });
 }
 
-function obtenerHoja(nombreProyecto) {
+function obtenerHoja(proyecto) {
   var libro = SpreadsheetApp.getActiveSpreadsheet();
+  var nombreProyecto = proyecto && proyecto.nombre;
+  // Si el teléfono manda el id del proyecto, manda el nombre ACTUAL de la hoja (así un teléfono con el nombre viejo no recrea el proyecto renombrado).
+  if (proyecto && proyecto.id) { var conocido = proyectoPorId(proyecto.id); if (conocido) nombreProyecto = conocido.nombre; }
   // Se normaliza el nombre (espacios y mayúsculas) para que "Barrio A" y "barrio  a" sean la misma pestaña.
-  var limpio = String(nombreProyecto || 'General').replace(/[\\\/\?\*\[\]:]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 90) || 'General';
-  limpio = limpio.replace(/^_+/, '').trim() || 'General'; // "_" está reservado para las pestañas del sistema
+  var limpio = nombreLimpio(nombreProyecto) || 'General';
   var hoja = buscarHoja(libro, limpio);
   if (hoja && esDisenoAnterior(hoja)) { archivarHoja(libro, hoja); hoja = null; }
+  var nueva = !hoja;
   hoja = hoja || libro.insertSheet(limpio);
-  if (hoja.getLastRow() > 0) asegurarEncabezados(hoja);
+  if (hoja.getLastRow() > 0) { actualizarColumnas(hoja); asegurarEncabezados(hoja); }
+  if (nueva) agregarFilaProyecto(limpio, proyecto && proyecto.cliente);
   if (hoja.getLastRow() === 0) {
     hoja.appendRow(COLUMNAS.map(function (c) { return c[1]; }));
     hoja.setFrozenRows(1);
@@ -164,7 +171,7 @@ function obtenerHoja(nombreProyecto) {
     COLUMNAS.forEach(function (c, i) {
       if (NUMERICAS.indexOf(c[0]) < 0) hoja.getRange(2, i + 1, hoja.getMaxRows() - 1, 1).setNumberFormat('@');
     });
-    ocultarRetiradas(hoja);
+    ocultarColumnas(hoja);
   }
   return hoja;
 }
@@ -198,12 +205,46 @@ function asegurarEncabezados(hoja) {
     hoja.getRange(1, i + 1, 1, 1).setFontWeight('bold').setBackground('#FFC53D');
     if (NUMERICAS.indexOf(c[0]) < 0) hoja.getRange(2, i + 1, hoja.getMaxRows() - 1, 1).setNumberFormat('@');
   });
-  if (nuevas) ocultarRetiradas(hoja);   // una pestaña de una versión anterior recibe las columnas nuevas y esconde las retiradas
+  if (nuevas) ocultarColumnas(hoja);   // una pestaña de una versión anterior recibe las columnas nuevas y esconde la miniatura
 }
 
-/** Oculta las columnas de campos retirados (los datos que ya tuvieran se conservan). */
-function ocultarRetiradas(hoja) {
-  COLUMNAS.forEach(function (c, i) { if (COLUMNAS_RETIRADAS.indexOf(c[0]) >= 0) hoja.hideColumns(i + 1); });
+/** Oculta las columnas internas (la miniatura). */
+function ocultarColumnas(hoja) {
+  COLUMNAS.forEach(function (c, i) { if (COLUMNAS_OCULTAS.indexOf(c[0]) >= 0) hoja.hideColumns(i + 1); });
+}
+
+/**
+ * Pone una pestaña con el diseño anterior al día: BORRA las columnas de los campos retirados (modelo, tensión, pines, temperatura de color,
+ * IP) y convierte "Fotocelda" (Sí/No) en "Control" (Fotocelda / Sin control). Los demás datos no se tocan.
+ */
+function actualizarColumnas(hoja) {
+  var n = Math.min(hoja.getMaxColumns(), 60);
+  var cab = hoja.getRange(1, 1, 1, n).getValues()[0];
+  var hubo = false;
+  for (var i = cab.length - 1; i >= 0; i--) if (COLUMNAS_BORRAR.indexOf(String(cab[i])) >= 0) { hoja.deleteColumn(i + 1); hubo = true; }
+  if (hubo) cab = hoja.getRange(1, 1, 1, Math.min(hoja.getMaxColumns(), 60)).getValues()[0];
+  var iF = cab.indexOf('Fotocelda');
+  if (iF < 0) return;
+  hoja.getRange(1, iF + 1).setValue('Control');
+  var filas = hoja.getLastRow() - 1;
+  if (filas < 1) return;
+  var rango = hoja.getRange(2, iF + 1, filas, 1);
+  rango.setValues(rango.getValues().map(function (r) {
+    var v = String(r[0] === undefined || r[0] === null ? '' : r[0]).trim();
+    return [!v ? '' : /^(no|sin)/i.test(v) ? 'Sin control' : 'Fotocelda'];
+  }));
+}
+
+/** Antes de leer una pestaña de proyecto por posición: si trae el diseño anterior de columnas, se actualiza. */
+function prepararLectura(h) {
+  if (h.getLastRow() >= 1 && h.getRange(1, 1).getValue() === COLUMNAS[0][1] && !esDisenoAnterior(h)) actualizarColumnas(h);
+}
+
+/** Quita las columnas retiradas de TODAS las pestañas de proyecto (menú ELI-LUMINARIA). */
+function actualizarTodasLasColumnas() {
+  var libro = SpreadsheetApp.getActiveSpreadsheet(), n = 0;
+  libro.getSheets().forEach(function (h) { if (esPestanaProyecto(h)) { actualizarColumnas(h); asegurarEncabezados(h); n++; } });
+  return n;
 }
 
 /** Lee todas las filas de datos con exactamente COLUMNAS.length columnas (rellena si la pestaña es antigua y más angosta). */
@@ -361,7 +402,7 @@ function auditarHoja(hoja, enLinea) {
 /** Para un activador por tiempo (cada 10-15 min): re-audita todos los proyectos (p. ej. cuando llega una jornada tardía). */
 function auditarTodo() {
   SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(function (h) {
-    if (h.getName().charAt(0) !== '_') auditarHoja(h, false);
+    if (h.getName().charAt(0) !== '_') { prepararLectura(h); auditarHoja(h, false); }
   });
 }
 
@@ -419,7 +460,7 @@ function texto(v, max) { return String(v === undefined || v === null ? '' : v).s
 
 /* ---------------- Limpieza de pestañas que ya no se usan ---------------- */
 
-var PESTANAS_SISTEMA = ['_equipo', '_jornadas', '_usuarios', '_config'];
+var PESTANAS_SISTEMA = ['_equipo', '_jornadas', '_usuarios', '_config', '_proyectos'];
 var PESTANAS_VACIAS_DE_GOOGLE = ['hoja 1', 'hoja1', 'sheet1', 'sheet 1'];
 
 /**
@@ -616,6 +657,7 @@ function onOpen() {
   try {
     SpreadsheetApp.getUi().createMenu('ELI-LUMINARIA')
       .addItem('Limpiar pestañas obsoletas', 'limpiarPestanasObsoletas')
+      .addItem('Quitar columnas que ya no se usan', 'actualizarTodasLasColumnas')
       .addItem('Reiniciar TODO desde cero (borra los datos)', 'reiniciarDesdeCero')
       .addItem('Preparar pestaña Usuarios', 'prepararUsuarios')
       .addItem('Generar claves faltantes', 'generarClavesFaltantes')
@@ -661,32 +703,143 @@ function ingresarUsuario(usuario, clave) {
   return u && normNombre(u.usuario) === normNombre(usuario) ? u : null;
 }
 
-/** Nombres de las pestañas de proyecto (las que tienen el diseño actual y no están archivadas), para que cada persona los vea al entrar. */
-function nombresProyectos() {
-  var res = [];
-  SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(function (h) {
-    var n = h.getName();
-    if (n.charAt(0) === '_' || / \((anterior|eliminado)( \d+)?\)$/.test(n) || res.length >= 100) return;
-    if (h.getLastRow() >= 1 && h.getRange(1, 1).getValue() === COLUMNAS[0][1]) res.push(n);
-  });
-  return res;
+/** ¿Es una pestaña de proyecto (diseño actual, no archivada ni del sistema)? */
+function esPestanaProyecto(h) {
+  var n = h.getName();
+  if (n.charAt(0) === '_' || / \((anterior|eliminado)( \d+)?\)$/.test(n)) return false;
+  return h.getLastRow() >= 1 && h.getRange(1, 1).getValue() === COLUMNAS[0][1];
+}
+
+/** Nombre de pestaña válido para un proyecto ("" si no queda nada). */
+function nombreLimpio(nombre) {
+  var limpio = String(nombre === undefined || nombre === null ? '' : nombre).replace(/[\\\/\?\*\[\]:]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, 90);
+  return limpio.replace(/^_+/, '').trim();
+}
+
+var COLUMNAS_PROYECTOS = [['id', 'ID'], ['nombre', 'Nombre'], ['cliente', 'Cliente / municipio'], ['notas', 'Notas'], ['activo', 'Activo']];
+function minusculas(v) { return String(v === undefined || v === null ? '' : v).trim().toLowerCase(); }
+function quitarFila(p) { return { id: p.id, nombre: p.nombre, cliente: p.cliente, notas: p.notas, activo: p.activo }; }
+
+/** La pestaña _Proyectos (datos de cada proyecto: id, nombre, cliente, notas y si está activo). Se crea sola. */
+function hojaProyectos() {
+  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  var h = buscarHoja(libro, HOJA_PROYECTOS);
+  if (!h) {
+    h = libro.insertSheet(HOJA_PROYECTOS);
+    h.appendRow(COLUMNAS_PROYECTOS.map(function (c) { return c[1]; }));
+    h.setFrozenRows(1);
+    h.getRange(1, 1, 1, COLUMNAS_PROYECTOS.length).setFontWeight('bold').setBackground('#FFC53D');
+  }
+  return h;
 }
 
 /**
- * Elimina un proyecto para todo el equipo: su pestaña se archiva como "Nombre (eliminado)" (los datos no se pierden; se borran del todo
- * con "Limpiar pestañas que no se usan"). Desde ese momento ya no aparece en la lista y los teléfonos lo quitan al conectarse.
+ * Los proyectos: uno por cada pestaña de proyecto. Cada pestaña tiene su fila en _Proyectos (se crea sola si falta y se quita si la pestaña ya no existe).
+ * Devuelve [{ id, nombre, cliente, notas, activo, fila }] en el orden de las pestañas.
+ */
+function proyectosInfo() {
+  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  var h = hojaProyectos();
+  var filas = h.getLastRow() >= 2 ? h.getRange(2, 1, h.getLastRow() - 1, 5).getValues() : [];
+  var tabs = [];
+  libro.getSheets().forEach(function (x) { if (esPestanaProyecto(x) && tabs.length < 100) tabs.push(x.getName()); });
+  var conTab = {};
+  tabs.forEach(function (n) { conTab[minusculas(n)] = true; });
+  for (var i = filas.length - 1; i >= 0; i--) {                       // filas sin pestaña: se quitan
+    if (!conTab[minusculas(filas[i][1])]) { h.deleteRow(i + 2); filas.splice(i, 1); }
+  }
+  var hay = {};
+  filas.forEach(function (r) { hay[minusculas(r[1])] = true; });
+  var nuevas = tabs.filter(function (n) { return !hay[minusculas(n)]; }).map(function (n) { return [nuevoIdProyecto(), n, '', '', 'si']; });
+  if (nuevas.length) { h.getRange(filas.length + 2, 1, nuevas.length, 5).setValues(nuevas); filas = filas.concat(nuevas); }
+  var porNombre = {};
+  filas.forEach(function (r, i) {
+    porNombre[minusculas(r[1])] = { id: String(r[0]), nombre: String(r[1]), cliente: String(r[2] === undefined ? '' : r[2]), notas: String(r[3] === undefined ? '' : r[3]), activo: !usuarioInactivo(r[4]), fila: i + 2 };
+  });
+  return tabs.map(function (n) { return porNombre[minusculas(n)]; });
+}
+
+function nuevoIdProyecto() { return 'p' + Utilities.getUuid().replace(/-/g, '').substring(0, 10); }
+function proyectoPorId(id) {
+  var todos = proyectosInfo();
+  for (var i = 0; i < todos.length; i++) if (todos[i].id === String(id)) return todos[i];
+  return null;
+}
+function buscarProyecto(d) {
+  var todos = proyectosInfo(), nombre = minusculas(d.nombreAnterior || d.nombre);
+  for (var i = 0; i < todos.length; i++) if ((d.id && todos[i].id === String(d.id)) || (!d.id && nombre && minusculas(todos[i].nombre) === nombre)) return todos[i];
+  return null;
+}
+function agregarFilaProyecto(nombre, cliente) {
+  var h = buscarHoja(SpreadsheetApp.getActiveSpreadsheet(), HOJA_PROYECTOS);
+  if (!h) return;                                                     // la pestaña se crea al listar los proyectos; ahí cada pestaña recibe su fila
+  var filas = h.getLastRow() >= 2 ? h.getRange(2, 1, h.getLastRow() - 1, 5).getValues() : [];
+  for (var i = 0; i < filas.length; i++) if (minusculas(filas[i][1]) === minusculas(nombre)) return;
+  h.appendRow([nuevoIdProyecto(), nombre, String(cliente === undefined || cliente === null ? '' : cliente).substring(0, 120), '', 'si']);
+}
+
+/** Cambia nombre, cliente y notas de un proyecto (el nombre cambia la pestaña: nadie crea un proyecto nuevo). */
+function guardarProyecto(d) {
+  var p = buscarProyecto({ id: d.id, nombre: d.nombreAnterior });
+  if (!p) return { ok: false, error: 'No se encontró el proyecto.' };
+  var nombre = nombreLimpio(d.nombre);
+  if (!nombre) return { ok: false, error: 'Escribe un nombre para el proyecto.' };
+  var libro = SpreadsheetApp.getActiveSpreadsheet();
+  if (minusculas(nombre) !== minusculas(p.nombre)) {
+    if (buscarHoja(libro, nombre)) return { ok: false, error: 'Ya existe un proyecto con ese nombre.' };
+    buscarHoja(libro, p.nombre).setName(nombre);
+  } else if (nombre !== p.nombre) buscarHoja(libro, p.nombre).setName(nombre);   // solo cambian mayúsculas
+  var h = hojaProyectos();
+  h.getRange(p.fila, 2, 1, 3).setValues([[nombre, textoSeguro(String(d.cliente === undefined || d.cliente === null ? '' : d.cliente).substring(0, 120)), textoSeguro(String(d.notas === undefined || d.notas === null ? '' : d.notas).substring(0, 500))]]);
+  return { ok: true, proyectos: proyectosInfo().map(quitarFila) };
+}
+
+/** Activa o desactiva un proyecto (un proyecto desactivado no se muestra a nadie; sus datos se conservan). */
+function activarProyecto(d) {
+  var p = buscarProyecto(d);
+  if (!p) return { ok: false, error: 'No se encontró el proyecto.' };
+  hojaProyectos().getRange(p.fila, 5).setValue(d.activo === false ? 'no' : 'si');
+  return { ok: true, proyectos: proyectosInfo().map(quitarFila) };
+}
+
+/**
+ * Elimina un proyecto para siempre: su pestaña (y las archivadas "(anterior)"/"(eliminado)"), su fila de _Proyectos y sus fotos de Drive.
+ * Las fotos se borran de a 400 por llamada; si quedan, el resultado lo dice (se repite la acción).
  */
 function eliminarProyecto(d) {
-  var nombre = String(d.nombre === undefined || d.nombre === null ? '' : d.nombre).trim();
-  if (!nombre || nombre.charAt(0) === '_') return { ok: false, error: 'Falta el nombre del proyecto.' };
   var libro = SpreadsheetApp.getActiveSpreadsheet();
-  var hoja = buscarHoja(libro, nombre);
-  if (!hoja) return { ok: true, eliminado: false };   // ya no estaba en la hoja: nada que archivar
-  if (hoja.getLastRow() < 1 || hoja.getRange(1, 1).getValue() !== COLUMNAS[0][1]) return { ok: false, error: 'Esa pestaña no es un proyecto.' };
-  var destino = hoja.getName() + ' (eliminado)', n = 2;
-  while (buscarHoja(libro, destino)) destino = hoja.getName() + ' (eliminado ' + n++ + ')';
-  hoja.setName(destino);
-  return { ok: true, eliminado: true };
+  var p = buscarProyecto(d);
+  var nombre = p ? p.nombre : String(d.nombre === undefined || d.nombre === null ? '' : d.nombre).trim();
+  if (!p && !nombre && d.id) return { ok: true, eliminado: false };    // ya no existía
+  if (!nombre || nombre.charAt(0) === '_') return { ok: false, error: 'Falta el nombre del proyecto.' };
+  var principal = buscarHoja(libro, nombre);
+  if (principal && !esPestanaProyecto(principal)) return { ok: false, error: 'Esa pestaña no es un proyecto.' };
+  var base = minusculas(nombre);
+  var hojas = libro.getSheets().filter(function (h) {
+    var n = h.getName();
+    return minusculas(n) === base || new RegExp('^' + base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\((anterior|eliminado)( \\d+)?\\)$', 'i').test(n);
+  });
+  if (!hojas.length && !p) return { ok: true, eliminado: false };
+  var fotos = 0, restantes = 0;
+  var it = DriveApp.getFoldersByName(CARPETA_FOTOS);
+  if (it.hasNext()) {
+    var carpeta = it.next();
+    hojas.forEach(function (h) {
+      if (h.getLastRow() < 2) return;
+      h.getRange(2, 1, h.getLastRow() - 1, 1).getValues().forEach(function (r) {
+        var u = String(r[0]).trim();
+        if (!u) return;
+        if (fotos >= 400) { restantes++; return; }
+        var f = carpeta.getFilesByName(u + '.jpg');
+        while (f.hasNext()) { f.next().setTrashed(true); fotos++; }
+      });
+    });
+  }
+  if (restantes) return { ok: true, eliminado: false, fotosRestantes: restantes, error: 'Quedan ' + restantes + ' fotos por borrar: repite la eliminación.' };
+  hojaProyectos();                                                    // garantiza que el libro conserve al menos una pestaña
+  hojas.forEach(function (h) { libro.deleteSheet(h); });
+  if (p) hojaProyectos().deleteRow(p.fila);
+  return { ok: true, eliminado: true, hojas: hojas.length, fotos: fotos, proyectos: proyectosInfo().map(quitarFila) };
 }
 
 /** Todas las personas (con su clave: solo la ve el administrador a través del proxy). */
@@ -833,6 +986,7 @@ function datosEquipo(token) {
   var iLat = col('latitud'), iLng = col('longitud'), iTec = col('tecnico'), iFab = col('fabricante'), iTecn = col('tecnologia'), iEli = col('eliminada');
   libro.getSheets().forEach(function (h) {
     if (h.getName().charAt(0) === '_' || h.getLastRow() < 2 || luminarias.length >= 5000) return;
+    prepararLectura(h);
     leerFilas(h).forEach(function (r) {
       if (luminarias.length >= 5000 || !r[0] || String(r[iEli]).toUpperCase().indexOf('S') === 0) return;
       var q = calidad[r[iTec]] = calidad[r[iTec]] || { total: 0, conAlertas: 0, codigos: {} };

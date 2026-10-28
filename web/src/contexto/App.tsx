@@ -11,7 +11,10 @@ import { guardarKv, leerKv, listarLuminarias, listarProyectos, marcarParaReenvia
 
 export interface ContextoApp {
   listo: boolean;
+  /** Proyectos activos (los desactivados no se muestran). */
   proyectos: ProyectoConCuenta[];
+  /** Proyectos desactivados (solo los gestiona el administrador). */
+  inactivos: ProyectoConCuenta[];
   proyecto: ProyectoConCuenta | null;
   items: Luminaria[];
   pendientes: number;
@@ -35,6 +38,7 @@ export const useApp = () => useContext(Ctx);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [listo, setListo] = useState(false);
   const [proyectos, setProyectos] = useState<ProyectoConCuenta[]>([]);
+  const [inactivos, setInactivos] = useState<ProyectoConCuenta[]>([]);
   const [activoId, setActivoId] = useState<number | null>(null);
   const [items, setItems] = useState<Luminaria[]>([]);
   const [ajustes, setAjustes] = useState<Ajustes>(ajustesPorDefecto());
@@ -43,10 +47,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const ultimaActividad = useRef(Date.now());
 
   const cargar = useCallback(async (preferido?: number | null) => {
-    const ps = await listarProyectos();
+    const todos = await listarProyectos();
+    const ps = todos.filter((p) => p.activo !== false);
     const guardado = preferido ?? Number(await leerKv('proyectoActivo'));
     const activo = ps.find((p) => p.id === guardado) ?? ps[0] ?? null;
     setProyectos(ps);
+    setInactivos(todos.filter((p) => p.activo === false));
     setActivoId(activo?.id ?? null);
     setItems(activo ? await listarLuminarias(activo.id) : []);
     setAjustes(await cargarAjustes());
@@ -120,10 +126,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const configCambiada = useCallback(() => { setVersionConfig((v) => v + 1); cargarAjustes().then(setAjustes); }, []);
 
   const valor = useMemo<ContextoApp>(() => ({
-    listo, proyectos, proyecto: proyectos.find((p) => p.id === activoId) ?? null, items, ajustes,
+    listo, proyectos, inactivos, proyecto: proyectos.find((p) => p.id === activoId) ?? null, items, ajustes,
     pendientes: items.filter((l) => !l.sincronizado).length,
     refrescar, activar, recargarAjustes, versionConfig, configCambiada, bloqueada, desbloquear, salir,
-  }), [listo, proyectos, activoId, items, ajustes, refrescar, activar, recargarAjustes, versionConfig, configCambiada, bloqueada, desbloquear, salir]);
+  }), [listo, proyectos, inactivos, activoId, items, ajustes, refrescar, activar, recargarAjustes, versionConfig, configCambiada, bloqueada, desbloquear, salir]);
 
   return <Ctx.Provider value={valor}>{children}</Ctx.Provider>;
 }

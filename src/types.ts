@@ -5,8 +5,8 @@ export interface Caracteristicas {
   fabricante: string;
   tecnologia: string;
   potenciaW: string;
-  /** Binario: "Sí" o "No". */
-  fotocelda: string;
+  /** Cómo se controla el encendido: "Fotocelda", "Telegestión", "Sin control" u "Otro: <cuál>". */
+  control: string;
   /** "Poste", "Fachada" u "Otro: <cuál>". */
   montaje: string;
   /** Solo si el montaje es poste: Concreto, Madera, Metálico, Fibra de vidrio, Fibra de vidrio traslúcido u "Otro: <cuál>". */
@@ -24,6 +24,10 @@ export interface Proyecto {
   cliente: string;
   notas: string;
   creadoEn: string;
+  /** Id del proyecto en la hoja de Google (lo pone el servidor): permite renombrar, desactivar o eliminar sin crear proyectos duplicados. */
+  idHoja?: string;
+  /** Un proyecto desactivado no se muestra (por defecto, activo). */
+  activo?: boolean;
 }
 
 export interface Luminaria extends Caracteristicas {
@@ -95,13 +99,21 @@ export const PREFIJO_OTRO = 'Otro: ';
 
 const sinTildes = (t: string) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z]/g, '');
 
-/** Fotocelda es Sí/No. Datos antiguos o lo que diga la IA: "Sin fotocelda"/"no" → No; cualquier otra descripción (NEMA, integrada…) → Sí. */
-export function normalizarFotocelda(valor: string): string {
+export const CONTROLES = ['Fotocelda', 'Telegestión', 'Sin control', 'Otro (¿cuál?)'];
+
+/**
+ * Lleva el control a Fotocelda, Telegestión, Sin control u "Otro: <cuál>". Datos antiguos (el campo era "Fotocelda" Sí/No):
+ * "Sí", NEMA, integrada, externa → Fotocelda; "No" y "Sin fotocelda" → Sin control.
+ */
+export function normalizarControl(valor: string): string {
   const v = valor.trim();
   if (!v) return '';
   const k = sinTildes(v);
-  if (k === 'no' || k.startsWith('sin') || k.startsWith('ninguna') || k === 'nohay' || k === 'ausente') return 'No';
-  return 'Sí';
+  if (/^otr[oa]\b/i.test(v)) return /^otr[oa]\s*:\s*\S/i.test(v) ? PREFIJO_OTRO + v.replace(/^otr[oa]\s*:\s*/i, '') : 'Otro';
+  if (k === 'no' || k.startsWith('sin') || k.startsWith('ningun') || k === 'nohay' || k === 'ausente') return 'Sin control';
+  if (k.includes('telegest') || k.includes('telecontrol') || k.includes('gestion') || k.includes('inteligente')) return 'Telegestión';
+  if (k === 'si' || k.includes('fotoc') || k.includes('nema') || k.includes('twistlock') || k.startsWith('integrada') || k.startsWith('externa')) return 'Fotocelda';
+  return PREFIJO_OTRO + v;
 }
 
 /** Lleva el montaje a Poste, Fachada u "Otro: <cuál>" (un dato antiguo como "Brazo" queda como "Otro: Brazo"). */
@@ -141,7 +153,7 @@ export const CAMPOS: {
   { key: 'fabricante', label: 'Fabricante', hint: 'Ej. Philips, Schréder, Lumenpulse' },
   { key: 'tecnologia', opciones: TECNOLOGIAS, label: 'Tecnología', hint: 'Si es otra, escribe cuál' },
   { key: 'potenciaW', opciones: ['30','50','70','100','150','250','400'], label: 'Potencia (W)', numeric: true },
-  { key: 'fotocelda', opciones: ['Sí','No'], soloOpciones: true, label: 'Fotocelda' },
+  { key: 'control', opciones: CONTROLES, label: 'Control', hint: 'Si es otro, escribe cuál' },
   { key: 'montaje', opciones: MONTAJES, label: 'Montaje', hint: 'Poste, fachada u otro (escribe cuál)' },
   { key: 'materialPoste', opciones: MATERIALES_POSTE, label: 'Material del poste', hint: 'Si es otro, escribe cuál', visibleSi: (c) => /^poste\b/i.test(c.montaje.trim()) },
   { key: 'numeroTransformador', label: 'N.º del transformador', hint: 'Opcional' },
@@ -150,5 +162,5 @@ export const CAMPOS: {
 ];
 
 export const caracteristicasVacias = (): Caracteristicas => ({
-  fabricante: '', tecnologia: '', potenciaW: '', fotocelda: '', montaje: '', materialPoste: '', numeroTransformador: '', estado: '', observaciones: '',
+  fabricante: '', tecnologia: '', potenciaW: '', control: '', montaje: '', materialPoste: '', numeroTransformador: '', estado: '', observaciones: '',
 });

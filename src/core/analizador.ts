@@ -1,4 +1,4 @@
-import { Caracteristicas, caracteristicasVacias, Confianza, normalizarFotocelda, normalizarMaterialPoste, normalizarMontaje, normalizarTecnologia } from '../types';
+import { Caracteristicas, caracteristicasVacias, Confianza, normalizarControl, normalizarMaterialPoste, normalizarMontaje, normalizarTecnologia } from '../types';
 import { Ajustes } from './ajustes';
 
 export interface ResultadoAnalisis {
@@ -7,13 +7,13 @@ export interface ResultadoAnalisis {
 }
 
 const PROMPT = `Eres un técnico experto en alumbrado público e iluminación exterior/interior (normas ANSI C136, RETILAP, IEC).
-Recibes de 1 a 3 fotos de UNA misma luminaria (general, placa/etiqueta, fotocelda). Extrae sus características básicas.
+Recibes de 1 a 3 fotos de UNA misma luminaria (general, placa/etiqueta, control). Extrae sus características básicas.
 
 Reglas:
 - Lee cualquier etiqueta, placa, grabado o texto visible (fabricante, potencia, país).
 - Si un dato NO se puede ver ni deducir con razonable certeza, devuelve cadena vacía "". No inventes cifras.
 - Si deduces un dato sólo por la forma/aspecto, añade " (est.)" al final.
-- Fotocelda: responde solo "Sí" si se ve una fotocelda (NEMA/twist-lock, integrada o externa) o "No" si claramente no hay. Si no la puedes ver, déjalo vacío.
+- Control (cómo se enciende): "Fotocelda" si se ve una fotocelda (NEMA/twist-lock, integrada o externa), "Telegestión" si hay un módulo, nodo o antena de telegestión, "Sin control" si claramente no hay ninguno, u "Otro: <cuál>". Si no lo puedes ver, déjalo vacío.
 - Montaje: "Poste" si la luminaria va sobre un poste o en un brazo de poste, "Fachada" si va fijada a una pared o fachada, o "Otro: <cuál>". Si es poste, en "materialPoste" pon el material que se ve: Concreto, Madera, Metálico, Fibra de vidrio, Fibra de vidrio traslúcido u "Otro: <cuál>".
 - Tecnología: responde SOLO con una de estas: LED, Sodio, Metal Halide, Mercurio, Fluorescente, Incandescente, Halógena, Inducción, Luz mixta. Si ninguna encaja, responde "Otra: <cuál>". Por aspecto: módulo de LEDs con lentes = LED; lámpara tubular/elipsoidal tras vidrio = sodio, mercurio o metal halide (solo si lo puedes distinguir).
 - Responde en español, valores cortos. Campos numéricos sin unidad (W).
@@ -31,7 +31,7 @@ export const TOOL = {
       fabricante: campo('Fabricante'),
       tecnologia: campo('Una de: LED, Sodio, Metal Halide, Mercurio, Fluorescente, Incandescente, Halógena, Inducción, Luz mixta; si ninguna, "Otra: <cuál>"'),
       potenciaW: campo('Potencia en vatios'),
-      fotocelda: campo('"Sí" si tiene fotocelda, "No" si no la tiene'),
+      control: campo('Fotocelda, Telegestión, Sin control u "Otro: <cuál>"'),
       montaje: campo('Poste, Fachada u "Otro: <cuál>"'),
       materialPoste: campo('Solo si el montaje es poste: Concreto, Madera, Metálico, Fibra de vidrio, Fibra de vidrio traslúcido u "Otro: <cuál>"'),
       estado: campo('Estado visual: bueno, deteriorado, apagada o vandalizada'),
@@ -44,7 +44,7 @@ export const TOOL = {
 
 export class ErrorAnalisis extends Error {}
 
-const ETIQUETAS = ['Foto general', 'Foto de la placa / etiqueta', 'Foto de la fotocelda'];
+const ETIQUETAS = ['Foto general', 'Foto de la placa / etiqueta', 'Foto del control (fotocelda o telegestión)'];
 
 const TIMEOUT_MS = 25000;
 
@@ -114,7 +114,7 @@ export async function analizarFotosCon(cargarAjustes: () => Promise<Ajustes>, ba
     out[k] = typeof v === 'string' ? v.trim() : v != null ? String(v) : '';
   }
   out.tecnologia = normalizarTecnologia(out.tecnologia);
-  out.fotocelda = normalizarFotocelda(out.fotocelda); out.montaje = normalizarMontaje(out.montaje);
+  out.control = normalizarControl(out.control); out.montaje = normalizarMontaje(out.montaje);
   out.materialPoste = /^poste\b/i.test(out.montaje) ? normalizarMaterialPoste(out.materialPoste) : '';
   const c = bloque.input?.confianza;
   return { caracteristicas: out, confianza: c === 'alta' || c === 'media' || c === 'baja' ? c : 'baja' };

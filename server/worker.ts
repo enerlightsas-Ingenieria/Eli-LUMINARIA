@@ -50,7 +50,7 @@ const MAX_TEXTO_BLOQUE = 3000;
 const MAX_TEXTO_TOTAL = 5000;
 const HERRAMIENTA = 'registrar_luminaria';
 const PROPIEDADES = [
-  'fabricante', 'tecnologia', 'potenciaW', 'fotocelda', 'montaje', 'materialPoste', 'estado', 'observaciones', 'confianza',
+  'fabricante', 'tecnologia', 'potenciaW', 'control', 'montaje', 'materialPoste', 'estado', 'observaciones', 'confianza',
 ];
 
 const json = (status: number, cuerpo: unknown) =>
@@ -735,8 +735,17 @@ async function administrarSistema(request: Request, env: any, llamar: typeof fet
     const j: any = await r.clone().json().catch(() => null);
     return j?.ok ? json(200, { ok: true, fotos: c.fotos }) : r;
   }
-  if (c?.accion === 'eliminar_proyecto' && typeof c.nombre === 'string' && c.nombre.trim() && c.nombre.length <= 120) {
-    return haciaHojas({ accion: 'proyecto_eliminar', nombre: c.nombre.trim() }, env.SYNC_TOKEN_ADMIN, env, llamar);
+  // Proyectos (solo administradores): cambiar nombre/cliente/notas, activar o desactivar, y eliminar del todo (hoja y fotos incluidas)
+  const idOk = (v: unknown) => v === undefined || (typeof v === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(v));
+  const txt = (v: unknown, max: number) => v === undefined || (typeof v === 'string' && v.length <= max);
+  if (c?.accion === 'eliminar_proyecto' && idOk(c.id) && txt(c.nombre, 120) && (c.id || (typeof c.nombre === 'string' && c.nombre.trim()))) {
+    return haciaHojas({ accion: 'proyecto_eliminar', id: c.id, nombre: typeof c.nombre === 'string' ? c.nombre.trim() : undefined }, env.SYNC_TOKEN_ADMIN, env, llamar);
+  }
+  if (c?.accion === 'guardar_proyecto' && idOk(c.id) && txt(c.nombreAnterior, 120) && typeof c.nombre === 'string' && c.nombre.length <= 120 && txt(c.cliente, 120) && txt(c.notas, 500) && (c.id || typeof c.nombreAnterior === 'string')) {
+    return haciaHojas({ accion: 'proyecto_guardar', id: c.id, nombreAnterior: c.nombreAnterior, nombre: c.nombre, cliente: c.cliente, notas: c.notas }, env.SYNC_TOKEN_ADMIN, env, llamar);
+  }
+  if (c?.accion === 'activar_proyecto' && idOk(c.id) && txt(c.nombre, 120) && typeof c.activo === 'boolean' && (c.id || typeof c.nombre === 'string')) {
+    return haciaHojas({ accion: 'proyecto_activar', id: c.id, nombre: c.nombre, activo: c.activo }, env.SYNC_TOKEN_ADMIN, env, llamar);
   }
   return json(400, { ok: false, error: 'Acción no permitida' });
 }
@@ -843,12 +852,16 @@ async function verificarIngreso(usuario: string, clave: string, env: any, llamar
 }
 
 /** Nombres de los proyectos que ya existen en la hoja (para que cada persona los vea al entrar). Si la hoja no responde, undefined (los teléfonos no deben interpretarlo como "no hay proyectos"). */
-async function proyectosDeLaHoja(env: any, llamar: typeof fetch): Promise<string[] | undefined> {
-  if (!env.SYNC_URL || !env.SYNC_TOKEN) return undefined;
+interface InfoProyecto { id: string; nombre: string; cliente: string; notas: string; activo: boolean }
+async function proyectosDeLaHoja(env: any, llamar: typeof fetch): Promise<{ proyectos: string[]; proyectosInfo?: InfoProyecto[] } | {}> {
+  if (!env.SYNC_URL || !env.SYNC_TOKEN) return {};
   try {
     const c: any = await (await haciaHojas({ accion: 'proyectos' }, env.SYNC_TOKEN, env, llamar)).json();
-    return c?.ok && Array.isArray(c.proyectos) ? c.proyectos.filter((x: unknown) => typeof x === 'string').slice(0, 100) : undefined;
-  } catch { return undefined; }
+    if (!c?.ok || !Array.isArray(c.proyectos)) return {};
+    const info: InfoProyecto[] = (Array.isArray(c.info) ? c.info : []).filter((x: any) => x && typeof x.id === 'string' && typeof x.nombre === 'string').slice(0, 100)
+      .map((x: any) => ({ id: x.id, nombre: x.nombre, cliente: String(x.cliente ?? ''), notas: String(x.notas ?? ''), activo: x.activo !== false }));
+    return { proyectos: c.proyectos.filter((x: unknown) => typeof x === 'string').slice(0, 100), ...(Array.isArray(c.info) ? { proyectosInfo: info } : {}) };   // sin 'info' (script viejo) solo van los nombres
+  } catch { return {}; }
 }
 
 /** POST /ingresar { usuario, clave } → { ok, nombre, rol, terceros?, proyectos }. No requiere cabecera: es la puerta de entrada. */
@@ -874,7 +887,7 @@ async function ingresar(request: Request, env: any, llamar: typeof fetch): Promi
     return json(401, { ok: false, error: 'Usuario o clave incorrectos.' });
   }
   intentos.delete(llave);
-  return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), proyectos: await proyectosDeLaHoja(env, llamar) });
+  return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), ...(await proyectosDeLaHoja(env, llamar)) });
 }
 
 /** Menú de administración: listar y crear/editar personas. El token del administrador del script se pone AQUÍ. */
@@ -925,7 +938,7 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   catch { return json(502, { error: 'No se pudo verificar el usuario (la hoja de Google no respondió).' }); }
   if (!quien) return json(401, { error: 'Unauthorized' });
 
-  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), proyectos: await proyectosDeLaHoja(env, llamar) });
+  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), ...(await proyectosDeLaHoja(env, llamar)) });
   if (ruta === '/equipo') {
     if (quien.rol === 'tecnico') return json(401, { error: 'Unauthorized' });
     return haciaHojas({ accion: 'equipo' }, env.SYNC_TOKEN_ADMIN, env, llamar);

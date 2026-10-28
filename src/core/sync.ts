@@ -7,7 +7,7 @@ const LOTE = 15;
 
 export interface ResultadoSync { enviadas: number; borradasEnviadas: number; recibidas: number; borradasRemotas: number }
 
-const infoProyecto = (p: Proyecto) => ({ uuid: p.uuid, nombre: p.nombre, cliente: p.cliente });
+const infoProyecto = (p: Proyecto) => ({ uuid: p.uuid, id: p.idHoja, nombre: p.nombre, cliente: p.cliente });   // el id manda: si el proyecto fue renombrado, se usa su nombre actual
 
 /** Lo que el núcleo necesita de la base local y de la red de cada plataforma. */
 export interface DepsSync {

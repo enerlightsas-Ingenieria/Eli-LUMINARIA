@@ -20,7 +20,7 @@ import { hayConexion } from '../servicios/red';
 const RANURAS = [
   { titulo: 'General', ayuda: 'La luminaria completa, con el poste y el brazo', icono: 'camara' },
   { titulo: 'Placa / etiqueta', ayuda: 'Acércate a la placa con fabricante y potencia', icono: 'lista' },
-  { titulo: 'Fotocelda', ayuda: 'La fotocelda, para ver si tiene', icono: 'chispa' },
+  { titulo: 'Control', ayuda: 'La fotocelda o el módulo de control, si lo hay', icono: 'chispa' },
 ];
 
 interface FotoTomada { blob: Blob; url: string; origen: 'camara' | 'galeria' }
@@ -140,7 +140,7 @@ export function Capturar() {
     <>
       <Cabecera titulo="Nueva luminaria" atras={volver} />
       <p className="muted" style={{ marginBottom: 14 }}>
-        Con una foto general basta. Si añades la <b style={{ color: 'var(--texto)' }}>placa</b> y la <b style={{ color: 'var(--texto)' }}>fotocelda</b>, la IA identifica mucho mejor fabricante, potencia y fotocelda.
+        Con una foto general basta. Si añades la <b style={{ color: 'var(--texto)' }}>placa</b> y la <b style={{ color: 'var(--texto)' }}>control</b>, la IA identifica mucho mejor fabricante, potencia y control.
       </p>
 
       {terceros && !evaluacion.ok && <p className="aviso" role="status">{evaluacion.mensaje}</p>}

@@ -13,7 +13,7 @@ export const WORKER = 'https://worker.test';
 /** Backend de prueba: el proxy real delante del script de Google real (sobre una hoja simulada). La IA es un doble fijo. */
 export const MODELOS_GEMINI = ['gemini-3.8-flash', 'gemini-3.8-flash-lite', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.5-flash-preview-05-20', 'gemini-3.5-flash-lite-preview-06-17', 'gemini-3.1-flash-lite-preview', 'gemini-3.0-flash', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
 
-export function crearBackend(respuestaIA: Record<string, string> = { fabricante: 'Philips', tecnologia: 'LED', potenciaW: '150', fotocelda: 'Sí', montaje: 'Poste', materialPoste: 'Concreto', confianza: 'alta' }, opciones: { gemini?: boolean } = {}) {
+export function crearBackend(respuestaIA: Record<string, string> = { fabricante: 'Philips', tecnologia: 'LED', potenciaW: '150', control: 'Fotocelda', montaje: 'Poste', materialPoste: 'Concreto', confianza: 'alta' }, opciones: { gemini?: boolean } = {}) {
   const gs = crearServidor(fileURLToPath(new URL('../../server/google-apps-script.gs', import.meta.url)));
   const env = {
     ANTHROPIC_API_KEY: 'sk-secreta', APP_TOKENS: 'Ana:tokAna,Beto:tokBeto', ADMIN_TOKENS: 'Sup:tokSup',

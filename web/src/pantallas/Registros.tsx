@@ -97,7 +97,7 @@ export function Registros() {
           <div className="vacio">
             <Icono nombre="camara" tam={56} />
             <h2>{items.length ? 'Sin resultados' : 'Aún no hay luminarias'}</h2>
-            <p>{items.length ? 'Prueba con otro texto o filtro.' : 'Toma una foto y la app identificará fabricante, tecnología, potencia, fotocelda y más, junto con la coordenada.'}</p>
+            <p>{items.length ? 'Prueba con otro texto o filtro.' : 'Toma una foto y la app identificará fabricante, tecnología, potencia, control y más, junto con la coordenada.'}</p>
           </div>
         )}
         {visibles.map((l) => (
@@ -105,7 +105,7 @@ export function Registros() {
             <Foto id={l.fotos[0]} miniatura={l.miniatura} className="miniatura" />
             <div style={{ minWidth: 0 }}>
               <div className="t">{l.codigo || `#${l.id}`} · {l.fabricante || 'Sin identificar'}</div>
-              <div className="s">{[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.fotocelda === 'Sí' && 'con fotocelda'].filter(Boolean).join(' · ') || '—'}</div>
+              <div className="s">{[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.control && l.control !== 'Sin control' && l.control].filter(Boolean).join(' · ') || '—'}</div>
               {!!l.tecnico && <div className="s" style={{ fontSize: 12 }}>Por {l.tecnico}</div>}
               <div className="c">{l.latitud != null ? `📍 ${l.latitud.toFixed(6)}, ${l.longitud?.toFixed(6)}` : '📍 sin coordenada'}</div>
               <div className="etq">

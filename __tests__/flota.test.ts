@@ -916,22 +916,69 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
     expect((await m.post('/usuarios', { accion: 'listar' }, 'claveJefe99')).j.usuarios.map((u: any) => u.usuario).sort()).toEqual(['ana', 'luz']);
   });
 
-  it('eliminar un proyecto es solo del administrador: se archiva en la hoja, deja de aparecer en la lista y ya no se ofrece a nadie', async () => {
+  it('proyectos: solo el administrador los cambia; renombrar cambia la pestaña (no crea otra); desactivar los oculta; eliminar borra pestaña, fila y archivadas', async () => {
     const m = montar();
     const tec = (await m.crear({ nombre: 'Ana', usuario: 'ana', rol: 'tecnico' })).j.usuario.clave;
     const sup = (await m.crear({ nombre: 'Sara', usuario: 'sara', rol: 'supervisor' })).j.usuario.clave;
+    const adm = 'claveJefe99';
     await m.post('/sync', subida(), tec);
-    expect((await m.post('/yo', {}, tec)).j.proyectos).toEqual(['Barrio A']);
-    for (const clave of [tec, sup]) expect((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre: 'Barrio A' }, clave)).status).toBe(401);   // técnico y supervisor no
-    expect((await m.post('/yo', {}, tec)).j.proyectos).toEqual(['Barrio A']);
-    for (const nombre of ['', 5, '_Usuarios', 'x'.repeat(121)]) expect([400, 200]).toContain((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre }, 'claveJefe99')).status);
-    expect((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre: '_Usuarios' }, 'claveJefe99')).j.ok).toBe(false);          // no se pueden borrar pestañas del sistema
-    expect((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre: 'Barrio A' }, 'claveJefe99')).j).toMatchObject({ ok: true, eliminado: true });
-    expect((await m.post('/yo', {}, tec)).j.proyectos).toEqual([]);
-    expect(m.gs.hoja('Barrio A (eliminado)')).toBeTruthy();                                                                              // los datos se conservan archivados
-    expect((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre: 'Barrio A' }, 'claveJefe99')).j).toMatchObject({ ok: true, eliminado: false });   // repetirlo no falla
-    const script = await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'proyecto_eliminar', nombre: 'Barrio A' }) });
-    expect((await script.json()).ok).toBe(false);                                                                                       // el token del equipo no sirve
+    const yo = async (c = tec) => (await m.post('/yo', {}, c)).j;
+    const [p] = (await yo()).proyectosInfo;
+    expect(p).toMatchObject({ nombre: 'Barrio A', cliente: '', notas: '', activo: true });
+    expect(p.id).toMatch(/^p[a-z0-9]{10}$/);
+    expect((await yo()).proyectos).toEqual(['Barrio A']);                                  // los nombres siguen yendo (apps antiguas)
+
+    // solo administradores
+    for (const accion of [{ accion: 'eliminar_proyecto', id: p.id }, { accion: 'guardar_proyecto', id: p.id, nombre: 'X' }, { accion: 'activar_proyecto', id: p.id, activo: false }]) {
+      for (const clave of [tec, sup]) expect((await m.post('/sistema', accion, clave)).status).toBe(401);
+    }
+    expect((await yo()).proyectosInfo[0].activo).toBe(true);
+
+    // renombrar + cliente/notas: la MISMA pestaña cambia de nombre y no aparece ningún proyecto nuevo
+    const g = await m.post('/sistema', { accion: 'guardar_proyecto', id: p.id, nombre: 'Barrio Nuevo', cliente: 'Soacha', notas: 'Fase 1' }, adm);
+    expect(g.j.ok).toBe(true);
+    expect((await yo()).proyectosInfo).toEqual([{ id: p.id, nombre: 'Barrio Nuevo', cliente: 'Soacha', notas: 'Fase 1', activo: true }]);
+    expect(m.gs.hoja('Barrio A')).toBeUndefined(); expect(m.gs.hoja('Barrio Nuevo')!.filas).toHaveLength(2);
+    // un teléfono con el nombre VIEJO pero el id no recrea el proyecto: sigue escribiendo en la pestaña renombrada
+    await m.post('/sync', { proyecto: { nombre: 'Barrio A', id: p.id }, luminarias: [{ uuid: 'u2', fabricante: 'G', latitud: 1, longitud: 1 }] }, tec);
+    expect(m.gs.hoja('Barrio A')).toBeUndefined(); expect(m.gs.hoja('Barrio Nuevo')!.filas).toHaveLength(3);
+    expect((await yo()).proyectosInfo).toHaveLength(1);
+    // nombres inválidos o repetidos
+    await m.post('/sync', { proyecto: { nombre: 'Otro' }, luminarias: [{ uuid: 'o1', fabricante: 'F', latitud: 1, longitud: 1 }] }, tec);
+    expect((await m.post('/sistema', { accion: 'guardar_proyecto', id: p.id, nombre: 'otro' }, adm)).j.error).toMatch(/Ya existe/);
+    expect((await m.post('/sistema', { accion: 'guardar_proyecto', id: p.id, nombre: '  ' }, adm)).j.ok).toBe(false);
+    expect((await m.post('/sistema', { accion: 'guardar_proyecto', id: 'p0000000000', nombre: 'Z' }, adm)).j.ok).toBe(false);
+
+    // desactivar: deja de ofrecerse (nombres) pero sigue en la información y conserva sus datos
+    expect((await m.post('/sistema', { accion: 'activar_proyecto', id: p.id, activo: false }, adm)).j.ok).toBe(true);
+    const tras = await yo();
+    expect(tras.proyectos).toEqual(['Otro']);
+    expect(tras.proyectosInfo.find((x: any) => x.id === p.id).activo).toBe(false);
+    expect(m.gs.hoja('Barrio Nuevo')!.filas).toHaveLength(3);
+    await m.post('/sistema', { accion: 'activar_proyecto', id: p.id, activo: true }, adm);
+    expect((await yo()).proyectos).toEqual(['Barrio Nuevo', 'Otro']);
+
+    // eliminar: se borran la pestaña, la fila de _Proyectos y las pestañas archivadas del mismo proyecto
+    const arch = m.gs.hojas.push(Object.assign(new (m.gs.hoja('Otro')!.constructor as any)('Barrio Nuevo (anterior)'), { filas: [['UUID']] }));
+    expect(arch).toBeGreaterThan(0);
+    expect((await m.post('/sistema', { accion: 'eliminar_proyecto', id: p.id }, adm)).j).toMatchObject({ ok: true, eliminado: true, hojas: 2 });
+    expect(m.gs.hoja('Barrio Nuevo')).toBeUndefined(); expect(m.gs.hoja('Barrio Nuevo (anterior)')).toBeUndefined();
+    expect((await yo()).proyectosInfo.map((x: any) => x.nombre)).toEqual(['Otro']);
+    expect(m.gs.hoja('_Proyectos')!.filas.map((f: any[]) => f[1])).toEqual(['Nombre', 'Otro']);
+    expect((await m.post('/sistema', { accion: 'eliminar_proyecto', id: p.id }, adm)).j).toMatchObject({ ok: true, eliminado: false });   // repetirlo no falla
+    // el token del equipo no sirve en el script, ni se puede borrar una pestaña del sistema
+    const script = await m.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'proyecto_eliminar', id: 'x' }) });
+    expect((await script.json()).ok).toBe(false);
+    expect((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre: '_Usuarios' }, adm)).j.ok).toBe(false);
+    for (const mala of [{ accion: 'eliminar_proyecto' }, { accion: 'eliminar_proyecto', id: 'a b' }, { accion: 'guardar_proyecto', nombre: 'X' }, { accion: 'activar_proyecto', id: 'p1', activo: 'no' }]) expect((await m.post('/sistema', mala, adm)).status).toBe(400);
+  });
+
+  it('un script viejo en el servidor (sin información de proyectos): solo van los nombres', async () => {
+    const m = montar();
+    const tec = (await m.crear({ nombre: 'Ana', usuario: 'ana', rol: 'tecnico' })).j.usuario.clave;
+    await m.post('/sync', subida(), tec);
+    const yo = (await m.post('/yo', {}, tec)).j;
+    expect(yo.proyectos).toEqual(['Barrio A']); expect(Array.isArray(yo.proyectosInfo)).toBe(true);
   });
 
   it('teléfono (WhatsApp): se guarda, se conserva al editar sin enviarlo, se puede cambiar o quitar, y se valida', async () => {

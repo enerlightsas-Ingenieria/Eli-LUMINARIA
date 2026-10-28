@@ -42,6 +42,7 @@ function abrir() {
     if (user_version < 5) await migrarAV5(db);
     if (user_version < 6) await migrarAV6(db);
     if (user_version < 7) await migrarAV7(db);
+    if (user_version < 8) await migrarAV8(db);
     return db;
   })();
   return dbPromise;
@@ -108,6 +109,16 @@ async function migrarAV7(db: SQLite.SQLiteDatabase) {
   const cols = (await db.getAllAsync<{ name: string }>('PRAGMA table_info(luminarias)')).map((c) => c.name);
   for (const c of ['barrio', 'miniatura']) if (!cols.includes(c)) await db.execAsync(`ALTER TABLE luminarias ADD COLUMN ${c} TEXT DEFAULT ''`);
   await db.execAsync('PRAGMA user_version = 7');
+}
+
+/** v7 → v8: "Fotocelda" (Sí/No) pasa a "Control" (Fotocelda / Telegestión / Sin control / Otro). */
+async function migrarAV8(db: SQLite.SQLiteDatabase) {
+  const cols = (await db.getAllAsync<{ name: string }>('PRAGMA table_info(luminarias)')).map((c) => c.name);
+  if (!cols.includes('control')) await db.execAsync("ALTER TABLE luminarias ADD COLUMN control TEXT DEFAULT ''");
+  if (cols.includes('fotocelda')) {
+    await db.execAsync("UPDATE luminarias SET control = CASE WHEN TRIM(COALESCE(fotocelda,'')) = '' THEN '' WHEN LOWER(TRIM(fotocelda)) = 'no' OR LOWER(TRIM(fotocelda)) LIKE 'sin%' THEN 'Sin control' ELSE 'Fotocelda' END");
+  }
+  await db.execAsync('PRAGMA user_version = 8');
 }
 
 /** SQLite no acepta booleanos: se guardan como 0/1. */

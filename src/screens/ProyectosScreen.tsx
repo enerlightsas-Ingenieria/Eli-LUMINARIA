@@ -93,8 +93,8 @@ export function ProyectosScreen() {
                 <>
                   <Text style={{ color: c.muted, fontWeight: '600', marginBottom: 8 }}>POR TECNOLOGÍA</Text>
                   <Barras datos={r.porTecnologia} max={r.porTecnologia[0].cantidad} />
-                  <Text style={{ color: c.muted, fontWeight: '600', marginTop: 16, marginBottom: 8 }}>FOTOCELDA</Text>
-                  <Barras datos={r.porFotocelda} max={r.porFotocelda[0].cantidad} />
+                  <Text style={{ color: c.muted, fontWeight: '600', marginTop: 16, marginBottom: 8 }}>CONTROL</Text>
+                  <Barras datos={r.porControl} max={r.porControl[0].cantidad} />
                 </>
               )}
             </Card>
