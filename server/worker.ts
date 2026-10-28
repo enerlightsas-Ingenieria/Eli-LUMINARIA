@@ -814,6 +814,7 @@ async function sincronizar(request: Request, env: any, llamar: typeof fetch, qui
   if (!ACCIONES_SYNC.includes(c.accion)) return json(400, { ok: false, error: 'Acción no permitida' });
   delete c.token;                                  // el cliente no puede imponer el token del script
   delete c.por;                                    // ni declarar quién es: el autor lo sella el servidor
+  c.soloExistentes = quien.rol !== 'admin';        // solo los administradores crean proyectos (una pestaña nueva); el resto trabaja en los que ya existen
   if (c.accion === 'latido') c.tecnico = quien.nombre;   // la presencia se atribuye al dueño de la clave, no a lo que diga el cliente
   if (c.accion === undefined) {
     c.por = { usuario: quien.usuario, nombre: quien.nombre };

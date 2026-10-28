@@ -293,9 +293,9 @@ test('administración: el administrador crea un técnico en la app, le entrega s
   await expect(carla.page.getByLabel('Tecnología', { exact: true })).toHaveValue('Otra: ');
   await carla.page.getByLabel('Tecnología', { exact: true }).fill('Otra: Plasma');
   await guardar(carla.page);
-  await expect.poll(() => filas(b, 'General').length, { timeout: 20_000 }).toBe(1);
-  expect(filas(b, 'General')[0]).toMatchObject({ Técnico: 'Carla Gómez', Usuario: 'cgomez', Fabricante: 'Schréder', Tecnología: 'Otra: Plasma' });
-  expect(Object.keys(filas(b, 'General')[0])).not.toContain('Marca');
+  await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);
+  expect(filas(b, 'Barrio A')[0]).toMatchObject({ Técnico: 'Carla Gómez', Usuario: 'cgomez', Fabricante: 'Schréder', Tecnología: 'Otra: Plasma' });
+  expect(Object.keys(filas(b, 'Barrio A')[0])).not.toContain('Marca');
 
   // el administrador la hace supervisora: ahora ve el panel y también puede capturar
   await admin.page.getByRole('dialog').getByRole('button', { name: 'Cancelar' }).click();
@@ -659,9 +659,10 @@ test('proyectos: solo el administrador los edita; renombrar no crea otro; desact
   const alDia = async (p: Page) => { await p.evaluate(() => window.dispatchEvent(new Event('online'))); await p.waitForTimeout(1500); };   // la app vuelve a preguntar al servidor
   for (const p of [admin.page, ana.page]) await p.getByRole('link', { name: 'Proyectos' }).click();
 
-  // un técnico no ve cómo editar proyectos (sí puede crear uno nuevo)
+  // un técnico no puede editar ni crear proyectos; el administrador sí
   await expect(ana.page.getByRole('button', { name: /Editar/ })).toHaveCount(0);
-  await expect(ana.page.getByRole('button', { name: 'Nuevo proyecto' })).toBeVisible();
+  await expect(ana.page.getByRole('button', { name: 'Nuevo proyecto' })).toHaveCount(0);
+  await expect(admin.page.getByRole('button', { name: 'Nuevo proyecto' })).toBeVisible();
 
   // el administrador cambia nombre y cliente: es la MISMA pestaña, no aparece un proyecto nuevo con el nombre viejo
   await admin.page.getByRole('button', { name: 'Editar Barrio A' }).click();
@@ -674,7 +675,7 @@ test('proyectos: solo el administrador los edita; renombrar no crea otro; desact
   await alDia(ana.page);
   await expect(ana.page.getByRole('button', { name: /Proyecto Barrio Nuevo/ })).toBeVisible();
   await expect(ana.page.getByRole('button', { name: /Proyecto Barrio A\b/ })).toHaveCount(0);
-  await expect(ana.page.getByRole('button', { name: /^Proyecto / })).toHaveCount(3);        // General (local), Barrio Nuevo y Zona 2: ninguno duplicado
+  await expect(ana.page.getByRole('button', { name: /^Proyecto / })).toHaveCount(2);        // Barrio Nuevo y Zona 2: ninguno duplicado (el "General" vacío del teléfono sobra y se quita)
 
   // desactivar: desaparece para Ana; el administrador lo ve en "Desactivados" y puede activarlo
   await admin.page.getByRole('button', { name: 'Editar Barrio Nuevo' }).click();
@@ -694,7 +695,7 @@ test('proyectos: solo el administrador los edita; renombrar no crea otro; desact
   await boton(admin.page, 'Sí, eliminar todo');
   await expect(admin.page.getByRole('button', { name: /Proyecto Barrio Nuevo/ })).toHaveCount(0);
   expect(b.gs.hoja('Barrio Nuevo')).toBeUndefined();
-  expect(b.gs.hoja('_Proyectos')!.filas.map((f: any[]) => f[1]).sort()).toEqual(['General', 'Nombre', 'Zona 2']);   // sin el eliminado (General nace al sincronizar el proyecto local)
+  expect(b.gs.hoja('_Proyectos')!.filas.map((f: any[]) => f[1]).sort()).toEqual(['Nombre', 'Zona 2']);   // sin el eliminado
   await alDia(ana.page);
   await expect(ana.page.getByRole('button', { name: /Proyecto Barrio Nuevo/ })).toHaveCount(0);
 });

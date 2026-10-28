@@ -15,6 +15,7 @@ export const MODELOS_GEMINI = ['gemini-3.8-flash', 'gemini-3.8-flash-lite', 'gem
 
 export function crearBackend(respuestaIA: Record<string, string> = { fabricante: 'Philips', tecnologia: 'LED', potenciaW: '150', control: 'Fotocelda', montaje: 'Poste', materialPoste: 'Concreto', confianza: 'alta' }, opciones: { gemini?: boolean } = {}) {
   const gs = crearServidor(fileURLToPath(new URL('../../server/google-apps-script.gs', import.meta.url)));
+  gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'listar', proyecto: { nombre: 'Barrio A' }, desde: '' }) });   // proyecto que ya existe en la hoja (solo el administrador crea proyectos)
   const env = {
     ANTHROPIC_API_KEY: 'sk-secreta', APP_TOKENS: 'Ana:tokAna,Beto:tokBeto', ADMIN_TOKENS: 'Sup:tokSup',
     ...(opciones.gemini ? { GEMINI_API_KEY: 'AIza-prueba' } : {}),

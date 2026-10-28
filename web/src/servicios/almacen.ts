@@ -151,6 +151,9 @@ export async function conciliarProyectosInfo(remotos: ProyectoRemoto[]): Promise
   for (const p of locales) {
     if (usados.has(p.id)) continue;
     const ls = await listarLuminarias(p.id);
+    if (!p.idHoja && remotos.length && !ls.length && p.nombre === 'General' && !p.notas && !p.cliente) {   // el "General" que nace con la app: sobra cuando el servidor ya trae los proyectos reales
+      await borrarProyecto(p.id); quitados++; continue;
+    }
     const pendiente = ls.some((l) => !l.sincronizado) || (await borradasPendientes(p.id)).length > 0;
     const conocido = !!p.idHoja || (await leerKv(`enHoja:${p.uuid}`)) === '1' || ls.some((l) => l.sincronizado);   // la hoja ya lo tuvo y ahora no está: lo eliminó el administrador
     if (!conocido || pendiente) continue;

@@ -829,6 +829,7 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
   const montar = (extra: any = {}) => {
     const gs = crearServidor();
     const env: any = { SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, ADMIN_TOKENS: 'Jefe:claveJefe99', ...extra };
+    gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'listar', proyecto: { nombre: 'Barrio A' }, desde: '' }) });   // el proyecto ya existe en la hoja (solo el administrador los crea)
     const f = jest.fn((u: any, i: any) => gs.llamar(u, i));
     const post = async (ruta: string, cuerpo: any, clave = '') => {
       const r = await manejar(new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave, 'cf-connecting-ip': '2.2.2.2' }, body: JSON.stringify(cuerpo) }), env, f as any);
@@ -944,7 +945,7 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
     expect(m.gs.hoja('Barrio A')).toBeUndefined(); expect(m.gs.hoja('Barrio Nuevo')!.filas).toHaveLength(3);
     expect((await yo()).proyectosInfo).toHaveLength(1);
     // nombres inválidos o repetidos
-    await m.post('/sync', { proyecto: { nombre: 'Otro' }, luminarias: [{ uuid: 'o1', fabricante: 'F', latitud: 1, longitud: 1 }] }, tec);
+    await m.post('/sync', { proyecto: { nombre: 'Otro' }, luminarias: [{ uuid: 'o1', fabricante: 'F', latitud: 1, longitud: 1 }] }, adm);   // lo crea el administrador
     expect((await m.post('/sistema', { accion: 'guardar_proyecto', id: p.id, nombre: 'otro' }, adm)).j.error).toMatch(/Ya existe/);
     expect((await m.post('/sistema', { accion: 'guardar_proyecto', id: p.id, nombre: '  ' }, adm)).j.ok).toBe(false);
     expect((await m.post('/sistema', { accion: 'guardar_proyecto', id: 'p0000000000', nombre: 'Z' }, adm)).j.ok).toBe(false);
@@ -971,6 +972,22 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
     expect((await script.json()).ok).toBe(false);
     expect((await m.post('/sistema', { accion: 'eliminar_proyecto', nombre: '_Usuarios' }, adm)).j.ok).toBe(false);
     for (const mala of [{ accion: 'eliminar_proyecto' }, { accion: 'eliminar_proyecto', id: 'a b' }, { accion: 'guardar_proyecto', nombre: 'X' }, { accion: 'activar_proyecto', id: 'p1', activo: 'no' }]) expect((await m.post('/sistema', mala, adm)).status).toBe(400);
+  });
+
+  it('solo el administrador crea proyectos: un técnico o supervisor no puede sincronizar a uno que no existe (ni recrear uno eliminado)', async () => {
+    const m = montar();
+    const tec = (await m.crear({ nombre: 'Ana', usuario: 'ana', rol: 'tecnico' })).j.usuario.clave;
+    const sup = (await m.crear({ nombre: 'Sara', usuario: 'sara', rol: 'supervisor' })).j.usuario.clave;
+    const nuevo = { proyecto: { nombre: 'Proyecto Nuevo' }, luminarias: [{ uuid: 'n1', fabricante: 'F', latitud: 1, longitud: 1 }] };
+    for (const clave of [tec, sup]) expect((await m.post('/sync', nuevo, clave)).j).toMatchObject({ ok: false, error: expect.stringMatching(/Solo el administrador crea proyectos/) });
+    expect((await m.post('/sync', { accion: 'listar', proyecto: { nombre: 'Proyecto Nuevo' }, desde: '' }, tec)).j.ok).toBe(false);
+    expect(m.gs.hoja('Proyecto Nuevo')).toBeUndefined();
+    expect((await m.post('/sync', { ...nuevo, soloExistentes: false }, tec)).j.ok).toBe(false);       // el teléfono no puede saltarse la regla
+    expect((await m.post('/sync', nuevo, 'claveJefe99')).j.ok).toBe(true);                             // el administrador sí lo crea
+    expect((await m.post('/sync', nuevo, tec)).j.ok).toBe(true);                                       // y desde entonces todos trabajan en él
+    await m.post('/sistema', { accion: 'eliminar_proyecto', nombre: 'Proyecto Nuevo' }, 'claveJefe99');
+    expect((await m.post('/sync', nuevo, tec)).j.ok).toBe(false);                                      // eliminado: no se recrea
+    expect(m.gs.hoja('Proyecto Nuevo')).toBeUndefined();
   });
 
   it('un script viejo en el servidor (sin información de proyectos): solo van los nombres', async () => {
@@ -1044,6 +1061,7 @@ describe('dirección de una coordenada y miniatura de la foto', () => {
   const montar = (extra: any = {}, nom: any = nominatim) => {
     const gs = crearServidor();
     const env: any = { APP_TOKENS: 'juan:tokJ', SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, ...extra };
+    gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN', accion: 'listar', proyecto: { nombre: 'Barrio A' }, desde: '' }) });   // el proyecto ya existe en la hoja (solo el administrador los crea)
     const visto: string[] = [];
     const f = jest.fn(async (u: any, i: any) => { const url = String(u); if (url.includes('gs.example')) return gs.llamar(u, i); visto.push(url); return new Response(JSON.stringify(nom), { status: 200 }); });
     const post = async (ruta: string, cuerpo: any, clave = 'tokJ') => { const r = await manejar(new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave }, body: JSON.stringify(cuerpo) }), env, f as any); return { status: r.status, j: await r.json() }; };

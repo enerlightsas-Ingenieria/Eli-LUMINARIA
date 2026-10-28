@@ -35,7 +35,8 @@ export function Proyectos() {
   const guardar = async () => {
     if (!editando?.nombre?.trim()) { await avisar('Falta el nombre', 'Escribe un nombre para el proyecto.'); return; }
     const e = editando;
-    if (!e.id) {   // proyecto nuevo (lo puede crear cualquier cuenta): aparece en la hoja al sincronizar su primer registro
+    if (!e.id) {   // proyecto nuevo (solo administradores): aparece en la hoja al sincronizar
+      if (!esAdmin) { await avisar('Sin permiso', 'Solo el administrador puede crear proyectos.'); return; }
       setEditando(null);
       await activar(await crearProyecto(e.nombre!, e.cliente ?? '', e.notas ?? ''));
       await refrescar();
@@ -100,7 +101,7 @@ export function Proyectos() {
   return (
     <>
       <Cabecera titulo="Proyectos" subtitulo="Agrupa tus levantamientos por zona o cliente" acciones={[
-        { icono: 'mas', etiqueta: 'Nuevo proyecto', onClick: () => setEditando({ nombre: '', cliente: '', notas: '' }) },
+        ...(esAdmin ? [{ icono: 'mas' as const, etiqueta: 'Nuevo proyecto', onClick: () => setEditando({ nombre: '', cliente: '', notas: '' }) }] : []),
         { icono: sincronizando ? 'actualizar' : 'nube', etiqueta: 'Sincronizar', onClick: sincronizarTodo },
         { icono: 'compartir', etiqueta: 'Exportar', onClick: () => setMenuExportar(true) },
       ]} />

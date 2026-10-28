@@ -83,7 +83,8 @@ function doPost(e) {
     if (d.accion === 'proyecto_guardar') return salida(guardarProyecto(d));
     if (d.accion === 'proyecto_activar') return salida(activarProyecto(d));
     if (d.accion === 'proyecto_eliminar') return salida(eliminarProyecto(d));
-    var hoja = obtenerHoja(d.proyecto);
+    var hoja = obtenerHoja(d.proyecto, d.soloExistentes === true);
+    if (!hoja) return salida({ ok: false, error: 'El proyecto no existe (o fue eliminado). Solo el administrador crea proyectos: pídele que lo cree.' });
 
     if (d.accion === 'listar') return salida({ ok: true, ahora: ahora, luminarias: listar(hoja, d.desde || '') });
 
@@ -151,7 +152,7 @@ function doGet(e) {
   return salida({ ok: true, servicio: 'ELI-LUMINARIA' });
 }
 
-function obtenerHoja(proyecto) {
+function obtenerHoja(proyecto, soloExistentes) {
   var libro = SpreadsheetApp.getActiveSpreadsheet();
   var nombreProyecto = proyecto && proyecto.nombre;
   // Si el teléfono manda el id del proyecto, manda el nombre ACTUAL de la hoja (así un teléfono con el nombre viejo no recrea el proyecto renombrado).
@@ -160,6 +161,7 @@ function obtenerHoja(proyecto) {
   var limpio = nombreLimpio(nombreProyecto) || 'General';
   var hoja = buscarHoja(libro, limpio);
   if (hoja && esDisenoAnterior(hoja)) { archivarHoja(libro, hoja); hoja = null; }
+  if (!hoja && soloExistentes) return null;                           // solo el administrador crea proyectos
   var nueva = !hoja;
   hoja = hoja || libro.insertSheet(limpio);
   if (hoja.getLastRow() > 0) { actualizarColumnas(hoja); asegurarEncabezados(hoja); }
