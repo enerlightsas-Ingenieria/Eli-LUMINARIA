@@ -58,14 +58,15 @@ var NUMERICAS = ['id', 'latitud', 'longitud', 'precisionM', 'potenciaW'];
 function col(clave) { for (var i = 0; i < COLUMNAS.length; i++) if (COLUMNAS[i][0] === clave) return i; return -1; }
 
 function doPost(e) {
-  var lock = LockService.getScriptLock();
+  var lock = LockService.getScriptLock(), conLock = false;
   try {
-    lock.waitLock(30000);
     var d = JSON.parse(e.postData.contents);
     // 'equipo' y la administración de usuarios exigen TOKEN_ADMIN; todo lo demás, el token del equipo
     var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'proyecto_guardar', 'proyecto_activar', 'proyecto_eliminar', 'config_guardar', 'ia_clave_guardar', 'ia_claves'].indexOf(d.accion) >= 0;
     var esAdmin = soloAdmin && d.token === TOKEN_ADMIN;
     if (soloAdmin ? !esAdmin : d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' }); // las acciones de administración NO sirven con el token del equipo
+    // Las consultas que solo leen usuarios o configuración NO esperan el candado: así no se hace cola detrás de los envíos y no se agota la espera.
+    if (['usuario', 'ingresar', 'contactos', 'config', 'ia_claves', 'usuarios_listar'].indexOf(d.accion) < 0) { lock.waitLock(45000); conLock = true; }
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
     if (d.accion === 'equipo') { var datos = datosEquipo(TOKEN_ADMIN); datos.ok = true; return salida(datos); }
     if (d.accion === 'latido') return salida(registrarLatido(d, ahora));
@@ -138,7 +139,7 @@ function doPost(e) {
   } catch (err) {
     return salida({ ok: false, error: 'Servidor ocupado o error: ' + String(err) });
   } finally {
-    try { lock.releaseLock(); } catch (x) {}
+    if (conLock) { try { lock.releaseLock(); } catch (x) {} }
   }
 }
 

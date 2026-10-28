@@ -3,10 +3,10 @@ import { useApp } from '../contexto/App';
 import { verificarIdentidad } from '../servicios/identidad';
 import { sincronizacion } from '../servicios/nucleo';
 
-const CADA_MS = 45_000;
+const CADA_MS = 90_000;
 
 /**
- * Sincroniza en segundo plano: al guardar (con pausa de 3 s), al volver a la página, al recuperar la conexión y cada 45 s mientras la
+ * Sincroniza en segundo plano: al guardar (con pausa de 3 s), al volver a la página, al recuperar la conexión y cada 90 s mientras la
  * app está a la vista (así lo que hace un equipo aparece pronto en los demás, y se notan proyectos eliminados, bajas y cambios de rol).
  */
 export function AutoSync() {

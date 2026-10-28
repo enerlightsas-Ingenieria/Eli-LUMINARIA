@@ -86,7 +86,7 @@ function deLaHoja(u: any): Identidad | null {
 const ROLES: Rol[] = ['tecnico', 'supervisor', 'admin'];
 
 const cacheUsuarios = new Map<string, { v: Identidad | null; hasta: number }>();
-export const vaciarCacheUsuarios = () => cacheUsuarios.clear();
+export const vaciarCacheUsuarios = () => { cacheUsuarios.clear(); olvidarProyectos(); };
 
 /**
  * Quién es esta clave: primero los secretos (sin red), después la pestaña _Usuarios (con memoria de unos segundos para no
@@ -735,6 +735,7 @@ async function administrarSistema(request: Request, env: any, llamar: typeof fet
     const j: any = await r.clone().json().catch(() => null);
     return j?.ok ? json(200, { ok: true, fotos: c.fotos }) : r;
   }
+  olvidarProyectos();   // cualquier acción de este menú puede cambiar la lista de proyectos
   // Proyectos (solo administradores): cambiar nombre/cliente/notas, activar o desactivar, y eliminar del todo (hoja y fotos incluidas)
   const idOk = (v: unknown) => v === undefined || (typeof v === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(v));
   const txt = (v: unknown, max: number) => v === undefined || (typeof v === 'string' && v.length <= max);
@@ -814,6 +815,7 @@ async function sincronizar(request: Request, env: any, llamar: typeof fetch, qui
   if (!ACCIONES_SYNC.includes(c.accion)) return json(400, { ok: false, error: 'Acción no permitida' });
   delete c.token;                                  // el cliente no puede imponer el token del script
   delete c.por;                                    // ni declarar quién es: el autor lo sella el servidor
+  if (c.accion === undefined) olvidarProyectos();   // un envío puede crear la pestaña de un proyecto
   c.soloExistentes = quien.rol !== 'admin';        // solo los administradores crean proyectos (una pestaña nueva); el resto trabaja en los que ya existen
   if (c.accion === 'latido') c.tecnico = quien.nombre;   // la presencia se atribuye al dueño de la clave, no a lo que diga el cliente
   if (c.accion === undefined) {
@@ -853,9 +855,23 @@ async function verificarIngreso(usuario: string, clave: string, env: any, llamar
 }
 
 /** Nombres de los proyectos que ya existen en la hoja (para que cada persona los vea al entrar). Si la hoja no responde, undefined (los teléfonos no deben interpretarlo como "no hay proyectos"). */
+/** Los teléfonos preguntan por los proyectos con frecuencia; la hoja (que atiende de a una petición) responde por todos cada PROYECTOS_CACHE_SEG (20 s). Se olvida al cambiar proyectos o enviar datos. */
+// Por entorno (env): cada despliegue tiene el suyo, y las pruebas con varias hojas simuladas no se mezclan.
+let cacheProyectos = new WeakMap<object, { v: any; hasta: number }>();
+export const olvidarProyectos = () => { cacheProyectos = new WeakMap(); };
+
 interface InfoProyecto { id: string; nombre: string; cliente: string; notas: string; activo: boolean }
 async function proyectosDeLaHoja(env: any, llamar: typeof fetch): Promise<{ proyectos: string[]; proyectosInfo?: InfoProyecto[] } | {}> {
   if (!env.SYNC_URL || !env.SYNC_TOKEN) return {};
+  const ttl = Math.max(0, Number(env.PROYECTOS_CACHE_SEG ?? 20)) * 1000;
+  const hit = cacheProyectos.get(env);
+  if (ttl && hit && hit.hasta > Date.now()) return hit.v;
+  const v = await proyectosDeLaHojaSinCache(env, llamar);
+  if (ttl && Object.keys(v).length) cacheProyectos.set(env, { v, hasta: Date.now() + ttl });
+  return v;
+}
+
+async function proyectosDeLaHojaSinCache(env: any, llamar: typeof fetch): Promise<{ proyectos: string[]; proyectosInfo?: InfoProyecto[] } | {}> {
   try {
     const c: any = await (await haciaHojas({ accion: 'proyectos' }, env.SYNC_TOKEN, env, llamar)).json();
     if (!c?.ok || !Array.isArray(c.proyectos)) return {};
