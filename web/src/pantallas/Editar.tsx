@@ -13,6 +13,8 @@ import { ir, volver } from '../router';
 import { cargarAjustes } from '../servicios/ajustes';
 import { borrarFotos, borrarLuminaria, guardarFoto, guardarKv, guardarLuminaria, leerKv } from '../servicios/almacen';
 import { base64DeFoto } from '../servicios/fotos';
+import { obtenerPosicion } from '../servicios/gps';
+import { direccionDelPunto } from '../servicios/identidad';
 import { hayConexion } from '../servicios/red';
 
 const num = (t: string): number | null => { const n = parseFloat(t.replace(',', '.')); return Number.isFinite(n) ? n : null; };
@@ -29,6 +31,7 @@ export function Editar({ id }: { id: string }) {
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [camara, setCamara] = useState(false);
   const guardado = useRef(false);
+  const direccionBuscada = useRef(false);
   const cargado = useRef(false);
   const originales = useRef<string[]>([]);
   const lRef = useRef<LuminariaBorrador | null>(null);
@@ -56,6 +59,37 @@ export function Editar({ id }: { id: string }) {
       }
     })();
   }, [id, listo, existente]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // La dirección y el barrio se proponen solos con la coordenada del punto (una vez, si están vacíos y hay conexión)
+  const lat = l?.latitud ?? null, lng = l?.longitud ?? null, sinDireccion = !!l && !l.direccion && !l.barrio;
+  useEffect(() => {
+    if (!sinDireccion || direccionBuscada.current || !coordenadaValida(lat, lng) || !hayConexion()) return;
+    direccionBuscada.current = true;
+    direccionDelPunto(lat!, lng!).then((d) => {
+      if (d && (d.direccion || d.barrio)) setL((p) => (p && !p.direccion && !p.barrio ? { ...p, direccion: d.direccion, barrio: d.barrio } : p));
+    });
+  }, [sinDireccion, lat, lng]);
+
+  const buscarDireccion = async () => {
+    if (!coordenadaValida(l!.latitud, l!.longitud)) { await avisar('Falta la coordenada', 'Primero necesitas la coordenada del punto.'); return; }
+    if (!hayConexion()) { await avisar('Sin conexión', 'Necesitas internet para buscar la dirección. Puedes escribirla a mano.'); return; }
+    setOcupado('Buscando la dirección…');
+    const d = await direccionDelPunto(l!.latitud!, l!.longitud!);
+    setOcupado(null);
+    if (!d || (!d.direccion && !d.barrio)) { await avisar('Sin resultado', 'El mapa no tiene la dirección de este punto. Escríbela a mano.'); return; }
+    setL((p) => (p ? { ...p, direccion: d.direccion || p.direccion, barrio: d.barrio || p.barrio } : p));
+  };
+
+  // La coordenada es obligatoria: si faltó (GPS apagado o sin permiso), se puede tomar aquí con el GPS del teléfono
+  const usarUbicacionActual = async () => {
+    setOcupado('Buscando la ubicación…');
+    const p = await obtenerPosicion('alta');
+    setOcupado(null);
+    if (!p) { await avisar('Sin ubicación', 'No se pudo obtener la ubicación. Activa el GPS del teléfono, permite la ubicación para este sitio e inténtalo de nuevo.'); return; }
+    setCoordTxt({ lat: String(p.latitud), lng: String(p.longitud) });
+    setL((q) => (q ? { ...q, latitud: p.latitud, longitud: p.longitud, precisionM: p.precisionM } : q));
+    direccionBuscada.current = false;
+  };
 
   // Si se sale sin guardar una luminaria nueva, se descartan las fotos (un refresco de la página conserva el borrador)
   useEffect(() => () => {
@@ -106,6 +140,10 @@ export function Editar({ id }: { id: string }) {
       await avisar('Coordenada inválida', 'Escribe la latitud y la longitud como números, por ejemplo 4.711 y -74.0721.');
       return;
     }
+    if (!coordenadaValida(l.latitud, l.longitud)) {   // lo más importante de un registro: sin coordenada no se guarda
+      await avisar('Falta la coordenada', 'No se puede guardar una luminaria sin coordenada. Pulsa "Usar mi ubicación actual" (con el GPS activado) o escribe la latitud y la longitud.');
+      return;
+    }
     if (coordenadaValida(l.latitud, l.longitud)) {
       const cerca = masCercano({ latitud: l.latitud!, longitud: l.longitud! }, items.filter((x) => x.id !== l.id), 8);
       if (cerca) {
@@ -147,6 +185,11 @@ export function Editar({ id }: { id: string }) {
             <button type="button" className="quitar" aria-label="Quitar foto" onClick={() => quitarFoto(fid)}><Icono nombre="cerrar" tam={16} /></button>
           </div>
         ))}
+        {!l.fotos.length && !!l.miniatura && (
+          <div className="foto" title="Foto de referencia en baja resolución (la tomó otra persona o otro dispositivo)">
+            <Foto miniatura={l.miniatura} alt="Foto de referencia en baja resolución" />
+          </div>
+        )}
         {l.fotos.length < 3 && <button type="button" className="anadir" aria-label="Añadir foto" onClick={() => setCamara(true)}><Icono nombre="mas" tam={32} /></button>}
       </div>
 
@@ -167,7 +210,10 @@ export function Editar({ id }: { id: string }) {
       </div>
       {terceros && <p className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 8 }}>Modo terceros: la coordenada la registra el GPS y no se edita a mano.</p>}
       {l.precisionM != null && <p className="muted" style={{ fontSize: 12, marginTop: -6, marginBottom: 10 }}>Precisión GPS ≈ {Math.round(l.precisionM)} m</p>}
-      <Campo etiqueta="Dirección / referencia" valor={l.direccion} alCambiar={(t) => set('direccion', t)} pista="Dirección más cercana, barrio y municipio. Ej. Cra 7 #12-30, Barrio Centro, Soacha" />
+      {!coordenadaValida(l.latitud, l.longitud) && <Boton texto="Usar mi ubicación actual" variante="secundario" icono="gps" cargando={ocupado === 'Buscando la ubicación…'} onClick={usarUbicacionActual} />}
+      <Campo etiqueta="Dirección / referencia" valor={l.direccion} alCambiar={(t) => set('direccion', t)} pista="Se propone sola con la ubicación; corrígela si hace falta" />
+      <Campo etiqueta="Barrio" valor={l.barrio ?? ''} alCambiar={(t) => set('barrio', t)} pista="Se propone solo con la ubicación" />
+      {coordenadaValida(l.latitud, l.longitud) && <Boton texto="Buscar dirección y barrio del punto" variante="secundario" icono="mapa" cargando={ocupado === 'Buscando la dirección…'} onClick={buscarDireccion} />}
       <Campo etiqueta="Sector" valor={l.sector ?? ''} alCambiar={(t) => set('sector', t)} opciones={SECTORES} soloOpciones />
       {coordenadaValida(l.latitud, l.longitud) && (
         <a className="boton secundario bloque" style={{ textDecoration: 'none' }} href={enlaceMapa(l.latitud!, l.longitud!)} target="_blank" rel="noopener noreferrer"><Icono nombre="mapa" tam={18} />Abrir en mapa</a>

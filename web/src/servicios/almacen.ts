@@ -144,8 +144,8 @@ export async function listarLuminarias(proyectoId: number): Promise<Luminaria[]>
 
 /** Registros guardados antes de que existieran el código del poste, el sector, el material del poste o el transformador. */
 const completar = (l: Luminaria): Luminaria => (
-  l.codigoPoste === undefined || l.sector === undefined || l.materialPoste === undefined || l.numeroTransformador === undefined
-    ? { ...l, codigoPoste: l.codigoPoste ?? '', sector: l.sector ?? '', materialPoste: l.materialPoste ?? '', numeroTransformador: l.numeroTransformador ?? '' } : l);
+  l.codigoPoste === undefined || l.sector === undefined || l.barrio === undefined || l.materialPoste === undefined || l.numeroTransformador === undefined
+    ? { ...l, codigoPoste: l.codigoPoste ?? '', sector: l.sector ?? '', barrio: l.barrio ?? '', materialPoste: l.materialPoste ?? '', numeroTransformador: l.numeroTransformador ?? '' } : l);
 
 export async function obtenerLuminaria(id: number): Promise<Luminaria | undefined> {
   const db = await abrir();
@@ -195,6 +195,21 @@ export async function contarDesde(tecnico: string, desdeISO: string): Promise<nu
 }
 export async function contarEntre(tecnico: string, desdeISO: string, hastaISO: string): Promise<number> {
   return (await todas()).filter((l) => l.tecnico === tecnico && l.creadoEn >= desdeISO && l.creadoEn <= hastaISO).length;
+}
+
+/**
+ * Una sola vez por dispositivo: las luminarias con foto propia que ya estaban enviadas se vuelven a marcar como pendientes, para que
+ * viajen otra vez con su miniatura (las anteriores a esa mejora no la tienen y los demás no verían la foto). Devuelve cuántas marcó.
+ */
+export async function marcarParaReenviar(): Promise<number> {
+  const db = await abrir();
+  const t = db.transaction('luminarias', 'readwrite');
+  const st = t.objectStore('luminarias');
+  const todas = (await pedir(st.getAll())) as Luminaria[];
+  let n = 0;
+  for (const l of todas) if (l.sincronizado && l.fotos?.length) { st.put({ ...l, sincronizado: false }); n++; }
+  await terminar(t);
+  return n;
 }
 
 export async function borradasPendientes(proyectoId: number): Promise<string[]> {

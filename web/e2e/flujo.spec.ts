@@ -65,13 +65,16 @@ test('técnico: configura por enlace, captura con IA, guarda y se sincroniza a l
   await page.getByLabel('N.º del transformador', { exact: true }).fill('T-123');
   await expect(page.getByLabel('Latitud', { exact: true })).toHaveValue('4.711');
   await expect(page.getByLabel('Longitud', { exact: true })).toHaveValue('-74.0721');
+  await expect(page.getByLabel('Dirección / referencia', { exact: true })).toHaveValue('Carrera 7 12-30, Bogotá', { timeout: 15_000 });   // la dirección sale sola de la coordenada
+  await expect(page.getByLabel('Barrio', { exact: true })).toHaveValue('La Candelaria');
+  await expect(page.getByLabel('Grado IP', { exact: true })).toHaveCount(0);                                                          // campo retirado
   await page.getByLabel('Código de la luminaria', { exact: true }).fill('P-001');
   await guardar(page);
 
   await expect(page.getByText('P-001 · Philips')).toBeVisible();
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);   // sincronización automática (3 s después de guardar)
   const fila = filas(b, 'Barrio A')[0];
-  expect(fila).toMatchObject({ Fabricante: 'Philips', 'Código de la luminaria': 'P-001', Técnico: 'Ana', Tecnología: 'LED', Fotocelda: 'Sí', Montaje: 'Poste', 'Material del poste': 'Concreto', Sector: 'Rural', 'N.º transformador': 'T-123', Latitud: 4.711, Longitud: -74.0721, 'Origen de la foto': 'camara' });
+  expect(fila).toMatchObject({ Fabricante: 'Philips', 'Código de la luminaria': 'P-001', Técnico: 'Ana', Tecnología: 'LED', Fotocelda: 'Sí', Montaje: 'Poste', 'Material del poste': 'Concreto', Sector: 'Rural', 'N.º transformador': 'T-123', Dirección: 'Carrera 7 12-30, Bogotá', Barrio: 'La Candelaria', Latitud: 4.711, Longitud: -74.0721, 'Origen de la foto': 'camara' });
   await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);                          // ya no figura como pendiente
 });
 
@@ -90,6 +93,8 @@ test('dos técnicos: lo que hace uno aparece en el otro; las ediciones y borrado
   await expect(dialogo(beto.page)).toContainText('recibida(s) del equipo');
   await boton(beto.page, 'Entendido');
   await expect(beto.page.getByText('Por Ana')).toBeVisible();
+  await expect(beto.page.locator('img.miniatura')).toBeVisible({ timeout: 15_000 });         // Beto ve la foto de referencia que tomó Ana
+  expect(await beto.page.locator('img.miniatura').getAttribute('src')).toMatch(/^data:image\/jpeg;base64,/);
   await expect(beto.page.getByText('Philips')).toBeVisible();
 
   // Ana elimina el registro → se propaga a Beto, y en la hoja queda marcado (no se borra la fila)

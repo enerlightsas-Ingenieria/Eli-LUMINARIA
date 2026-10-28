@@ -990,6 +990,82 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
   });
 });
 
+describe('dirección de una coordenada y miniatura de la foto', () => {
+  const { crearServidor } = require('./helpers/hoja');
+  const { leerDireccion, olvidarDirecciones } = require('../server/worker');
+  const nominatim = { address: { road: 'Carrera 7', house_number: '12-30', neighbourhood: 'La Candelaria', city: 'Bogotá' } };
+  const montar = (extra: any = {}, nom: any = nominatim) => {
+    const gs = crearServidor();
+    const env: any = { APP_TOKENS: 'juan:tokJ', SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, ...extra };
+    const visto: string[] = [];
+    const f = jest.fn(async (u: any, i: any) => { const url = String(u); if (url.includes('gs.example')) return gs.llamar(u, i); visto.push(url); return new Response(JSON.stringify(nom), { status: 200 }); });
+    const post = async (ruta: string, cuerpo: any, clave = 'tokJ') => { const r = await manejar(new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave }, body: JSON.stringify(cuerpo) }), env, f as any); return { status: r.status, j: await r.json() }; };
+    return { gs, visto, post };
+  };
+  beforeEach(() => { vaciarCacheUsuarios(); vaciarCacheIA(); olvidarDirecciones(); });
+
+  it('leerDireccion: calle y número, municipio; barrio aparte; con lo que haya', () => {
+    expect(leerDireccion(nominatim)).toEqual({ direccion: 'Carrera 7 12-30, Bogotá', barrio: 'La Candelaria', municipio: 'Bogotá' });
+    expect(leerDireccion({ address: { pedestrian: 'Peatonal 3', suburb: 'Centro', town: 'Soacha' } })).toEqual({ direccion: 'Peatonal 3, Soacha', barrio: 'Centro', municipio: 'Soacha' });
+    expect(leerDireccion({ address: { village: 'La Vereda' } })).toEqual({ direccion: 'La Vereda', barrio: '', municipio: 'La Vereda' });
+    expect(leerDireccion(null)).toEqual({ direccion: '', barrio: '', municipio: '' });
+  });
+
+  it('/direccion: pide a OpenStreetMap con la coordenada y se identifica; guarda la respuesta (el mismo tramo no vuelve a consultar); exige cuenta y coordenada válida', async () => {
+    const m = montar();
+    const r = await m.post('/direccion', { latitud: 4.711, longitud: -74.0721 });
+    expect(r.j).toEqual({ ok: true, direccion: 'Carrera 7 12-30, Bogotá', barrio: 'La Candelaria', municipio: 'Bogotá' });
+    expect(m.visto[0]).toMatch(/nominatim\.openstreetmap\.org\/reverse\?.*lat=4\.711&lon=-74\.0721/);
+    await m.post('/direccion', { latitud: 4.71102, longitud: -74.07211 });          // a pocos metros: misma respuesta guardada
+    expect(m.visto).toHaveLength(1);
+    expect((await m.post('/direccion', { latitud: 4.711, longitud: -74.0721 }, 'mala')).status).toBe(401);
+    for (const c of [{}, { latitud: 'x', longitud: 1 }, { latitud: 91, longitud: 0 }, { latitud: 0, longitud: 181 }]) expect((await m.post('/direccion', c)).status).toBe(400);
+  });
+
+  it('si el mapa falla, responde 502 (la app deja escribirla a mano)', async () => {
+    const gs = crearServidor();
+    const env: any = { APP_TOKENS: 'juan:tokJ', SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', USUARIOS_CACHE_SEG: 0 };
+    const f = jest.fn(async (u: any, i: any) => (String(u).includes('gs.example') ? gs.llamar(u, i) : new Response('x', { status: 429 })));
+    const r = await manejar(new Request('https://p.example/direccion', { method: 'POST', headers: { 'x-api-key': 'tokJ' }, body: JSON.stringify({ latitud: 1, longitud: 1 }) }), env, f as any);
+    expect(r.status).toBe(502);
+  });
+
+  const subida = (l: any) => ({ proyecto: { nombre: 'Barrio A' }, luminarias: [{ uuid: 'u1', fabricante: 'F', latitud: 4.7, longitud: -74, barrio: 'Centro', ...l }] });
+  const celda = (m: any, col: string) => { const h = m.gs.hoja('Barrio A'); return h.filas[1][h.filas[0].indexOf(col)]; };
+
+  it('la miniatura viaja a la hoja y vuelve a todos; si se edita sin enviarla, se conserva; una inválida o demasiado grande se descarta', async () => {
+    const m = montar();
+    const mini = '/9j/4AAQSkZJRg' + 'A'.repeat(2000);
+    expect((await m.post('/sync', subida({ miniatura: mini }))).j.ok).toBe(true);
+    expect(celda(m, 'Miniatura (no editar)')).toBe(mini);
+    expect(celda(m, 'Barrio')).toBe('Centro');
+    const lista = (await m.post('/sync', { accion: 'listar', proyecto: { nombre: 'Barrio A' }, desde: '' })).j.luminarias;
+    expect(lista[0]).toMatchObject({ uuid: 'u1', barrio: 'Centro', miniatura: mini });
+    await m.post('/sync', subida({ fabricante: 'Otro' }));                                // editar sin miniatura
+    expect(celda(m, 'Miniatura (no editar)')).toBe(mini);
+    const n = montar();
+    await n.post('/sync', subida({ miniatura: '<script>alert(1)</script>' }));
+    expect(celda(n, 'Miniatura (no editar)')).toBe('');
+    const g = montar();
+    await g.post('/sync', subida({ miniatura: 'A'.repeat(40_001) }));
+    expect(celda(g, 'Miniatura (no editar)')).toBe('');
+  });
+
+  it('si el administrador apaga las fotos, tampoco se guarda la miniatura', async () => {
+    const m = montar({ ADMIN_TOKENS: 'jefe:claveJefe99' });
+    await m.post('/sistema', { accion: 'guardar', fotos: false }, 'claveJefe99');
+    await m.post('/sync', subida({ miniatura: '/9j/AAAA', foto: 'FOTO64' }));
+    expect(celda(m, 'Miniatura (no editar)')).toBe('');
+    expect(celda(m, 'Foto')).toBe('');
+  });
+
+  it('sin coordenada, la auditoría avisa con SIN_COORDENADA', async () => {
+    const m = montar();
+    await m.post('/sync', subida({ latitud: null, longitud: null }));
+    expect(celda(m, 'Alertas')).toContain('SIN_COORDENADA');
+  });
+});
+
 describe('otras IAs (Groq, OpenRouter, Mistral, Qwen, Kimi, ChatGPT, otra): compatibles con la API de ChatGPT', () => {
   const { crearServidor } = require('./helpers/hoja');
   const {

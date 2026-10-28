@@ -7,7 +7,6 @@ export interface Caracteristicas {
   potenciaW: string;
   /** Binario: "Sí" o "No". */
   fotocelda: string;
-  ip: string;
   /** "Poste", "Fachada" u "Otro: <cuál>". */
   montaje: string;
   /** Solo si el montaje es poste: Concreto, Madera, Metálico, Fibra de vidrio, Fibra de vidrio traslúcido u "Otro: <cuál>". */
@@ -37,8 +36,12 @@ export interface Luminaria extends Caracteristicas {
   latitud: number | null;
   longitud: number | null;
   precisionM: number | null;
-  /** Dirección más cercana, con barrio y municipio. */
+  /** Dirección del punto donde se tomó la foto (la app la propone a partir de la coordenada; se puede corregir). */
   direccion: string;
+  /** Barrio del punto (la app lo propone a partir de la coordenada; se puede corregir). */
+  barrio: string;
+  /** Foto de referencia en baja resolución (JPEG en base64, ~240 px): viaja con el registro para que todos la vean. */
+  miniatura?: string;
   /** Urbano o Rural. */
   sector: string;
   /** Código del poste (opcional; el que use la empresa). */
@@ -139,7 +142,6 @@ export const CAMPOS: {
   { key: 'tecnologia', opciones: TECNOLOGIAS, label: 'Tecnología', hint: 'Si es otra, escribe cuál' },
   { key: 'potenciaW', opciones: ['30','50','70','100','150','250','400'], label: 'Potencia (W)', numeric: true },
   { key: 'fotocelda', opciones: ['Sí','No'], soloOpciones: true, label: 'Fotocelda' },
-  { key: 'ip', opciones: ['IP54','IP65','IP66','IP67'], label: 'Grado IP' },
   { key: 'montaje', opciones: MONTAJES, label: 'Montaje', hint: 'Poste, fachada u otro (escribe cuál)' },
   { key: 'materialPoste', opciones: MATERIALES_POSTE, label: 'Material del poste', hint: 'Si es otro, escribe cuál', visibleSi: (c) => /^poste\b/i.test(c.montaje.trim()) },
   { key: 'numeroTransformador', label: 'N.º del transformador', hint: 'Opcional' },
@@ -148,5 +150,5 @@ export const CAMPOS: {
 ];
 
 export const caracteristicasVacias = (): Caracteristicas => ({
-  fabricante: '', tecnologia: '', potenciaW: '', fotocelda: '', ip: '', montaje: '', materialPoste: '', numeroTransformador: '', estado: '', observaciones: '',
+  fabricante: '', tecnologia: '', potenciaW: '', fotocelda: '', montaje: '', materialPoste: '', numeroTransformador: '', estado: '', observaciones: '',
 });

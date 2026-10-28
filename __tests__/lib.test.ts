@@ -6,7 +6,7 @@ import { CAMPOS, caracteristicasVacias, Luminaria, normalizarFotocelda, normaliz
 const base = (o: Partial<Luminaria> = {}): Luminaria => ({
   ...caracteristicasVacias(), id: 1, uuid: 'u1', proyectoId: 1, creadoEn: '2026-01-01T00:00:00Z',
   actualizadoEn: '2026-01-01T00:00:00Z', fotos: [], latitud: 4.711, longitud: -74.0721, precisionM: 5.4,
-  direccion: '', sector: '', codigoPoste: '', codigo: 'P-001', tecnico: 'Ana', confianza: 'alta', sincronizado: false, origen: 'camara', ubicacionSimulada: false, jornadaId: 'j1', ...o,
+  direccion: '', barrio: '', sector: '', codigoPoste: '', codigo: 'P-001', tecnico: 'Ana', confianza: 'alta', sincronizado: false, origen: 'camara', ubicacionSimulada: false, jornadaId: 'j1', ...o,
 });
 
 describe('geo', () => {
@@ -110,8 +110,8 @@ describe('campos nuevos: fotocelda Sí/No, montaje, material del poste, sector y
   });
   it('los campos retirados ya no existen y los nuevos sí; el material solo se muestra con montaje en poste', () => {
     const claves = CAMPOS.map((c) => c.key as string);
-    for (const k of ['modelo', 'tensionV', 'pinesFotocelda', 'temperaturaColorK']) expect(claves).not.toContain(k);
-    expect(claves).toEqual(['fabricante', 'tecnologia', 'potenciaW', 'fotocelda', 'ip', 'montaje', 'materialPoste', 'numeroTransformador', 'estado', 'observaciones']);
+    for (const k of ['modelo', 'tensionV', 'pinesFotocelda', 'temperaturaColorK', 'ip']) expect(claves).not.toContain(k);
+    expect(claves).toEqual(['fabricante', 'tecnologia', 'potenciaW', 'fotocelda', 'montaje', 'materialPoste', 'numeroTransformador', 'estado', 'observaciones']);
     expect(CAMPOS.find((c) => c.key === 'fotocelda')).toMatchObject({ opciones: ['Sí', 'No'], soloOpciones: true });
     expect(CAMPOS.find((c) => c.key === 'materialPoste')!.opciones).toEqual(['Concreto', 'Madera', 'Metálico', 'Fibra de vidrio', 'Fibra de vidrio traslúcido', 'Otro (¿cuál?)']);
     const v = CAMPOS.find((c) => c.key === 'materialPoste')!.visibleSi!;

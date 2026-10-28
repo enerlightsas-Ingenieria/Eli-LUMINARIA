@@ -48,6 +48,20 @@ export async function urlDeFoto(id: string): Promise<string | undefined> {
   return u;
 }
 
+/** Miniatura de referencia: JPEG de ~240 px (≈10 KB) en base64, siempre por debajo del límite de una celda de la hoja. */
+export async function miniaturaDeFoto(id: string): Promise<string> {
+  const b = await obtenerFoto(id);
+  if (!b) throw new Error('La foto ya no está en este dispositivo.');
+  const bmp = await createImageBitmap(b);
+  try {
+    for (const [lado, calidad] of [[240, 0.6], [200, 0.45], [160, 0.35]] as const) {
+      const m = await blobABase64(await aJpegReducido(bmp, bmp.width, bmp.height, lado, calidad));
+      if (m.length <= 30_000) return m;
+    }
+    throw new Error('La miniatura quedó demasiado grande.');
+  } finally { bmp.close(); }
+}
+
 export async function base64DeFoto(id: string): Promise<string> {
   const b = await obtenerFoto(id);
   if (!b) throw new Error('La foto ya no está en este dispositivo.');

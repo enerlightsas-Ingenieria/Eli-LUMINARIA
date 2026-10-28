@@ -86,7 +86,7 @@ describe('db', () => {
   });
 });
 
-describe('migración v1 → v6', () => {
+describe('migración v1 → v7', () => {
   it('añade tecnico, tombstones y la evidencia de captura a una base v1 sin perder filas', async () => {
     mockMotor = new DatabaseSync(':memory:');
     mockMotor.exec(`
@@ -105,7 +105,7 @@ describe('migración v1 → v6', () => {
     expect(ls[0]).toMatchObject({ marca: 'Schréder', tecnico: '' });
     await db.guardarLuminaria({ ...ls[0], tecnico: 'Ana' });
     expect((await db.listarLuminarias(1))[0].tecnico).toBe('Ana');
-    expect((mockMotor.prepare('PRAGMA user_version').get() as any).user_version).toBe(6);
+    expect((mockMotor.prepare('PRAGMA user_version').get() as any).user_version).toBe(7);
     expect(ls[0]).toMatchObject({ origen: '', ubicacionSimulada: false, jornadaId: '' });
     await db.guardarLuminaria({ ...ls[0], origen: 'camara', ubicacionSimulada: true, jornadaId: 'j9' });
     expect((await db.listarLuminarias(1))[0]).toMatchObject({ origen: 'camara', ubicacionSimulada: true, jornadaId: 'j9' });

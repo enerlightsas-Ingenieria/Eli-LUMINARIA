@@ -7,7 +7,7 @@ import { cerrarSesion, verificarIdentidad } from '../servicios/identidad';
 import { jornada } from '../servicios/nucleo';
 import { claveDeSesion, INACTIVIDAD_MINUTOS } from '../servicios/sesion';
 import { ir } from '../router';
-import { guardarKv, leerKv, listarLuminarias, listarProyectos, ProyectoConCuenta } from '../servicios/almacen';
+import { guardarKv, leerKv, listarLuminarias, listarProyectos, marcarParaReenviar, ProyectoConCuenta } from '../servicios/almacen';
 
 export interface ContextoApp {
   listo: boolean;
@@ -63,6 +63,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     verificarIdentidad().then((cambio) => { if (cambio && vivo) { cargarAjustes().then(setAjustes); cargar(); } });
     return () => { vivo = false; };
   }, [listo, versionConfig, cargar]);
+
+  // Una sola vez: las luminarias ya enviadas con foto vuelven a enviarse para que lleven su miniatura y todos las vean.
+  useEffect(() => {
+    if (!listo || !ajustes.apiKey) return;
+    (async () => {
+      if ((await leerKv('miniaturas:v1')) === '1') return;
+      await marcarParaReenviar();
+      await guardarKv('miniaturas:v1', '1');
+      await cargar();
+    })().catch(() => {});
+  }, [listo, ajustes.apiKey, cargar]);
 
   // Al volver el internet se vuelve a preguntar quién es esta cuenta (así se notan bajas y cambios de rol hechos mientras no había señal).
   useEffect(() => {

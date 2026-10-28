@@ -186,3 +186,19 @@ describe('conciliar proyectos con la hoja (un proyecto eliminado por el administ
     expect((await db.listarProyectos()).map((p) => p.nombre)).toEqual(['General']);
   });
 });
+
+describe('reenviar una vez lo ya enviado para que lleve su miniatura', () => {
+  it('marca como pendientes solo las enviadas que tienen foto propia', async () => {
+    const [p] = await db.listarProyectos();
+    const a = await db.guardarLuminaria(borrador(p.id, { fotos: ['f1'] }));
+    const b = await db.guardarLuminaria(borrador(p.id, { fotos: [] }));          // de otra persona: sin foto local
+    const c = await db.guardarLuminaria(borrador(p.id, { fotos: ['f3'] }));      // aún sin enviar
+    const todas = await db.listarLuminarias(p.id);
+    await db.marcarSincronizadas(todas.filter((x) => x.id !== c).map((x) => ({ uuid: x.uuid, actualizadoEn: x.actualizadoEn })));
+    expect(await db.marcarParaReenviar()).toBe(1);
+    const despues = await db.listarLuminarias(p.id);
+    expect(despues.find((l) => l.id === a)!.sincronizado).toBe(false);
+    expect(despues.find((l) => l.id === b)!.sincronizado).toBe(true);
+    expect(despues.find((l) => l.id === c)!.sincronizado).toBe(false);
+  });
+});

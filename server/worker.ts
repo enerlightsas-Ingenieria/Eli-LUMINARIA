@@ -15,6 +15,7 @@
  *   /ingresar       → entrar con usuario y clave (sin cabecera): devuelve nombre, rol y proyectos
  *   /yo             → quién soy (nombre y rol según la clave)
  *   /contactos      → personas con teléfono para WhatsApp (el técnico ve a sus supervisores; supervisores y administradores, a todos)
+ *   /direccion      → dirección y barrio de una coordenada (para proponerlos al registrar una luminaria); cualquier cuenta
  *   /sistema        → ajustes del sistema (guardar la primera foto en Drive): solo administradores
  *   /ia             → administración de la IA: estado, elegir principal (Gemini/Claude), probar (solo administradores)
  *   /usuarios       → menú de administración: listar/crear/editar personas (solo administradores)
@@ -41,6 +42,7 @@
  * Si cambias la herramienta de la app (src/services/analyzer.ts), actualiza PROPIEDADES: una prueba comprueba que coinciden.
  */
 const MAX_BYTES = 12_000_000;
+const MAX_MINIATURA = 40_000;   // caracteres: una celda de Google admite 50 000
 const MAX_TOKENS = 1500;
 const MAX_IMAGENES = 3;
 const MAX_IMAGEN_B64 = 4_500_000;
@@ -48,7 +50,7 @@ const MAX_TEXTO_BLOQUE = 3000;
 const MAX_TEXTO_TOTAL = 5000;
 const HERRAMIENTA = 'registrar_luminaria';
 const PROPIEDADES = [
-  'fabricante', 'tecnologia', 'potenciaW', 'fotocelda', 'ip', 'montaje', 'materialPoste', 'estado', 'observaciones', 'confianza',
+  'fabricante', 'tecnologia', 'potenciaW', 'fotocelda', 'montaje', 'materialPoste', 'estado', 'observaciones', 'confianza',
 ];
 
 const json = (status: number, cuerpo: unknown) =>
@@ -739,6 +741,47 @@ async function administrarSistema(request: Request, env: any, llamar: typeof fet
   return json(400, { ok: false, error: 'Acción no permitida' });
 }
 
+/* ---------- dirección y barrio de una coordenada ---------- */
+
+const cacheDirecciones = new Map<string, { v: { direccion: string; barrio: string; municipio: string }; hasta: number }>();
+export const olvidarDirecciones = () => cacheDirecciones.clear();
+
+/** Del resultado de Nominatim (OpenStreetMap) a { dirección, barrio, municipio }. */
+export function leerDireccion(j: any): { direccion: string; barrio: string; municipio: string } {
+  const a = j?.address ?? {};
+  const via = String(a.road ?? a.pedestrian ?? a.footway ?? a.path ?? a.cycleway ?? '').trim();
+  const numero = String(a.house_number ?? '').trim();
+  const municipio = String(a.city ?? a.town ?? a.village ?? a.municipality ?? a.county ?? '').trim();
+  const barrio = String(a.neighbourhood ?? a.suburb ?? a.quarter ?? a.city_district ?? a.hamlet ?? '').trim();
+  const calle = via ? (numero ? `${via} ${numero}` : via) : '';
+  return { direccion: [calle, municipio].filter(Boolean).join(', ').slice(0, 200), barrio: barrio.slice(0, 100), municipio: municipio.slice(0, 100) };
+}
+
+/** POST /direccion { latitud, longitud } → { ok, direccion, barrio, municipio } (vacíos si el mapa no conoce el punto). Usa OpenStreetMap (Nominatim) o GEOCODER_URL. */
+async function direccionDeCoordenada(request: Request, env: any, llamar: typeof fetch): Promise<Response> {
+  const texto = await request.text();
+  if (texto.length > 300) return json(413, { ok: false, error: 'Payload too large' });
+  let c: any;
+  try { c = JSON.parse(texto); } catch { return json(400, { ok: false, error: 'JSON inválido' }); }
+  const lat = Number(c?.latitud), lng = Number(c?.longitud);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return json(400, { ok: false, error: 'Coordenada inválida' });
+  const clave = `${lat.toFixed(4)},${lng.toFixed(4)}`;   // ~11 m: varias luminarias del mismo tramo comparten la consulta
+  const hit = cacheDirecciones.get(clave);
+  if (hit && hit.hasta > Date.now()) return json(200, { ok: true, ...hit.v });
+  const base = String(env.GEOCODER_URL ?? 'https://nominatim.openstreetmap.org/reverse');
+  let r: Response;
+  try {
+    r = await llamar(`${base}?format=jsonv2&addressdetails=1&zoom=18&accept-language=es&lat=${lat}&lon=${lng}`, {
+      headers: { 'user-agent': `ELI-LUMINARIA/1.0 (${env.GEOCODER_CONTACTO ?? 'alumbrado publico'})`, accept: 'application/json' },
+    });
+  } catch { return json(502, { ok: false, error: 'No se pudo consultar el mapa.' }); }
+  if (!r.ok) { await r.body?.cancel().catch(() => {}); return json(502, { ok: false, error: `El mapa respondió ${r.status}.` }); }
+  const v = leerDireccion(await r.json().catch(() => null));
+  if (cacheDirecciones.size > 500) cacheDirecciones.clear();
+  cacheDirecciones.set(clave, { v, hasta: Date.now() + 3_600_000 });
+  return json(200, { ok: true, ...v });
+}
+
 const ACCIONES_SYNC = [undefined, 'listar', 'latido'];
 
 /** Reenvía al script de Google poniendo AQUÍ el token del script (el navegador nunca lo conoce). */
@@ -765,7 +808,14 @@ async function sincronizar(request: Request, env: any, llamar: typeof fetch, qui
   if (c.accion === 'latido') c.tecnico = quien.nombre;   // la presencia se atribuye al dueño de la clave, no a lo que diga el cliente
   if (c.accion === undefined) {
     c.por = { usuario: quien.usuario, nombre: quien.nombre };
-    if (Array.isArray(c.luminarias) && !(await guardarFotos(env, llamar))) for (const l of c.luminarias) if (l && typeof l === 'object') delete l.foto;   // el administrador desactivó guardar fotos
+    if (Array.isArray(c.luminarias)) {
+      const conFotos = await guardarFotos(env, llamar);
+      for (const l of c.luminarias) {
+        if (!l || typeof l !== 'object') continue;
+        if (!conFotos) { delete l.foto; delete l.miniatura; }   // el administrador desactivó guardar fotos (la miniatura también es una foto)
+        else if (typeof l.miniatura !== 'string' || l.miniatura.length > MAX_MINIATURA || !/^[A-Za-z0-9+/=]+$/.test(l.miniatura)) delete l.miniatura;   // solo una foto pequeña en base64
+      }
+    }
   }
   return haciaHojas(c, env.SYNC_TOKEN, env, llamar);
 }
@@ -866,7 +916,7 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   const ruta = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
   const clave = request.headers.get('x-api-key') ?? '';
 
-  if (!['/', '/analizar', '/sync', '/equipo', '/yo', '/usuarios', '/ia', '/ingresar', '/sistema', '/contactos'].includes(ruta)) return json(404, { error: 'Not found' });
+  if (!['/', '/analizar', '/sync', '/equipo', '/yo', '/usuarios', '/ia', '/ingresar', '/sistema', '/contactos', '/direccion'].includes(ruta)) return json(404, { error: 'Not found' });
 
   if (ruta === '/ingresar') return ingresar(request, env, llamar);
 
@@ -902,6 +952,7 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   }
   if (env.LIMITADOR && !(await env.LIMITADOR.limit({ key: quien.nombre })).success) return json(429, { error: 'Demasiadas solicitudes' });
 
+  if (ruta === '/direccion') return direccionDeCoordenada(request, env, llamar);
   return ruta === '/sync' ? sincronizar(request, env, llamar, quien) : analizar(request, env, llamar, quien.nombre);
 }
 

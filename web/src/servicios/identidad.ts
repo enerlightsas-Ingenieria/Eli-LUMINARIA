@@ -61,6 +61,14 @@ export async function verificarIdentidad(): Promise<boolean> {
   return true;
 }
 
+/** Dirección y barrio del punto (los propone el servidor a partir de OpenStreetMap). null si no hay conexión o el mapa no responde. */
+export async function direccionDelPunto(latitud: number, longitud: number): Promise<{ direccion: string; barrio: string } | null> {
+  try {
+    const j = await llamarProxy('/direccion', { latitud, longitud }, 12000);
+    return { direccion: String(j.direccion ?? ''), barrio: String(j.barrio ?? '') };
+  } catch { return null; }
+}
+
 /** Elimina un proyecto para TODO el equipo (solo administrador; el servidor lo comprueba). Necesita conexión: si no, el proyecto reaparecería. */
 export async function eliminarProyectoDelEquipo(nombre: string): Promise<void> {
   await llamarProxy('/sistema', { accion: 'eliminar_proyecto', nombre }, 20000);

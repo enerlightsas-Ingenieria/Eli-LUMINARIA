@@ -23,6 +23,8 @@ export interface DepsSync {
   };
   cargarAjustes(): Promise<Ajustes>;
   leerFoto(uri: string): Promise<string>;
+  /** Foto pequeña (JPEG en base64) que viaja con el registro para que todos tengan una referencia; opcional. */
+  leerMiniatura?(uri: string): Promise<string>;
   post(a: Ajustes, cuerpo: object, timeoutMs?: number): Promise<any>;
 }
 
@@ -47,11 +49,16 @@ export function crearSincronizador(d: DepsSync) {
     try {
       for (let i = 0; i < pendientes.length; i += LOTE) {
         const lote = pendientes.slice(i, i + LOTE);
-        const luminarias = await Promise.all(lote.map(async (l) => ({
-          ...l,
-          fotos: undefined,
-          foto: a.syncFotos && l.fotos[0] ? await d.leerFoto(l.fotos[0]).catch(() => undefined) : undefined,
-        })));
+        const luminarias = await Promise.all(lote.map(async (l) => {
+          const uri = a.syncFotos ? l.fotos[0] : undefined;
+          return {
+            ...l,
+            fotos: undefined,
+            foto: uri ? await d.leerFoto(uri).catch(() => undefined) : undefined,
+            // sin foto propia (registro de otra persona) se reenvía la miniatura que ya tenía
+            miniatura: (uri && d.leerMiniatura ? await d.leerMiniatura(uri).catch(() => undefined) : undefined) ?? l.miniatura,
+          };
+        }));
         await post(a, { proyecto: infoProyecto(proyecto), luminarias });
         await d.almacen.marcarSincronizadas(lote.map((l) => ({ uuid: l.uuid, actualizadoEn: l.actualizadoEn })));
         enviadas += lote.length;

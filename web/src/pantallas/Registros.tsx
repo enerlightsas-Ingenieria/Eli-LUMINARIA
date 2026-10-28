@@ -102,7 +102,7 @@ export function Registros() {
         )}
         {visibles.map((l) => (
           <button key={l.id} type="button" className="tarjeta item" onClick={() => ir(`/editar/${l.id}`)} aria-label={`Luminaria ${l.id}, ${l.fabricante}`}>
-            <Foto id={l.fotos[0]} className="miniatura" />
+            <Foto id={l.fotos[0]} miniatura={l.miniatura} className="miniatura" />
             <div style={{ minWidth: 0 }}>
               <div className="t">{l.codigo || `#${l.id}`} · {l.fabricante || 'Sin identificar'}</div>
               <div className="s">{[l.tecnologia, l.potenciaW && `${l.potenciaW} W`, l.fotocelda === 'Sí' && 'con fotocelda'].filter(Boolean).join(' · ') || '—'}</div>

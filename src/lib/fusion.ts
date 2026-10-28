@@ -41,6 +41,8 @@ export function normalizarRemota(fila: Record<string, unknown>): Remota | null {
       longitud: numero(fila.longitud),
       precisionM: numero(fila.precisionM),
       direccion: texto(fila.direccion),
+      barrio: texto(fila.barrio),
+      miniatura: texto(fila.miniatura) || undefined,
       sector: sector.startsWith('urb') ? 'Urbano' : sector.startsWith('rur') ? 'Rural' : '',
       codigoPoste: texto(fila.codigoPoste),
       codigo: texto(fila.codigo),

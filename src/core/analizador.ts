@@ -10,7 +10,7 @@ const PROMPT = `Eres un técnico experto en alumbrado público e iluminación ex
 Recibes de 1 a 3 fotos de UNA misma luminaria (general, placa/etiqueta, fotocelda). Extrae sus características básicas.
 
 Reglas:
-- Lee cualquier etiqueta, placa, grabado o texto visible (fabricante, potencia, IP, país).
+- Lee cualquier etiqueta, placa, grabado o texto visible (fabricante, potencia, país).
 - Si un dato NO se puede ver ni deducir con razonable certeza, devuelve cadena vacía "". No inventes cifras.
 - Si deduces un dato sólo por la forma/aspecto, añade " (est.)" al final.
 - Fotocelda: responde solo "Sí" si se ve una fotocelda (NEMA/twist-lock, integrada o externa) o "No" si claramente no hay. Si no la puedes ver, déjalo vacío.
@@ -32,7 +32,6 @@ export const TOOL = {
       tecnologia: campo('Una de: LED, Sodio, Metal Halide, Mercurio, Fluorescente, Incandescente, Halógena, Inducción, Luz mixta; si ninguna, "Otra: <cuál>"'),
       potenciaW: campo('Potencia en vatios'),
       fotocelda: campo('"Sí" si tiene fotocelda, "No" si no la tiene'),
-      ip: campo('Grado de protección IP'),
       montaje: campo('Poste, Fachada u "Otro: <cuál>"'),
       materialPoste: campo('Solo si el montaje es poste: Concreto, Madera, Metálico, Fibra de vidrio, Fibra de vidrio traslúcido u "Otro: <cuál>"'),
       estado: campo('Estado visual: bueno, deteriorado, apagada o vandalizada'),

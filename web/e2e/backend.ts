@@ -37,6 +37,9 @@ export function crearBackend(respuestaIA: Record<string, string> = { fabricante:
       if (u.includes('/models?')) return new Response(JSON.stringify({ models: MODELOS_GEMINI.map((n) => ({ name: 'models/' + n, supportedGenerationMethods: ['generateContent'] })) }), { status: 200 });
       return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { name: 'registrar_luminaria', args: respuestaIA } }] } }] }), { status: 200 });
     }
+    if (u.startsWith('https://nominatim.openstreetmap.org')) {                         // el mapa que da la dirección de una coordenada
+      return new Response(JSON.stringify({ address: { road: 'Carrera 7', house_number: '12-30', neighbourhood: 'La Candelaria', city: 'Bogotá' } }), { status: 200 });
+    }
     if (u.startsWith('https://gs.test')) return gs.llamar(u, init);
     throw new Error('URL inesperada: ' + u);
   };

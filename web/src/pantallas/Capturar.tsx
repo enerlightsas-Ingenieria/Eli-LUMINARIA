@@ -19,8 +19,8 @@ import { hayConexion } from '../servicios/red';
 
 const RANURAS = [
   { titulo: 'General', ayuda: 'La luminaria completa, con el poste y el brazo', icono: 'camara' },
-  { titulo: 'Placa / etiqueta', ayuda: 'Acércate a la placa con fabricante, modelo y potencia', icono: 'lista' },
-  { titulo: 'Fotocelda', ayuda: 'El receptáculo de la fotocelda, para contar sus pines', icono: 'chispa' },
+  { titulo: 'Placa / etiqueta', ayuda: 'Acércate a la placa con fabricante y potencia', icono: 'lista' },
+  { titulo: 'Fotocelda', ayuda: 'La fotocelda, para ver si tiene', icono: 'chispa' },
 ];
 
 interface FotoTomada { blob: Blob; url: string; origen: 'camara' | 'galeria' }
@@ -72,6 +72,13 @@ export function Capturar() {
     if (!tomadas.length || !proyecto) return;
     // En modo terceros se vuelve a medir el GPS justo ahora: no basta con la lectura de hace un rato.
     let posFinal = pos;
+    if (!posFinal && !terceros) {   // la coordenada es obligatoria: se vuelve a intentar justo ahora
+      setFase('Buscando la ubicación…');
+      posFinal = await obtenerPosicion('alta');
+      setFase(null);
+      setPos(posFinal);
+      if (!posFinal) { await avisar('Falta la ubicación', 'Sin coordenada no se puede registrar una luminaria. Activa la ubicación (GPS) del teléfono, permite el acceso en el navegador y pulsa actualizar GPS.'); return; }
+    }
     if (terceros) {
       setFase('Verificando ubicación…');
       posFinal = await obtenerPosicion('alta');
@@ -101,7 +108,7 @@ export function Capturar() {
       const borrador: LuminariaBorrador = {
         ...car, uuid: nuevoUuid(), proyectoId: proyecto.id, creadoEn: ahora, actualizadoEn: ahora, fotos: ids, confianza,
         latitud: posFinal?.latitud ?? null, longitud: posFinal?.longitud ?? null, precisionM: posFinal?.precisionM ?? null,
-        direccion: '', sector: '', codigoPoste: '', codigo: '', tecnico: ajustes.tecnico,
+        direccion: '', barrio: '', sector: '', codigoPoste: '', codigo: '', tecnico: ajustes.tecnico,
         // las fotos elegidas con el selector del sistema no se pueden verificar: se marcan como "galería" y el servidor las audita
         origen: tomadas.some((f) => f.origen === 'galeria') ? 'galeria' : 'camara',
         ubicacionSimulada: !!posFinal?.simulada,
@@ -133,10 +140,11 @@ export function Capturar() {
     <>
       <Cabecera titulo="Nueva luminaria" atras={volver} />
       <p className="muted" style={{ marginBottom: 14 }}>
-        Con una foto general basta. Si añades la <b style={{ color: 'var(--texto)' }}>placa</b> y la <b style={{ color: 'var(--texto)' }}>fotocelda</b>, la IA identifica mucho mejor fabricante, potencia y pines.
+        Con una foto general basta. Si añades la <b style={{ color: 'var(--texto)' }}>placa</b> y la <b style={{ color: 'var(--texto)' }}>fotocelda</b>, la IA identifica mucho mejor fabricante, potencia y fotocelda.
       </p>
 
       {terceros && !evaluacion.ok && <p className="aviso" role="status">{evaluacion.mensaje}</p>}
+      {!terceros && !buscandoGps && !pos && <p className="aviso" role="status">Sin coordenada. Una luminaria no se puede registrar sin ubicación: activa el GPS del teléfono, permite la ubicación para este sitio y pulsa actualizar.</p>}
       <div className="tarjeta gps" data-testid="gps">
         <span style={{ color: calidad || 'var(--muted)' }}>{buscandoGps ? <span className="girar" /> : <Icono nombre="gps" />}</span>
         <div>
@@ -159,8 +167,8 @@ export function Capturar() {
       </div>
 
       <div className="pila" style={{ marginTop: 24 }}>
-        {iaDisponible && <Boton texto="Analizar con IA" icono="chispa" deshabilitado={!tomadas.length || !evaluacion.ok} onClick={() => continuar(true)} />}
-        <Boton texto="Llenar manualmente" variante={iaDisponible ? 'secundario' : 'primario'} deshabilitado={!tomadas.length || !evaluacion.ok} onClick={() => continuar(false)} />
+        {iaDisponible && <Boton texto="Analizar con IA" icono="chispa" deshabilitado={!tomadas.length || !evaluacion.ok || !pos} onClick={() => continuar(true)} />}
+        <Boton texto="Llenar manualmente" variante={iaDisponible ? 'secundario' : 'primario'} deshabilitado={!tomadas.length || !evaluacion.ok || !pos} onClick={() => continuar(false)} />
       </div>
 
       {camaraEn !== null && (

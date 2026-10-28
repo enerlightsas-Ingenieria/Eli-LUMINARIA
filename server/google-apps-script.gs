@@ -43,10 +43,11 @@ var COLUMNAS = [
   ['mapa', 'Enlace mapa'], ['foto', 'Foto'], ['eliminada', 'Eliminada'], ['recibidoEn', 'Recibido'],
   // Las columnas nuevas se AÑADEN SIEMPRE AL FINAL: todo el script lee por posición y así las pestañas ya creadas siguen siendo válidas.
   ['origen', 'Origen de la foto'], ['ubicacionSimulada', 'Ubicación simulada'], ['jornadaId', 'ID jornada'], ['alertas', 'Alertas'], ['usuario', 'Usuario'],
-  ['sector', 'Sector'], ['materialPoste', 'Material del poste'], ['numeroTransformador', 'N.º transformador']
+  ['sector', 'Sector'], ['materialPoste', 'Material del poste'], ['numeroTransformador', 'N.º transformador'],
+  ['barrio', 'Barrio'], ['miniatura', 'Miniatura (no editar)']
 ];
-// Campos que la app ya no pide (modelo, tensión, pines y temperatura de color): sus columnas se conservan para no mover las demás, pero se ocultan.
-var COLUMNAS_RETIRADAS = ['modelo', 'tensionV', 'pinesFotocelda', 'temperaturaColorK'];
+// Campos que la app ya no pide (modelo, tensión, pines, temperatura de color y grado IP) y la miniatura de la foto: sus columnas se conservan para no mover las demás, pero se ocultan.
+var COLUMNAS_RETIRADAS = ['modelo', 'tensionV', 'pinesFotocelda', 'temperaturaColorK', 'ip', 'miniatura'];   // 'miniatura' = foto pequeña que se reparte a los teléfonos: va oculta
 // Encabezados de la versión anterior (con Marca, Tipo de luminaria, Flujo y Altura): esas pestañas se archivan, no se mezclan.
 var ENCABEZADOS_RETIRADOS = ['Marca', 'Tipo de luminaria', 'Flujo (lm)', 'Altura (m)', 'Código activo'];
 // Columnas que se dejan como número (para sumar/graficar); el resto se fuerza a texto para que Sheets no
@@ -113,6 +114,8 @@ function doPost(e) {
       if (n) {
         var iF = col('foto');
         if (!l.foto) valores[iF] = hoja.getRange(n, iF + 1).getValue(); // conserva el enlace de foto anterior
+        var iMi = col('miniatura');
+        if (!l.miniatura) valores[iMi] = hoja.getRange(n, iMi + 1).getValue(); // y la miniatura
         hoja.getRange(n, 1, 1, valores.length).setValues([valores]);
       } else {
         hoja.appendRow(valores);
@@ -277,7 +280,7 @@ function esSi(v) { return v === true || String(v === undefined || v === null ? '
 /**
  * Calcula las alertas de cada captura. 'filas' = objetos con las claves de COLUMNAS; 'jornadas' = {id: {inicio, fin|null}} en ms.
  * Devuelve un arreglo paralelo de listas de códigos:
- *   UBICACION_SIMULADA, GALERIA, SIN_JORNADA, JORNADA_NO_CONFIRMADA, FUERA_DE_JORNADA, GPS_IMPRECISO, SALTO_IMPOSIBLE, AGRUPADAS
+ *   UBICACION_SIMULADA, GALERIA, SIN_JORNADA, JORNADA_NO_CONFIRMADA, FUERA_DE_JORNADA, GPS_IMPRECISO, SIN_COORDENADA, SALTO_IMPOSIBLE, AGRUPADAS
  * Los registros sin 'origen' (apps antiguas) no se evalúan contra la jornada. Es información para el supervisor, no un veredicto.
  */
 function calcularAlertas(filas, jornadas) {
@@ -299,6 +302,7 @@ function calcularAlertas(filas, jornadas) {
       }
     }
     if (typeof f.precisionM === 'number' && f.precisionM > LIMITE_PRECISION_M) a.push('GPS_IMPRECISO');
+    if (typeof f.latitud !== 'number' || typeof f.longitud !== 'number') a.push('SIN_COORDENADA'); // la coordenada es lo más importante: la app no deja guardar sin ella; esto avisa si llega algo así
     if (typeof f.latitud === 'number' && typeof f.longitud === 'number' && t !== null) {
       (porTecnico[f.tecnico] = porTecnico[f.tecnico] || []).push({ i: i, t: t, lat: f.latitud, lng: f.longitud });
     }

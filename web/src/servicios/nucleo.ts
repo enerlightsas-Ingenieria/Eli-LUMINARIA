@@ -7,7 +7,7 @@ import type { Ajustes } from '@compartido/core/ajustes';
 import * as almacen from './almacen';
 import { cargarAjustes } from './ajustes';
 import { analizarPendientes, ResultadoLote } from './analisisPendiente';
-import { base64DeFoto } from './fotos';
+import { base64DeFoto, miniaturaDeFoto } from './fotos';
 import { obtenerPosicion } from './gps';
 
 declare const __VERSION__: string;
@@ -17,7 +17,7 @@ export const post = (a: Ajustes, cuerpo: object, timeoutMs?: number) => postServ
 
 export const analizarFotos = (base64s: string[], cancelar?: AbortSignal) => analizarFotosCon(cargarAjustes, base64s, cancelar);
 
-export const sincronizacion = crearSincronizador({ almacen, cargarAjustes, leerFoto: base64DeFoto, post });
+export const sincronizacion = crearSincronizador({ almacen, cargarAjustes, leerFoto: base64DeFoto, leerMiniatura: miniaturaDeFoto, post });
 
 export const jornada = crearJornada({
   almacen,

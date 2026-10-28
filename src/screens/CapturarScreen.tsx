@@ -121,7 +121,7 @@ export function CapturarScreen() {
       const borrador: LuminariaBorrador = {
         ...car, uuid: nuevoUuid(), proyectoId: proyecto.id, creadoEn: ahora, actualizadoEn: ahora, fotos: uris, confianza,
         latitud: p?.latitud ?? null, longitud: p?.longitud ?? null, precisionM: p?.precisionM ?? null,
-        direccion: p ? await direccionDe(p.latitud, p.longitud) : '', sector: '', codigoPoste: '', codigo: '', tecnico,
+        direccion: p ? await direccionDe(p.latitud, p.longitud) : '', barrio: '', sector: '', codigoPoste: '', codigo: '', tecnico,
         origen: tomadas.some((f) => f.origen === 'galeria') ? 'galeria' : 'camara',
         ubicacionSimulada: !!p?.simulada,
         jornadaId: jornadaActiva ? estado!.id : '',
