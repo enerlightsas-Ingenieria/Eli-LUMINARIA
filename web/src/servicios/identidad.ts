@@ -3,7 +3,7 @@ import { codificar, type ConfigFlota } from '@compartido/lib/config';
 import { cargarAjustes, guardarAjustes } from './ajustes';
 import { dejarAviso, fijarClaveDeSesion, guardarVerificador, olvidarVerificador, verificarLocal } from './sesion';
 import { conciliarProyectos, conciliarProyectosInfo, ProyectoRemoto } from './almacen';
-import { listarProyectos } from './almacen';
+import { guardarKv, leerKv, listarProyectos } from './almacen';
 import { asegurarProyectos } from './configuracion';
 
 export interface Usuario { nombre: string; usuario: string; rol: Rol; clave: string; activo: boolean; terceros?: boolean; telefono?: string; proyectos?: string[]; tecnicos?: string[] }
@@ -60,7 +60,15 @@ export async function verificarIdentidad(): Promise<boolean> {
   const usuario = typeof j.usuario === 'string' && j.usuario ? j.usuario : a.usuario;
   // Quita primero lo que el administrador eliminó y luego crea lo que falte (si el servidor no informó la lista, no se toca nada)
   const creados = await alinearProyectos(j);
-  if (rolDe(a) === j.rol && a.rol === j.rol && a.tecnico === j.nombre && !a.supervisor && a.modoTerceros === terceros && a.syncFotos === fotos && a.usuario === usuario) return creados > 0;
+  // Si cambió lo que esta cuenta puede ver (proyectos o técnicos asignados), se vuelve a descargar todo desde cero
+  // (el punto de descarga anterior dejaría fuera lo que ahora sí le corresponde).
+  let reiniciada = false;
+  if (typeof j.alcance === 'string' && (await leerKv('alcance')) !== j.alcance) {
+    for (const p of await listarProyectos()) await guardarKv(`desde:${p.uuid}`, '');
+    await guardarKv('alcance', j.alcance);
+    reiniciada = true;
+  }
+  if (rolDe(a) === j.rol && a.rol === j.rol && a.tecnico === j.nombre && !a.supervisor && a.modoTerceros === terceros && a.syncFotos === fotos && a.usuario === usuario) return creados > 0 || reiniciada;
   await guardarAjustes({ ...a, rol: j.rol, supervisor: false, tecnico: j.nombre, usuario, modoTerceros: terceros, syncFotos: fotos });
   if (usuario && usuario !== a.usuario) await guardarVerificador(usuario, a.apiKey).catch(() => {});   // el usuario correcto para entrar sin conexión
   return true;

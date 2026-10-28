@@ -760,6 +760,7 @@ function buscarUsuario(clave) {
       var todos = listarUsuarios();
       var efectivos = tecnicosDeSupervisor(yo, todos);
       u.proyectos = yo.proyectos; u.tecnicos = efectivos || [];
+      u.tecnicosManual = yo.tecnicos.length > 0;   // true = eligió técnicos a mano (ve solo lo que ellos registraron); false = ve todo lo de sus proyectos
       u.tecnicosNombres = u.tecnicos.map(function (login) {
         for (var k = 0; k < todos.length; k++) if (normNombre(todos[k].usuario) === normNombre(login)) return todos[k].nombre;
         return login;
@@ -1092,17 +1093,19 @@ function registrarLatido(d, ahora) {
  * Una lista vacía no restringe. Devuelve funciones que dicen si un proyecto, un técnico o un registro se ve.
  */
 function filtroAlcance(a) {
-  if (!a) return { proyecto: function () { return true; }, persona: function () { return true; }, hay: false };
+  if (!a) return { proyecto: function () { return true; }, persona: function () { return true; }, registro: function () { return true; }, hay: false };
   var ps = {}, ls = {}, ns = {};
   (a.proyectos || []).forEach(function (x) { ps[minusculas(x)] = true; });
   (a.tecnicos || []).forEach(function (x) { ls[normNombre(x)] = true; });
   (a.nombres || []).forEach(function (x) { ns[normNombre(x)] = true; });
   if (a.yo) { ls[normNombre(a.yo.usuario)] = true; ns[normNombre(a.yo.nombre)] = true; }   // lo que registra el propio supervisor siempre lo ve
   var conP = (a.proyectos || []).length > 0, conT = (a.tecnicos || []).length > 0;
+  var persona = function (usuario, nombre) { return !conT || !!ls[normNombre(usuario)] || !!ns[normNombre(nombre)]; };
   return {
     hay: conP || conT,
     proyecto: function (nombre) { return !conP || !!ps[minusculas(nombre)]; },
-    persona: function (usuario, nombre) { return !conT || !!ls[normNombre(usuario)] || !!ns[normNombre(nombre)]; },
+    persona: persona,                                                  // quién aparece en el panel (jornadas)
+    registro: function (usuario, nombre) { return !a.manual || persona(usuario, nombre); },   // qué registros se ven: todos los de sus proyectos, salvo que haya elegido técnicos a mano
   };
 }
 
@@ -1138,7 +1141,7 @@ function datosEquipo(token, alcance) {
     prepararLectura(h);
     leerFilas(h).forEach(function (r) {
       if (luminarias.length >= 5000 || !r[0] || String(r[iEli]).toUpperCase().indexOf('S') === 0) return;
-      if (!filtro.persona(r[col('usuario')], r[iTec])) return;
+      if (!filtro.registro(r[col('usuario')], r[iTec])) return;
       var q = calidad[r[iTec]] = calidad[r[iTec]] || { total: 0, conAlertas: 0, codigos: {} };
       q.total++;
       if (r[iAl]) { q.conAlertas++; String(r[iAl]).split(', ').forEach(function (c) { q.codigos[c] = (q.codigos[c] || 0) + 1; }); }

@@ -77,7 +77,7 @@ export function identificar(token: string, tokens: string | undefined): string |
 
 export type Rol = 'tecnico' | 'supervisor' | 'admin';
 /** Qué supervisa un supervisor: ids de proyectos y usuarios de técnicos (con sus nombres). Una lista vacía = sin restricción en eso. */
-export type Alcance = { proyectos: string[]; tecnicos: string[]; nombres: string[] };
+export type Alcance = { proyectos: string[]; tecnicos: string[]; nombres: string[]; manual: boolean };
 export type Identidad = { nombre: string; usuario: string; rol: Rol; terceros?: boolean; alcance?: Alcance };
 
 /** Identidad que devuelve la hoja (nombre completo + usuario para entrar). Si no hay usuario aparte, es el nombre. */
@@ -85,7 +85,7 @@ function deLaHoja(u: any): Identidad | null {
   if (!u || typeof u.nombre !== 'string' || !u.nombre) return null;
   const rol: Rol = ROLES.includes(u.rol) ? u.rol : 'tecnico';
   const lista = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x).slice(0, 200) : []) as string[];
-  const alcance: Alcance = { proyectos: lista(u.proyectos), tecnicos: lista(u.tecnicos), nombres: lista(u.tecnicosNombres) };
+  const alcance: Alcance = { proyectos: lista(u.proyectos), tecnicos: lista(u.tecnicos), nombres: lista(u.tecnicosNombres), manual: u.tecnicosManual === true };
   return {
     nombre: u.nombre, usuario: typeof u.usuario === 'string' && u.usuario ? u.usuario : u.nombre, rol,
     ...(typeof u.terceros === 'boolean' ? { terceros: u.terceros } : {}),
@@ -806,6 +806,16 @@ async function direccionDeCoordenada(request: Request, env: any, llamar: typeof 
 
 /* ---------- supervisores: solo ven los proyectos y técnicos que supervisan ---------- */
 
+/** Huella corta de lo que ve esta persona: si cambia, el teléfono vuelve a descargar todo (lo nuevo que ahora le corresponde). '' = sin restricción. */
+function huellaAlcance(q: Identidad): string {
+  const a = q.alcance;
+  if (!a) return '';
+  const t = JSON.stringify([[...a.proyectos].sort(), a.manual ? [...a.tecnicos].sort() : []]);
+  let h = 5381;
+  for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
 /** Proyectos que ve esta persona: todos, salvo un técnico o supervisor con proyectos asignados (solo esos). */
 function proyectosPara(quien: Identidad, p: any): any {
   const ids = quien.alcance?.proyectos ?? [];
@@ -817,7 +827,7 @@ function proyectosPara(quien: Identidad, p: any): any {
 /** ¿Este registro lo puede ver el supervisor? Sí si lo hizo un técnico asignado (por usuario o, en registros antiguos, por nombre) o él mismo. */
 function registroVisible(quien: Identidad, l: any): boolean {
   const a = quien.alcance;
-  if (!a || !a.tecnicos.length) return true;
+  if (!a || !a.manual || !a.tecnicos.length) return true;   // sin técnicos elegidos a mano ve todo lo de sus proyectos
   const u = norm(l?.usuario), t = norm(l?.tecnico);
   return a.tecnicos.some((x) => norm(x) === u) || a.nombres.some((x) => norm(x) === t) || (!!u && u === norm(quien.usuario)) || (!!t && t === norm(quien.nombre));
 }
@@ -869,7 +879,7 @@ async function sincronizar(request: Request, env: any, llamar: typeof fetch, qui
     if (!permitido) return json(200, { ok: false, codigo: 'SIN_ACCESO_PROYECTO', error: 'No tienes asignado este proyecto. Pídele al administrador que te lo asigne.' });
   }
   const r = await haciaHojas(c, env.SYNC_TOKEN, env, llamar);
-  if (quien.rol === 'supervisor' && quien.alcance?.tecnicos.length && c.accion === 'listar') {
+  if (quien.rol === 'supervisor' && quien.alcance?.manual && quien.alcance.tecnicos.length && c.accion === 'listar') {
     const j: any = await r.clone().json().catch(() => null);
     if (j?.ok && Array.isArray(j.luminarias)) return json(200, { ...j, luminarias: j.luminarias.filter((l: any) => registroVisible(quien, l)) });
   }
@@ -948,7 +958,7 @@ async function ingresar(request: Request, env: any, llamar: typeof fetch): Promi
     return json(401, { ok: false, error: 'Usuario o clave incorrectos.' });
   }
   intentos.delete(llave);
-  return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), ...proyectosPara(quien, await proyectosDeLaHoja(env, llamar)) });
+  return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), alcance: huellaAlcance(quien), ...proyectosPara(quien, await proyectosDeLaHoja(env, llamar)) });
 }
 
 /** Menú de administración: listar y crear/editar personas. El token del administrador del script se pone AQUÍ. */
@@ -1001,14 +1011,14 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   catch { return json(502, { error: 'No se pudo verificar el usuario (la hoja de Google no respondió).' }); }
   if (!quien) return json(401, { error: 'Unauthorized' });
 
-  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), ...proyectosPara(quien, await proyectosDeLaHoja(env, llamar)) });
+  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), alcance: huellaAlcance(quien), ...proyectosPara(quien, await proyectosDeLaHoja(env, llamar)) });
   if (ruta === '/equipo') {
     if (quien.rol === 'tecnico') return json(401, { error: 'Unauthorized' });
     let alcance: any;
     if (quien.rol === 'supervisor' && quien.alcance) {   // el supervisor ve solo sus técnicos y proyectos (el filtro se aplica en la hoja)
       const info: InfoProyecto[] = ((await proyectosDeLaHoja(env, llamar)) as any).proyectosInfo ?? [];
       alcance = {
-        proyectos: info.filter((x) => quien.alcance!.proyectos.includes(x.id)).map((x) => x.nombre), tecnicos: quien.alcance.tecnicos, nombres: quien.alcance.nombres,
+        proyectos: info.filter((x) => quien.alcance!.proyectos.includes(x.id)).map((x) => x.nombre), tecnicos: quien.alcance.tecnicos, nombres: quien.alcance.nombres, manual: quien.alcance.manual,
         yo: { usuario: quien.usuario, nombre: quien.nombre },
       };
       if (quien.alcance.proyectos.length && !alcance.proyectos.length) alcance.proyectos = ['\u0000ninguno'];   // sus proyectos asignados ya no existen: no ve ninguno

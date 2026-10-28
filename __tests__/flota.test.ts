@@ -1039,28 +1039,31 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
     expect(sara.usuario).toMatchObject({ proyectos: [id['Proyecto 1'], id['Proyecto 2']], tecnicos: [] });
     const libre = (await m.crear({ nombre: 'Luis Libre', usuario: 'luis', rol: 'supervisor' })).j.usuario.clave;   // sin asignación: ve todo
     const S = sara.usuario.clave;
+    // el administrador también registra en el proyecto 1: lo que está en SUS proyectos lo ve aunque no lo haya hecho uno de sus técnicos
+    expect((await m.post('/sync', { proyecto: { id: id['Proyecto 1'], nombre: 'Proyecto 1' }, luminarias: [{ uuid: 'jefe-1', fabricante: 'Admin', latitud: 4.7, longitud: -74 }] }, adm)).j.ok).toBe(true);
     const yo = await info(S);
     expect(yo.proyectos).toEqual(['Proyecto 1', 'Proyecto 2']);
     expect(yo.proyectosInfo.map((p: any) => p.nombre)).toEqual(['Proyecto 1', 'Proyecto 2']);
     expect((await info(libre)).proyectos).toEqual(['Proyecto 1', 'Proyecto 2', 'Proyecto 3']);
     expect((await info(adm)).proyectos).toHaveLength(3);
     expect((await m.post('/ingresar', { usuario: 'sara', clave: S })).j.proyectos).toEqual(['Proyecto 1', 'Proyecto 2']);
+    const h1 = (await info(S)).alcance; expect(h1).toMatch(/^[a-z0-9]+$/); expect((await info(adm)).alcance).toBe('');   // huella de lo que ve (cambia al cambiar su asignación)
 
     const baja = async (clave: string, proyecto: string) => (await m.post('/sync', { accion: 'listar', proyecto: { id: id[proyecto], nombre: proyecto }, desde: '' }, clave)).j;
-    expect((await baja(S, 'Proyecto 1')).luminarias.map((l: any) => l.uuid).sort()).toEqual(['t1-Proyecto 1', 't2-Proyecto 1']);
+    expect((await baja(S, 'Proyecto 1')).luminarias.map((l: any) => l.uuid).sort()).toEqual(['jefe-1', 't1-Proyecto 1', 't2-Proyecto 1']);
     expect((await baja(S, 'Proyecto 2')).luminarias.map((l: any) => l.uuid).sort()).toEqual(['t3-Proyecto 2', 't6-libre']);
     expect((await baja(libre, 'Proyecto 3')).luminarias).toHaveLength(2);
     expect(await baja(S, 'Proyecto 3')).toMatchObject({ ok: false, codigo: 'SIN_ACCESO_PROYECTO' });
     expect((await m.post('/sync', { proyecto: { nombre: 'proyecto 3' }, luminarias: [{ uuid: 'x1', fabricante: 'X', latitud: 1, longitud: 1 }] }, S)).j.ok).toBe(false);
     expect((await m.post('/sync', { proyecto: { id: id['Proyecto 3'], nombre: 'Proyecto 1' }, luminarias: [{ uuid: 'x2', fabricante: 'X', latitud: 1, longitud: 1 }] }, S)).j.ok).toBe(false);
     expect((await m.post('/sync', { proyecto: { id: id['Proyecto 1'], nombre: 'Proyecto 1' }, luminarias: [{ uuid: 'sara-1', fabricante: 'Mío', latitud: 4.7, longitud: -74 }] }, S)).j.ok).toBe(true);   // lo suyo lo ve
-    expect((await baja(S, 'Proyecto 1')).luminarias.map((l: any) => l.uuid).sort()).toEqual(['sara-1', 't1-Proyecto 1', 't2-Proyecto 1']);
+    expect((await baja(S, 'Proyecto 1')).luminarias.map((l: any) => l.uuid).sort()).toEqual(['jefe-1', 'sara-1', 't1-Proyecto 1', 't2-Proyecto 1']);
 
     // panel del equipo: t1, t2 y t3 (t6 no tiene jornada); el administrador y el supervisor libre ven a los cinco
     const equipo = async (clave: string) => (await m.post('/equipo', {}, clave)).j;
     expect((await equipo(S)).tecnicos.map((t: any) => t.tecnico).sort()).toEqual(['Tec t1', 'Tec t2', 'Tec t3']);
-    expect(Object.keys((await equipo(S)).calidad).sort()).toEqual(['Sara Sup', 'Tec t1', 'Tec t2', 'Tec t3', 'Tec t6']);
-    expect((await equipo(S)).luminarias.map((l: any) => l.tec).sort()).toEqual(['Sara Sup', 'Tec t1', 'Tec t2', 'Tec t3', 'Tec t6']);
+    expect(Object.keys((await equipo(S)).calidad).sort()).toEqual(['Jefe', 'Sara Sup', 'Tec t1', 'Tec t2', 'Tec t3', 'Tec t6']);
+    expect((await equipo(S)).luminarias.map((l: any) => l.tec).sort()).toEqual(['Jefe', 'Sara Sup', 'Tec t1', 'Tec t2', 'Tec t3', 'Tec t6']);
     expect((await equipo(libre)).tecnicos).toHaveLength(5);
     expect((await equipo(adm)).tecnicos).toHaveLength(5);
 
@@ -1074,6 +1077,7 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
     // técnicos marcados a mano mandan sobre los derivados; editar sin enviar las listas las conserva; solo proyecto 3 → t4 y t5; dejar de ser supervisor las borra
     expect((await m.crear({ nombre: 'Sara Sup', usuario: 'sara', rol: 'supervisor', tecnicos: ['t1'] })).j.usuario).toMatchObject({ proyectos: [id['Proyecto 1'], id['Proyecto 2']], tecnicos: ['t1'] });
     expect((await equipo(S)).tecnicos.map((t: any) => t.tecnico)).toEqual(['Tec t1']);
+    expect((await baja(S, 'Proyecto 1')).luminarias.map((l: any) => l.uuid).sort()).toEqual(['sara-1', 't1-Proyecto 1']);   // técnicos elegidos a mano: solo lo que ellos (y ella) registraron
     expect((await m.crear({ nombre: 'Sara Sup', usuario: 'sara', rol: 'supervisor', telefono: '300 999 0001' })).j.usuario).toMatchObject({ tecnicos: ['t1'] });
     expect((await m.crear({ nombre: 'Sara Sup', usuario: 'sara', rol: 'supervisor', proyectos: [id['Proyecto 3']], tecnicos: [] })).j.usuario).toMatchObject({ proyectos: [id['Proyecto 3']], tecnicos: [] });
     expect((await equipo(S)).tecnicos.map((t: any) => t.tecnico).sort()).toEqual(['Tec t4', 'Tec t5']);
