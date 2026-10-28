@@ -89,7 +89,7 @@ function deLaHoja(u: any): Identidad | null {
   return {
     nombre: u.nombre, usuario: typeof u.usuario === 'string' && u.usuario ? u.usuario : u.nombre, rol,
     ...(typeof u.terceros === 'boolean' ? { terceros: u.terceros } : {}),
-    ...(rol === 'supervisor' && (alcance.proyectos.length || alcance.tecnicos.length) ? { alcance } : {}),
+    ...(rol !== 'admin' && (alcance.proyectos.length || alcance.tecnicos.length) ? { alcance } : {}),   // técnicos: proyectos asignados; supervisores: proyectos y técnicos que supervisan
   };
 }
 const ROLES: Rol[] = ['tecnico', 'supervisor', 'admin'];
@@ -806,10 +806,10 @@ async function direccionDeCoordenada(request: Request, env: any, llamar: typeof 
 
 /* ---------- supervisores: solo ven los proyectos y técnicos que supervisan ---------- */
 
-/** Proyectos que ve esta persona: todos, salvo un supervisor con proyectos asignados (solo esos). */
+/** Proyectos que ve esta persona: todos, salvo un técnico o supervisor con proyectos asignados (solo esos). */
 function proyectosPara(quien: Identidad, p: any): any {
   const ids = quien.alcance?.proyectos ?? [];
-  if (quien.rol !== 'supervisor' || !ids.length || !Array.isArray(p?.proyectosInfo)) return p;
+  if (quien.rol === 'admin' || !ids.length || !Array.isArray(p?.proyectosInfo)) return p;
   const info = p.proyectosInfo.filter((x: InfoProyecto) => ids.includes(x.id));
   return { proyectos: info.filter((x: InfoProyecto) => x.activo).map((x: InfoProyecto) => x.nombre), proyectosInfo: info };
 }
@@ -860,9 +860,9 @@ async function sincronizar(request: Request, env: any, llamar: typeof fetch, qui
       }
     }
   }
-  // Un supervisor con proyectos asignados solo trabaja en esos; y si tiene técnicos asignados, solo recibe lo que ellos (y él) registraron.
+  // Un técnico o supervisor con proyectos asignados solo trabaja en esos; y un supervisor con técnicos a cargo solo recibe lo que ellos (y él) registraron.
   const ids = quien.alcance?.proyectos ?? [];
-  if (quien.rol === 'supervisor' && ids.length && (c.accion === undefined || c.accion === 'listar')) {
+  if (quien.rol !== 'admin' && ids.length && (c.accion === undefined || c.accion === 'listar')) {
     const info: InfoProyecto[] = ((await proyectosDeLaHoja(env, llamar)) as any).proyectosInfo ?? [];
     const p = c.proyecto ?? {};
     const permitido = info.some((x) => ids.includes(x.id) && (p.id ? p.id === x.id : norm(x.nombre) === norm(p.nombre)));

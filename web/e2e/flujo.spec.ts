@@ -734,7 +734,7 @@ test('supervisor con alcance: el administrador le asigna proyectos y solo ve eso
   await admin.page.getByLabel('Nombre completo').fill('Sara Sup');
   await admin.page.getByLabel('Clave (opcional)').fill('clave-sara-1');
   await admin.page.getByRole('tab', { name: 'Supervisor', exact: true }).click();
-  await expect(admin.page.getByTestId('alcance')).toContainText('Si no marcas nada en una lista, ve todo');
+  await expect(admin.page.getByTestId('alcance')).toContainText('y a los técnicos asignados a ellos');
   await admin.page.getByTestId('alcance').getByRole('checkbox', { name: 'Barrio A' }).check();             // solo el proyecto Barrio A
   await admin.page.getByRole('button', { name: 'Crear y ver datos de acceso' }).click();
   await expect(admin.page.getByTestId('acceso-usuario')).toHaveText('ssup');
@@ -765,4 +765,32 @@ test('Registros: el nombre del proyecto abre un selector en la misma pantalla (s
   await expect(page.getByText(/Zona 2 · 0 luminarias/)).toBeVisible();                                   // cambió de proyecto sin salir de Registros
   await expect(page.getByRole('link', { name: 'Registros' })).toHaveAttribute('aria-current', 'page');
   expect(new URL(page.url()).hash).not.toContain('proyectos');
+});
+
+test('técnico con proyectos asignados: solo ve y trabaja en esos', async ({ browser }) => {
+  const b = crearBackend();
+  await b.gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN-ADMIN', accion: 'proyecto_crear', nombre: 'Zona 2' }) });
+  const admin = await telefono(browser, b);
+  await configurar(admin.page, enlace({ token: 'tokSup' }));
+  await admin.page.getByRole('link', { name: 'Ajustes' }).click();
+  await admin.page.getByRole('button', { name: 'Administración (usuarios e IA)' }).click();
+  await admin.page.getByRole('button', { name: 'Administrar usuarios' }).click();
+  await admin.page.getByRole('button', { name: 'Nuevo usuario' }).click();
+  await admin.page.getByLabel('Nombre completo').fill('Tomás Gil');
+  await admin.page.getByLabel('Clave (opcional)').fill('clave-tomas-1');
+  await expect(admin.page.getByTestId('alcance')).toContainText('Si no marcas ninguno, ve todos');
+  await admin.page.getByTestId('alcance').getByRole('checkbox', { name: 'Zona 2' }).check();
+  await admin.page.getByRole('button', { name: 'Crear y ver datos de acceso' }).click();
+  await expect(admin.page.getByTestId('acceso-usuario')).toHaveText('tgil');
+
+  const tomas = await telefono(browser, b);
+  await tomas.ctx.route(`${WEB}/servidor.json`, (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify({ proxy: WORKER }) }));
+  await tomas.page.goto(WEB + '/');
+  await tomas.page.getByLabel('Usuario', { exact: true }).fill('tgil');
+  await tomas.page.getByLabel('Clave', { exact: true }).fill('clave-tomas-1');
+  await tomas.page.getByRole('button', { name: 'Entrar', exact: true }).click();
+  await expect(tomas.page.getByRole('link', { name: 'Registros' })).toBeVisible({ timeout: 15_000 });
+  await tomas.page.getByRole('link', { name: 'Proyectos' }).click();
+  await expect(tomas.page.getByRole('button', { name: /Proyecto Zona 2/ })).toBeVisible();
+  await expect(tomas.page.getByRole('button', { name: /Proyecto Barrio A/ })).toHaveCount(0);       // el otro proyecto no existe para él
 });

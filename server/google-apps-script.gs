@@ -754,16 +754,34 @@ function buscarUsuario(clave) {
     var nombre = String(r[0]).trim();
     if (!nombre) return null;
     var u = { nombre: nombre, usuario: loginDe(r), rol: rolDe(r[1]), terceros: esAfirmativo(r[4]) };
-    if (u.rol === 'supervisor') {   // qué supervisa (vacío = todo): proyectos por id y técnicos por usuario, con sus nombres para reconocer registros antiguos
-      u.proyectos = listaDe(r[7]); u.tecnicos = listaDe(r[8]);
+    if (u.rol === 'tecnico') u.proyectos = listaDe(r[7]);   // proyectos donde está asignado (vacío = todos)
+    if (u.rol === 'supervisor') {   // qué supervisa: proyectos por id y técnicos por usuario (los que marcó o, si no marcó, los asignados a sus proyectos)
+      var yo = { proyectos: listaDe(r[7]), tecnicos: listaDe(r[8]) };
+      var todos = listarUsuarios();
+      var efectivos = tecnicosDeSupervisor(yo, todos);
+      u.proyectos = yo.proyectos; u.tecnicos = efectivos || [];
       u.tecnicosNombres = u.tecnicos.map(function (login) {
-        for (var k = 0; k < datos.length; k++) if (String(datos[k][0]).trim() && normNombre(loginDe(datos[k])) === normNombre(login)) return String(datos[k][0]).trim();
+        for (var k = 0; k < todos.length; k++) if (normNombre(todos[k].usuario) === normNombre(login)) return todos[k].nombre;
         return login;
       });
     }
     return u;
   }
   return null;
+}
+
+/**
+ * Técnicos que ve un supervisor: los que marcó; si no marcó ninguno pero sí proyectos, los técnicos asignados a esos proyectos
+ * (un técnico sin proyectos asignados cuenta como asignado a todos); sin nada marcado, null (ve todos).
+ * Si ninguno coincide, devuelve una lista con un valor imposible para que no vea a nadie.
+ */
+function tecnicosDeSupervisor(sup, usuarios) {
+  if (sup.tecnicos.length) return sup.tecnicos;
+  if (!sup.proyectos.length) return null;
+  var ls = usuarios.filter(function (u) {
+    return u.rol === 'tecnico' && u.activo && (!u.proyectos.length || u.proyectos.some(function (p) { return sup.proyectos.indexOf(p) >= 0; }));
+  }).map(function (u) { return u.usuario; });
+  return ls.length ? ls : ['(nadie)'];
 }
 
 /** "a, b,c" → ['a','b','c'] (sin vacíos ni repetidos). */
@@ -775,8 +793,9 @@ function listaDe(v) {
 
 /** Personas activas con teléfono, para que quien las necesite les escriba por WhatsApp. Sin claves. */
 function contactosUsuarios() {
-  return listarUsuarios().filter(function (u) { return u.activo && u.telefono; })
-    .map(function (u) { return { nombre: u.nombre, usuario: u.usuario, rol: u.rol, telefono: u.telefono, supervisa: u.rol === 'supervisor' ? u.tecnicos : undefined }; });
+  var todos = listarUsuarios();
+  return todos.filter(function (u) { return u.activo && u.telefono; })
+    .map(function (u) { return { nombre: u.nombre, usuario: u.usuario, rol: u.rol, telefono: u.telefono, supervisa: u.rol === 'supervisor' ? (tecnicosDeSupervisor(u, todos) || undefined) : undefined }; });
 }
 
 /** Con qué se entra: la columna Usuario; si está vacía (cuentas antiguas), el nombre. */
@@ -1010,9 +1029,9 @@ function guardarUsuario(d) {
   // teléfono (WhatsApp): si no se envía, se conserva el que ya tenía
   var telefono = fila ? String(hoja.getRange(fila, 7).getValue()).trim() : '';
   if (d.telefono !== undefined && d.telefono !== null) telefono = String(d.telefono).trim();
-  // qué supervisa (solo supervisores): si no se envía, se conserva; vacío = todo
+  // proyectos asignados (técnicos y supervisores) y técnicos que supervisa (solo supervisores): si no se envían, se conservan; vacío = todo
   var previoP = fila ? listaDe(hoja.getRange(fila, 8).getValue()) : [], previoT = fila ? listaDe(hoja.getRange(fila, 9).getValue()) : [];
-  var proyectos = rol !== 'supervisor' ? [] : Array.isArray(d.proyectos) ? listaDe(d.proyectos.join(',')) : previoP;
+  var proyectos = rol === 'admin' ? [] : Array.isArray(d.proyectos) ? listaDe(d.proyectos.join(',')) : previoP;
   var tecnicos = rol !== 'supervisor' ? [] : Array.isArray(d.tecnicos) ? listaDe(d.tecnicos.join(',')) : previoT;
   var valores = [textoSeguro(nombre), rol, clave, activo ? 'si' : 'no', terceros ? 'si' : 'no', textoSeguro(login), telefono ? textoSeguro(telefono) : '', proyectos.join(','), tecnicos.join(',')];
   if (fila) hoja.getRange(fila, 1, 1, 9).setValues([valores]);

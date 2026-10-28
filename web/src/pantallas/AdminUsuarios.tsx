@@ -58,7 +58,7 @@ export function AdminUsuarios() {
     if (claveNueva && !(await confirmar('Generar clave nueva', 'La clave anterior dejará de funcionar y tendrás que entregarle la nueva.', 'Generar'))) return;
     setOcupado(true);
     try {
-      const u = await guardarUsuario({ nombre, usuario, telefono: edicion.telefono.trim(), rol: edicion.rol, activo: edicion.activo, terceros: edicion.rol === 'tecnico' && edicion.terceros, claveNueva: claveNueva && !clave, ...(clave ? { clave } : {}), ...(edicion.rol === 'supervisor' ? { proyectos: edicion.proyectos, tecnicos: edicion.tecnicos } : {}) });
+      const u = await guardarUsuario({ nombre, usuario, telefono: edicion.telefono.trim(), rol: edicion.rol, activo: edicion.activo, terceros: edicion.rol === 'tecnico' && edicion.terceros, claveNueva: claveNueva && !clave, ...(clave ? { clave } : {}), ...(edicion.rol === 'supervisor' ? { proyectos: edicion.proyectos, tecnicos: edicion.tecnicos } : edicion.rol === 'tecnico' ? { proyectos: edicion.proyectos } : {}) });
       setEdicion(null);
       await cargar();
       if (u.activo) await mostrarAcceso(u);
@@ -157,15 +157,25 @@ export function AdminUsuarios() {
         <Campo etiqueta={edicion?.original ? 'Clave nueva (opcional)' : 'Clave (opcional)'} valor={edicion?.clave ?? ''} alCambiar={(t) => setEdicion((e) => e && { ...e, clave: t })} pista={edicion?.original ? 'Déjala vacía para conservar la actual' : 'Vacía = el sistema genera una fácil de teclear'} />
         <p className="muted" style={{ margin: '4px 0' }}>Rol</p>
         <Segmentado valor={edicion?.rol ?? 'tecnico'} alCambiar={(rol) => setEdicion((e) => e && { ...e, rol })} opciones={ROLES} />
+        {edicion?.rol === 'tecnico' && (
+          <div data-testid="alcance" style={{ marginTop: 12 }}>
+            <p className="muted" style={{ margin: '4px 0' }}><b>Proyectos asignados.</b> Solo verá y podrá trabajar en los que marques. Si no marcas ninguno, ve todos.</p>
+            {todosProyectos.map((p) => (
+              <label key={p.idHoja} className="interruptor"><input type="checkbox" checked={edicion.proyectos.includes(p.idHoja!)} onChange={() => setEdicion((x) => x && { ...x, proyectos: alternar(x.proyectos, p.idHoja!) })} /> {p.nombre}</label>
+            ))}
+            {!todosProyectos.length && <p className="muted">Aún no hay proyectos.</p>}
+          </div>
+        )}
         {edicion?.rol === 'supervisor' && (
           <div data-testid="alcance" style={{ marginTop: 12 }}>
-            <p className="muted" style={{ margin: '4px 0' }}><b>¿Qué supervisa?</b> Marca solo lo que debe ver. Si no marcas nada en una lista, ve todo.</p>
+            <p className="muted" style={{ margin: '4px 0' }}><b>¿Qué supervisa?</b> Marca los proyectos: verá solo esos y a los técnicos asignados a ellos. Si no marcas ninguno, ve todos.</p>
             <p className="muted" style={{ margin: '8px 0 2px', fontWeight: 700 }}>Proyectos</p>
             {todosProyectos.map((p) => (
               <label key={p.idHoja} className="interruptor"><input type="checkbox" checked={edicion.proyectos.includes(p.idHoja!)} onChange={() => setEdicion((x) => x && { ...x, proyectos: alternar(x.proyectos, p.idHoja!) })} /> {p.nombre}</label>
             ))}
             {!todosProyectos.length && <p className="muted">Aún no hay proyectos.</p>}
-            <p className="muted" style={{ margin: '8px 0 2px', fontWeight: 700 }}>Técnicos</p>
+            <p className="muted" style={{ margin: '8px 0 2px', fontWeight: 700 }}>Técnicos (opcional)</p>
+            <p className="muted" style={{ margin: '0 0 4px', fontSize: 12 }}>Solo si quieres elegir a mano a quiénes supervisa; si los marcas, mandan sobre los de sus proyectos.</p>
             {tecnicosActivos.map((t) => (
               <label key={t.usuario} className="interruptor"><input type="checkbox" checked={edicion.tecnicos.includes(t.usuario)} onChange={() => setEdicion((x) => x && { ...x, tecnicos: alternar(x.tecnicos, t.usuario) })} /> {t.nombre} ({t.usuario})</label>
             ))}
