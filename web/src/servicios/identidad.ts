@@ -193,6 +193,9 @@ export async function eliminarUsuario(usuario: string): Promise<void> { await ll
 
 /** ¿Se guarda la primera foto de cada luminaria en Drive? (lo decide el administrador). */
 export const estadoSistema = (): Promise<{ fotos: boolean }> => llamarProxy('/sistema', { accion: 'estado' });
+export interface ResultadoOrdenFotos { ok: boolean; movidas: number; renombradas: number; yaOrdenadas: number; pendientes: number }
+/** Mueve las fotos ya guardadas a la carpeta de su proyecto y las renombra. Trabaja ~90 s por llamada; se repite mientras queden pendientes. */
+export const ordenarFotosEnDrive = (): Promise<ResultadoOrdenFotos> => llamarProxy('/sistema', { accion: 'migrar_fotos' }, 150000);
 export const guardarFotosEnDrive = (fotos: boolean): Promise<{ fotos: boolean }> => llamarProxy('/sistema', { accion: 'guardar', fotos });
 
 export async function guardarUsuario(u: { nombre: string; usuario?: string; telefono?: string; rol: Rol; activo: boolean; claveNueva?: boolean; clave?: string; terceros?: boolean; proyectos?: string[]; tecnicos?: string[] }): Promise<Usuario> {

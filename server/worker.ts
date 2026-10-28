@@ -745,6 +745,7 @@ async function administrarSistema(request: Request, env: any, llamar: typeof fet
     return j?.ok ? json(200, { ok: true, fotos: c.fotos }) : r;
   }
   olvidarProyectos();   // cualquier acción de este menú puede cambiar la lista de proyectos
+  if (c?.accion === 'migrar_fotos') return haciaHojas({ accion: 'fotos_migrar' }, env.SYNC_TOKEN_ADMIN, env, llamar);   // ordena las fotos ya guardadas en la carpeta de su proyecto
   // Proyectos (solo administradores): cambiar nombre/cliente/notas, activar o desactivar, y eliminar del todo (hoja y fotos incluidas)
   const idOk = (v: unknown) => v === undefined || (typeof v === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(v));
   const txt = (v: unknown, max: number) => v === undefined || (typeof v === 'string' && v.length <= max);

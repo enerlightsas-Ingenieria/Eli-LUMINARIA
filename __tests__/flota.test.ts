@@ -1291,6 +1291,25 @@ describe('fotos en Drive: una carpeta por proyecto y nombres que dicen dónde es
     expect(m.gs.arbol()[0].papelera).toBe(false);                                              // la carpeta "fotos" NO se toca
   });
 
+  it('"Ordenar fotos": las fotos que estaban en otra carpeta y con otro nombre se mueven a la carpeta de su proyecto y se renombran (el enlace no cambia); solo administradores', async () => {
+    const m = montar();
+    await crear(m, 'Zona 2'); await crear(m, 'Zona 3');
+    await sube(m, 'Zona 2', lum({ uuid: 'aaa111' })); await sube(m, 'Zona 3', lum({ uuid: 'bbb222', barrio: 'Otro' }));
+    const celdas = () => ['Zona 2', 'Zona 3'].map((n) => { const h = m.gs.hoja(n); return h.filas[1][h.filas[0].indexOf('Foto')]; });
+    const antes = celdas();
+    // simula fotos de antes: sueltas en otra carpeta, con el nombre viejo (uuid.jpg)
+    const vieja = { id: 'vieja', nombre: 'ELI-LUMINARIA Fotos', papelera: false, carpetas: [], archivos: [] as any[] };
+    for (const a of m.gs.archivos.values()) { a.padre.archivos = a.padre.archivos.filter((x: any) => x !== a); a.padre = vieja; vieja.archivos.push(a); a.nombre = (a.nombre.includes('aaa111') ? 'aaa111' : 'bbb222') + '.jpg'; }
+    expect(carpetas(m).every((c: any) => !archivos(c).length)).toBe(true);
+    expect((await m.post('/sistema', { accion: 'migrar_fotos' }, 'tokJ')).status).toBe(401);                      // un técnico no
+    const r = await m.post('/sistema', { accion: 'migrar_fotos' }, 'claveJefe99');
+    expect(r.j).toMatchObject({ ok: true, movidas: 2, renombradas: 2, pendientes: 0 });
+    expect(archivos(carpetas(m).find((c: any) => c.nombre === 'Zona 2'))).toEqual(['Zona 2 - La Candelaria - LUM-0012 - Poste P-045 - 4.711000_-74.072100 [aaa111].jpg']);
+    expect(archivos(carpetas(m).find((c: any) => c.nombre === 'Zona 3'))).toEqual(['Zona 3 - Otro - LUM-0012 - Poste P-045 - 4.711000_-74.072100 [bbb222].jpg']);
+    expect(celdas()).toEqual(antes);                                                                              // los enlaces de la hoja siguen valiendo
+    expect((await m.post('/sistema', { accion: 'migrar_fotos' }, 'claveJefe99')).j).toMatchObject({ movidas: 0, renombradas: 0, yaOrdenadas: 2 });   // repetirlo no hace nada
+  });
+
   it('reiniciar todo manda a la papelera las carpetas de los proyectos pero conserva la carpeta "fotos"', async () => {
     const m = montar();
     await crear(m, 'Zona 2'); await sube(m, 'Zona 2', lum());

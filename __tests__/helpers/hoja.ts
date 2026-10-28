@@ -52,18 +52,18 @@ export function crearServidor(rutaScript?: string, opciones: { envioCrea?: boole
   const hojas: Hoja[] = [];
   const fotosGuardadas: string[] = [];                            // archivos que el script mandó a Drive
   // Drive simulado por ID (la carpeta "fotos" de producción y lo que cuelga de ella)
-  interface Arch { id: string; nombre: string; papelera: boolean }
+  interface Arch { id: string; nombre: string; papelera: boolean; padre?: Carp }
   interface Carp { id: string; nombre: string; papelera: boolean; carpetas: Carp[]; archivos: Arch[] }
   const raices = new Map<string, Carp>(); const todosArchivos = new Map<string, Arch>(); let seq = 0;
   const iter = <T>(l: T[]) => { let i = 0; return { hasNext: () => i < l.length, next: () => l[i++] }; };
-  const archivoApi = (a: Arch): any => ({ getId: () => a.id, getName: () => a.nombre, setName: (n: string) => { a.nombre = n; }, setTrashed: (v: boolean) => { a.papelera = v; }, getUrl: () => 'https://drive.google.com/file/d/' + a.id + '/view' });
+  const archivoApi = (a: Arch): any => ({ getParents: () => iter(a.padre ? [carpetaArbol(a.padre)] : []), moveTo: (destino: any) => { if (a.padre) a.padre.archivos = a.padre.archivos.filter((x) => x !== a); const d: Carp = destino._c; d.archivos.push(a); a.padre = d; }, getId: () => a.id, getName: () => a.nombre, setName: (n: string) => { a.nombre = n; }, setTrashed: (v: boolean) => { a.papelera = v; }, getUrl: () => 'https://drive.google.com/file/d/' + a.id + '/view' });
   const carpetaArbol = (c: Carp): any => ({
-    getId: () => c.id, getName: () => c.nombre, setName: (n: string) => { c.nombre = n; }, setTrashed: (v: boolean) => { c.papelera = v; },
+    _c: c, getId: () => c.id, getName: () => c.nombre, setName: (n: string) => { c.nombre = n; }, setTrashed: (v: boolean) => { c.papelera = v; },
     getFoldersByName: (n: string) => iter(c.carpetas.filter((x) => !x.papelera && x.nombre === n).map(carpetaArbol)),
     getFolders: () => iter(c.carpetas.filter((x) => !x.papelera).map(carpetaArbol)),
     getFiles: () => iter(c.archivos.filter((x) => !x.papelera).map(archivoApi)),
     createFolder: (n: string) => { const h: Carp = { id: 'c' + ++seq, nombre: n, papelera: false, carpetas: [], archivos: [] }; c.carpetas.push(h); return carpetaArbol(h); },
-    createFile: (b: { nombre: string }) => { const a: Arch = { id: 'archivo' + String(++seq).padStart(25, '0'), nombre: b.nombre, papelera: false }; c.archivos.push(a); todosArchivos.set(a.id, a); fotosGuardadas.push(b.nombre); return archivoApi(a); },
+    createFile: (b: { nombre: string }) => { const a: Arch = { id: 'archivo' + String(++seq).padStart(25, '0'), nombre: b.nombre, papelera: false, padre: c }; c.archivos.push(a); todosArchivos.set(a.id, a); fotosGuardadas.push(b.nombre); return archivoApi(a); },
   });
   const carpetaApi = (_c: any) => ({ getFilesByName: () => ({ hasNext: () => false }), createFile: (b: { nombre: string }) => { fotosGuardadas.push(b.nombre); return { getUrl: () => 'https://drive.test/' + b.nombre }; } });
   const carpetas: { nombre: string; papelera: boolean }[] = [];   // carpetas de Drive simuladas (las de fotos)
@@ -74,7 +74,7 @@ export function crearServidor(rutaScript?: string, opciones: { envioCrea?: boole
   const html = { createHtmlOutput: (h: string) => ({ html: h, setTitle() { return this; }, addMetaTag() { return this; } }) };
   const propiedades = new Map<string, string>();                    // propiedades del script (donde se guardan las claves de las IAs)
   const gs = new Function('SpreadsheetApp', 'LockService', 'ContentService', 'DriveApp', 'Utilities', 'HtmlService', 'PropertiesService',
-    fuente + '\n;return { doPost, doGet, datosEquipo, calcularAlertas, auditarTodo, generarClavesFaltantes, prepararUsuarios, buscarUsuario, pestanasObsoletas, eliminarPestanas, reiniciarDatos };')(
+    fuente + '\n;return { doPost, doGet, datosEquipo, calcularAlertas, auditarTodo, migrarFotos, generarClavesFaltantes, prepararUsuarios, buscarUsuario, pestanasObsoletas, eliminarPestanas, reiniciarDatos };')(
     { getActiveSpreadsheet: () => libro },
     { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     { createTextOutput: (t: string) => ({ t, setMimeType() { return this; } }), MimeType: { JSON: 'json' } },

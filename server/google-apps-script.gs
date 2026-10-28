@@ -65,11 +65,11 @@ function doPost(e) {
   try {
     var d = JSON.parse(e.postData.contents);
     // 'equipo' y la administración de usuarios exigen TOKEN_ADMIN; todo lo demás, el token del equipo
-    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'proyecto_crear', 'proyecto_guardar', 'proyecto_activar', 'proyecto_eliminar', 'config_guardar', 'ia_clave_guardar', 'ia_claves'].indexOf(d.accion) >= 0;
+    var soloAdmin = ['equipo', 'usuarios_listar', 'usuarios_guardar', 'usuarios_borrar', 'proyecto_crear', 'proyecto_guardar', 'proyecto_activar', 'proyecto_eliminar', 'fotos_migrar', 'config_guardar', 'ia_clave_guardar', 'ia_claves'].indexOf(d.accion) >= 0;
     var esAdmin = soloAdmin && d.token === TOKEN_ADMIN;
     if (soloAdmin ? !esAdmin : d.token !== TOKEN) return salida({ ok: false, error: 'Token inválido' }); // las acciones de administración NO sirven con el token del equipo
     // Las consultas que solo leen usuarios o configuración NO esperan el candado: así no se hace cola detrás de los envíos y no se agota la espera.
-    if (['usuario', 'ingresar', 'contactos', 'config', 'ia_claves', 'usuarios_listar'].indexOf(d.accion) < 0) { lock.waitLock(45000); conLock = true; }
+    if (['usuario', 'ingresar', 'contactos', 'config', 'ia_claves', 'usuarios_listar', 'fotos_migrar'].indexOf(d.accion) < 0) { lock.waitLock(45000); conLock = true; }
     var ahora = new Date().toISOString(); // se toma ANTES de leer: el cursor de los teléfonos nunca se salta escrituras
     if (d.accion === 'equipo') { var datos = datosEquipo(TOKEN_ADMIN, d.alcance); datos.ok = true; return salida(datos); }
     if (d.accion === 'latido') return salida(registrarLatido(d, ahora));
@@ -84,6 +84,7 @@ function doPost(e) {
     if (d.accion === 'usuarios_listar') return salida({ ok: true, usuarios: listarUsuarios() });
     if (d.accion === 'usuarios_guardar') return salida(guardarUsuario(d));
     if (d.accion === 'usuarios_borrar') return salida(borrarUsuario(d));
+    if (d.accion === 'fotos_migrar') return salida(migrarFotos(90000));   // sin candado (puede tardar): no bloquea los envíos
     if (d.accion === 'proyecto_crear') return salida(crearProyecto(d));
     if (d.accion === 'proyecto_guardar') return salida(guardarProyecto(d));
     if (d.accion === 'proyecto_activar') return salida(activarProyecto(d));
@@ -345,6 +346,46 @@ function renombrarFoto(l, previa, proyecto) {
   var nuevo = nombreDeFoto(l, proyecto);
   if (nombreDeFoto(antes, proyecto) === nuevo) return;
   try { DriveApp.getFileById(id).setName(nuevo); } catch (e) {}
+}
+
+/**
+ * Ordena las fotos que ya estaban en Drive (de antes de las carpetas por proyecto): cada foto se mueve a la carpeta de su proyecto y se
+ * renombra con el formato nuevo. Parte de la columna "Foto" de la hoja, así que no necesita los teléfonos. El enlace no cambia.
+ * Trabaja hasta `presupuestoMs` (por defecto 90 s) y dice cuántas quedan; se repite hasta que no queden.
+ */
+function migrarFotos(presupuestoMs) {
+  var raiz = raizDeFotos();
+  if (!raiz) return { ok: false, error: 'No se pudo abrir la carpeta de fotos (revisa CARPETA_FOTOS_ID y el permiso de la cuenta que publicó el script).' };
+  var inicio = new Date().getTime(), limite = presupuestoMs || 90000;
+  var movidas = 0, renombradas = 0, ordenadas = 0, pendientes = 0;
+  SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(function (h) {
+    if (!esPestanaProyecto(h)) return;
+    prepararLectura(h);
+    var carpeta = null;
+    leerFilas(h).forEach(function (r) {
+      var id = idDeEnlace(r[col('foto')]);
+      if (!r[0] || !id || String(r[col('eliminada')]).toUpperCase().indexOf('S') === 0) return;
+      if (new Date().getTime() - inicio > limite) { pendientes++; return; }
+      var archivo;
+      try { archivo = DriveApp.getFileById(id); } catch (e) { return; }                // la foto ya no existe en Drive
+      carpeta = carpeta || carpetaDeProyecto(raiz, h.getName(), true);
+      var ahi = false, padres = archivo.getParents();
+      while (padres.hasNext()) if (padres.next().getId() === carpeta.getId()) ahi = true;
+      var l = { uuid: r[0], barrio: r[col('barrio')], codigo: r[col('codigo')], codigoPoste: r[col('codigoPoste')], latitud: r[col('latitud')], longitud: r[col('longitud')] };
+      var nombre = nombreDeFoto(l, h.getName());
+      var hecho = false;
+      if (!ahi) { archivo.moveTo(carpeta); movidas++; hecho = true; }
+      if (archivo.getName() !== nombre) { archivo.setName(nombre); renombradas++; hecho = true; }
+      if (!hecho) ordenadas++;
+    });
+  });
+  return { ok: true, movidas: movidas, renombradas: renombradas, yaOrdenadas: ordenadas, pendientes: pendientes };
+}
+
+/** Menú ELI-LUMINARIA → Ordenar fotos en Drive. */
+function ordenarFotosEnDrive() {
+  var r = migrarFotos(240000), ui = SpreadsheetApp.getUi();
+  ui.alert('Fotos', r.ok ? 'Movidas: ' + r.movidas + '\nRenombradas: ' + r.renombradas + '\nYa estaban ordenadas: ' + r.yaOrdenadas + (r.pendientes ? '\n\nQuedan ' + r.pendientes + ' por ordenar: vuelve a ejecutar esta opción.' : '\n\nListo: todas las fotos están en su carpeta.') : r.error, ui.ButtonSet.OK);
 }
 
 /** Al renombrar un proyecto se renombra su carpeta de fotos y el comienzo del nombre de sus fotos (hasta 300 por vez). */
@@ -728,6 +769,7 @@ function onOpen() {
     SpreadsheetApp.getUi().createMenu('ELI-LUMINARIA')
       .addItem('Limpiar pestañas obsoletas', 'limpiarPestanasObsoletas')
       .addItem('Quitar columnas que ya no se usan', 'actualizarTodasLasColumnas')
+      .addItem('Ordenar fotos en Drive (carpeta por proyecto)', 'ordenarFotosEnDrive')
       .addItem('Reiniciar TODO desde cero (borra los datos)', 'reiniciarDesdeCero')
       .addItem('Preparar pestaña Usuarios', 'prepararUsuarios')
       .addItem('Generar claves faltantes', 'generarClavesFaltantes')
