@@ -65,7 +65,7 @@ test('técnico: configura por enlace, captura con IA, guarda y se sincroniza a l
   await page.getByLabel('N.º del transformador', { exact: true }).fill('T-123');
   await expect(page.getByLabel('Latitud', { exact: true })).toHaveValue('4.711');
   await expect(page.getByLabel('Longitud', { exact: true })).toHaveValue('-74.0721');
-  await expect(page.getByLabel('Dirección / referencia', { exact: true })).toHaveValue('Carrera 7 12-30, Bogotá', { timeout: 15_000 });   // la dirección sale sola de la coordenada
+  await expect(page.getByLabel('Dirección / referencia', { exact: true })).toHaveValue('Carrera 7 No. 12 - 30, Bogotá', { timeout: 15_000 });   // la dirección sale sola de la coordenada
   await expect(page.getByLabel('Barrio', { exact: true })).toHaveValue('La Candelaria');
   await expect(page.getByLabel('Grado IP', { exact: true })).toHaveCount(0);                                                          // campo retirado
   await page.getByLabel('Código de la luminaria', { exact: true }).fill('P-001');
@@ -74,7 +74,7 @@ test('técnico: configura por enlace, captura con IA, guarda y se sincroniza a l
   await expect(page.getByText('P-001 · Philips')).toBeVisible();
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);   // sincronización automática (3 s después de guardar)
   const fila = filas(b, 'Barrio A')[0];
-  expect(fila).toMatchObject({ Fabricante: 'Philips', 'Código de la luminaria': 'P-001', Técnico: 'Ana', Tecnología: 'LED', Control: 'Fotocelda', Montaje: 'Poste', 'Material del poste': 'Concreto', Sector: 'Rural', 'N.º transformador': 'T-123', Dirección: 'Carrera 7 12-30, Bogotá', Barrio: 'La Candelaria', Latitud: 4.711, Longitud: -74.0721, 'Origen de la foto': 'camara' });
+  expect(fila).toMatchObject({ Fabricante: 'Philips', 'Código de la luminaria': 'P-001', Técnico: 'Ana', Tecnología: 'LED', Control: 'Fotocelda', Montaje: 'Poste', 'Material del poste': 'Concreto', Sector: 'Rural', 'N.º transformador': 'T-123', Dirección: 'Carrera 7 No. 12 - 30, Bogotá', Barrio: 'La Candelaria', Latitud: 4.711, Longitud: -74.0721, 'Origen de la foto': 'camara' });
   await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);                          // ya no figura como pendiente
 });
 
@@ -842,6 +842,21 @@ test('formulario manual: sugerencias de lo ya escrito, poste → concreto, actua
   await expect(selector).toHaveCount(0);
   expect(await page.getByLabel('Latitud', { exact: true }).inputValue()).not.toBe(antes);                  // el punto se movió
   await expect(page.getByText(/Precisión GPS/)).toHaveCount(0);                                            // ya no es una lectura del GPS
+
+  // dirección: si el mapa solo trae la calle, avisa que falta la puerta; «Armar dirección» la completa al estilo colombiano
+  await page.getByLabel('Dirección / referencia', { exact: true }).fill('Calle 35');
+  await expect(page.getByTestId('falta-puerta')).toBeVisible();
+  await page.getByRole('button', { name: /Armar dirección/ }).click();
+  const armar = page.getByRole('dialog', { name: 'Armar dirección' });
+  await expect(armar.getByRole('button', { name: 'Calle', exact: true })).toHaveAttribute('aria-pressed', 'true');   // entiende lo que ya estaba escrito
+  await expect(armar.getByLabel('Número de la vía')).toHaveValue('35');
+  await armar.getByLabel('Número (No.)', { exact: true }).fill('86');
+  await armar.getByLabel('Placa (-)', { exact: true }).fill('92');
+  await armar.getByLabel('Municipio u otro dato (opcional)').fill('Medellín');
+  await expect(armar.getByTestId('dir-vista')).toHaveText('Calle 35 No. 86 - 92, Medellín');
+  await armar.getByRole('button', { name: 'Usar esta dirección' }).click();
+  await expect(page.getByLabel('Dirección / referencia', { exact: true })).toHaveValue('Calle 35 No. 86 - 92, Medellín');
+  await expect(page.getByTestId('falta-puerta')).toHaveCount(0);
   await guardar(page);
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(2);
 });

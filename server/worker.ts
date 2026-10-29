@@ -766,21 +766,38 @@ async function administrarSistema(request: Request, env: any, llamar: typeof fet
 
 /* ---------- dirección y barrio de una coordenada ---------- */
 
-const cacheDirecciones = new Map<string, { v: { direccion: string; barrio: string; municipio: string }; hasta: number }>();
+const cacheDirecciones = new Map<string, { v: { direccion: string; barrio: string; municipio: string; conNumero: boolean }; hasta: number }>();
 export const olvidarDirecciones = () => cacheDirecciones.clear();
 
-/** Del resultado de Nominatim (OpenStreetMap) a { dirección, barrio, municipio }. */
-export function leerDireccion(j: any): { direccion: string; barrio: string; municipio: string } {
+/** "86-92" → "86 - 92" (como se escribe una placa en Colombia). */
+const placaBonita = (n: string) => n.replace(/\s*[-–]\s*/g, ' - ').replace(/\s+/g, ' ').trim();
+
+/** Calle 35 + 86-92 → "Calle 35 No. 86 - 92". */
+const conPlaca = (via: string, numero: string) => (via && numero ? `${via} No. ${placaBonita(numero)}` : via);
+
+/** Del resultado de Nominatim (OpenStreetMap) a { dirección, barrio, municipio, conNumero }. `conNumero` = el mapa conocía el número de la puerta. */
+export function leerDireccion(j: any): { direccion: string; barrio: string; municipio: string; conNumero: boolean } {
   const a = j?.address ?? {};
   const via = String(a.road ?? a.pedestrian ?? a.footway ?? a.path ?? a.cycleway ?? '').trim();
   const numero = String(a.house_number ?? '').trim();
   const municipio = String(a.city ?? a.town ?? a.village ?? a.municipality ?? a.county ?? '').trim();
   const barrio = String(a.neighbourhood ?? a.suburb ?? a.quarter ?? a.city_district ?? a.hamlet ?? '').trim();
-  const calle = via ? (numero ? `${via} ${numero}` : via) : '';
-  return { direccion: [calle, municipio].filter(Boolean).join(', ').slice(0, 200), barrio: barrio.slice(0, 100), municipio: municipio.slice(0, 100) };
+  const calle = conPlaca(via, numero);
+  return { direccion: [calle, municipio].filter(Boolean).join(', ').slice(0, 200), barrio: barrio.slice(0, 100), municipio: municipio.slice(0, 100), conNumero: !!(via && numero) };
 }
 
-/** POST /direccion { latitud, longitud } → { ok, direccion, barrio, municipio } (vacíos si el mapa no conoce el punto). Usa OpenStreetMap (Nominatim) o GEOCODER_URL. */
+/** Del resultado de la API de Geocodificación de Google (si se configuró GOOGLE_GEOCODING_KEY): suele traer la placa completa en Colombia. */
+export function leerDireccionGoogle(j: any): { direccion: string; barrio: string; municipio: string; conNumero: boolean } {
+  const resultados: any[] = Array.isArray(j?.results) ? j.results : [];
+  const mejor = resultados.find((r) => (r.types ?? []).some((t: string) => t === 'street_address' || t === 'premise')) ?? resultados.find((r) => (r.types ?? []).includes('route')) ?? resultados[0];
+  const pieza = (...tipos: string[]) => String((mejor?.address_components ?? []).find((c: any) => tipos.some((t) => (c.types ?? []).includes(t)))?.long_name ?? '').trim();
+  const via = pieza('route'), numero = pieza('street_number');
+  const municipio = pieza('locality', 'administrative_area_level_2');
+  const barrio = pieza('sublocality_level_1', 'sublocality', 'neighborhood');
+  return { direccion: [conPlaca(via, numero), municipio].filter(Boolean).join(', ').slice(0, 200), barrio: barrio.slice(0, 100), municipio: municipio.slice(0, 100), conNumero: !!(via && numero) };
+}
+
+/** POST /direccion { latitud, longitud } → { ok, direccion, barrio, municipio } (vacíos si el mapa no conoce el punto). Usa Google Geocoding si hay GOOGLE_GEOCODING_KEY (mejor para placas colombianas); si no, OpenStreetMap (Nominatim) o GEOCODER_URL. */
 async function direccionDeCoordenada(request: Request, env: any, llamar: typeof fetch): Promise<Response> {
   const texto = await request.text();
   if (texto.length > 300) return json(413, { ok: false, error: 'Payload too large' });
@@ -791,15 +808,20 @@ async function direccionDeCoordenada(request: Request, env: any, llamar: typeof 
   const clave = `${lat.toFixed(4)},${lng.toFixed(4)}`;   // ~11 m: varias luminarias del mismo tramo comparten la consulta
   const hit = cacheDirecciones.get(clave);
   if (hit && hit.hasta > Date.now()) return json(200, { ok: true, ...hit.v });
+  const google = typeof env.GOOGLE_GEOCODING_KEY === 'string' && env.GOOGLE_GEOCODING_KEY.length > 10;
   const base = String(env.GEOCODER_URL ?? 'https://nominatim.openstreetmap.org/reverse');
   let r: Response;
   try {
-    r = await llamar(`${base}?format=jsonv2&addressdetails=1&zoom=18&accept-language=es&lat=${lat}&lon=${lng}`, {
-      headers: { 'user-agent': `ELI-LUMINARIA/1.0 (${env.GEOCODER_CONTACTO ?? 'alumbrado publico'})`, accept: 'application/json' },
-    });
+    r = google
+      ? await llamar(`https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&language=es&region=co&key=${encodeURIComponent(env.GOOGLE_GEOCODING_KEY)}`, { headers: { accept: 'application/json' } })
+      : await llamar(`${base}?format=jsonv2&addressdetails=1&zoom=18&accept-language=es&lat=${lat}&lon=${lng}`, {
+        headers: { 'user-agent': `ELI-LUMINARIA/1.0 (${env.GEOCODER_CONTACTO ?? 'alumbrado publico'})`, accept: 'application/json' },
+      });
   } catch { return json(502, { ok: false, error: 'No se pudo consultar el mapa.' }); }
   if (!r.ok) { await r.body?.cancel().catch(() => {}); return json(502, { ok: false, error: `El mapa respondió ${r.status}.` }); }
-  const v = leerDireccion(await r.json().catch(() => null));
+  const cuerpo: any = await r.json().catch(() => null);
+  if (google && cuerpo?.status && !['OK', 'ZERO_RESULTS'].includes(cuerpo.status)) return json(502, { ok: false, error: 'El servicio de direcciones de Google no aceptó la consulta (revisa la clave).' });   // la clave NUNCA se devuelve
+  const v = google ? leerDireccionGoogle(cuerpo) : leerDireccion(cuerpo);
   if (cacheDirecciones.size > 500) cacheDirecciones.clear();
   cacheDirecciones.set(clave, { v, hasta: Date.now() + 3_600_000 });
   return json(200, { ok: true, ...v });

@@ -8,12 +8,13 @@ import { avisar, confirmar, dialogo } from '../componentes/dialogos';
 import { Foto } from '../componentes/Foto';
 import { SelectorUbicacion } from '../componentes/SelectorUbicacion';
 import { Icono } from '../componentes/Icono';
-import { Boton, Campo, Cabecera, Ficha, Seccion } from '../componentes/ui';
+import { Boton, Campo, Cabecera, Ficha, Hoja, Seccion } from '../componentes/ui';
 import { useApp } from '../contexto/App';
 import { ir, volver } from '../router';
 import { cargarAjustes } from '../servicios/ajustes';
 import { borrarFotos, borrarLuminaria, guardarFoto, guardarKv, guardarLuminaria, leerKv, listarTodasLasLuminarias } from '../servicios/almacen';
 import { base64DeFoto } from '../servicios/fotos';
+import { armarDireccion, leerPartes, type PartesDireccion, tieneNumeroDePuerta, TIPOS_VIA } from '../servicios/direccion';
 import { obtenerMejorPosicion } from '../servicios/gps';
 import { direccionDelPunto } from '../servicios/identidad';
 import { hayConexion } from '../servicios/red';
@@ -36,6 +37,7 @@ export function Editar({ id }: { id: string }) {
   const direccionBuscada = useRef(false);
   const [todas, setTodas] = useState<Luminaria[]>([]);
   const [mapaAbierto, setMapaAbierto] = useState(false);
+  const [partes, setPartes] = useState<PartesDireccion | null>(null);   // asistente "Armar dirección"
   const [precisionVista, setPrecisionVista] = useState<number | null>(null);
   const cargado = useRef(false);
   const originales = useRef<string[]>([]);
@@ -246,7 +248,9 @@ export function Editar({ id }: { id: string }) {
         <Boton texto={ocupado === 'Buscando la ubicación…' ? `Buscando señal… ${precisionVista != null ? `±${Math.round(precisionVista)} m` : ''}` : 'Actualizar ubicación (GPS)'} variante="secundario" icono="gps" cargando={ocupado === 'Buscando la ubicación…'} onClick={usarUbicacionActual} />
         {!terceros && <Boton texto="Ajustar en el mapa" variante="secundario" icono="mapa" onClick={() => setMapaAbierto(true)} />}
       </div>
-      <Campo etiqueta="Dirección / referencia" valor={l.direccion} alCambiar={(t) => set('direccion', t)} pista="Se propone sola con la ubicación; corrígela si hace falta" />
+      <Campo etiqueta="Dirección / referencia" valor={l.direccion} alCambiar={(t) => set('direccion', t)} pista="Ej. Calle 35 No. 86 - 92 (se propone sola con la ubicación)" />
+      {!!l.direccion.trim() && !tieneNumeroDePuerta(l.direccion) && <p className="muted" style={{ marginTop: -6, marginBottom: 8, fontSize: 13 }} data-testid="falta-puerta">El mapa no trae el número de la puerta: complétalo con «Armar dirección».</p>}
+      <Boton texto="Armar dirección (Calle 35 No. 86 - 92)" variante="secundario" icono="lista" onClick={() => setPartes(leerPartes(l.direccion))} />
       <Campo etiqueta="Barrio" valor={l.barrio ?? ''} alCambiar={(t) => set('barrio', t)} pista="Se propone solo con la ubicación" sugerencias={sug.barrio} />
       {coordenadaValida(l.latitud, l.longitud) && <Boton texto="Buscar dirección y barrio del punto" variante="secundario" icono="mapa" cargando={ocupado === 'Buscando la dirección…'} onClick={buscarDireccion} />}
       <Campo etiqueta="Sector" valor={l.sector ?? ''} alCambiar={(t) => set('sector', t)} opciones={SECTORES} soloOpciones />
@@ -265,6 +269,23 @@ export function Editar({ id }: { id: string }) {
         {!esNuevo && <Boton texto="Eliminar" variante="peligro" onClick={eliminar} />}
       </div>
 
+      <Hoja abierta={!!partes} alCerrar={() => setPartes(null)} titulo="Armar dirección" subtitulo="Como aparece en la placa de la calle">
+        {partes && (
+          <>
+            <div className="fichas" role="group" aria-label="Tipo de vía">
+              {TIPOS_VIA.map((t) => <button key={t} type="button" className={`ficha${partes.tipo === t ? ' activa' : ''}`} aria-pressed={partes.tipo === t} onClick={() => setPartes({ ...partes, tipo: partes.tipo === t ? '' : t })}>{t}</button>)}
+            </div>
+            <Campo etiqueta="Número de la vía" valor={partes.via} alCambiar={(v) => setPartes({ ...partes, via: v })} pista="Ej. 35 (o 80 sur, 12A)" />
+            <div className="fila">
+              <Campo etiqueta="Número (No.)" valor={partes.numero} alCambiar={(v) => setPartes({ ...partes, numero: v })} pista="Ej. 86" />
+              <Campo etiqueta="Placa (-)" valor={partes.placa} alCambiar={(v) => setPartes({ ...partes, placa: v })} pista="Ej. 92" />
+            </div>
+            <Campo etiqueta="Municipio u otro dato (opcional)" valor={partes.resto} alCambiar={(v) => setPartes({ ...partes, resto: v })} pista="Ej. Medellín" />
+            <p className="muted" data-testid="dir-vista">{armarDireccion(partes) || '—'}</p>
+            <div className="pila"><Boton texto="Usar esta dirección" deshabilitado={!armarDireccion(partes)} onClick={() => { set('direccion', armarDireccion(partes)); setPartes(null); }} /></div>
+          </>
+        )}
+      </Hoja>
       {mapaAbierto && (
         <SelectorUbicacion
           inicial={coordenadaValida(l.latitud, l.longitud) ? { lat: l.latitud!, lng: l.longitud! } : null}

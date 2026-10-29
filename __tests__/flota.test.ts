@@ -1152,7 +1152,7 @@ describe('usuario aparte del nombre, autor sellado por el servidor y fotos', () 
 
 describe('dirección de una coordenada y miniatura de la foto', () => {
   const { crearServidor } = require('./helpers/hoja');
-  const { leerDireccion, olvidarDirecciones } = require('../server/worker');
+  const { leerDireccion, leerDireccionGoogle, olvidarDirecciones } = require('../server/worker');
   const nominatim = { address: { road: 'Carrera 7', house_number: '12-30', neighbourhood: 'La Candelaria', city: 'Bogotá' } };
   const montar = (extra: any = {}, nom: any = nominatim) => {
     const gs = crearServidor(undefined, { envioCrea: false });
@@ -1166,21 +1166,37 @@ describe('dirección de una coordenada y miniatura de la foto', () => {
   beforeEach(() => { vaciarCacheUsuarios(); vaciarCacheIA(); olvidarDirecciones(); });
 
   it('leerDireccion: calle y número, municipio; barrio aparte; con lo que haya', () => {
-    expect(leerDireccion(nominatim)).toEqual({ direccion: 'Carrera 7 12-30, Bogotá', barrio: 'La Candelaria', municipio: 'Bogotá' });
-    expect(leerDireccion({ address: { pedestrian: 'Peatonal 3', suburb: 'Centro', town: 'Soacha' } })).toEqual({ direccion: 'Peatonal 3, Soacha', barrio: 'Centro', municipio: 'Soacha' });
-    expect(leerDireccion({ address: { village: 'La Vereda' } })).toEqual({ direccion: 'La Vereda', barrio: '', municipio: 'La Vereda' });
-    expect(leerDireccion(null)).toEqual({ direccion: '', barrio: '', municipio: '' });
+    expect(leerDireccion(nominatim)).toEqual({ direccion: 'Carrera 7 No. 12 - 30, Bogotá', barrio: 'La Candelaria', municipio: 'Bogotá', conNumero: true });
+    expect(leerDireccion({ address: { pedestrian: 'Peatonal 3', suburb: 'Centro', town: 'Soacha' } })).toEqual({ direccion: 'Peatonal 3, Soacha', barrio: 'Centro', municipio: 'Soacha', conNumero: false });
+    expect(leerDireccion({ address: { village: 'La Vereda' } })).toEqual({ direccion: 'La Vereda', barrio: '', municipio: 'La Vereda', conNumero: false });
+    expect(leerDireccion(null)).toEqual({ direccion: '', barrio: '', municipio: '', conNumero: false });
   });
 
   it('/direccion: pide a OpenStreetMap con la coordenada y se identifica; guarda la respuesta (el mismo tramo no vuelve a consultar); exige cuenta y coordenada válida', async () => {
     const m = montar();
     const r = await m.post('/direccion', { latitud: 4.711, longitud: -74.0721 });
-    expect(r.j).toEqual({ ok: true, direccion: 'Carrera 7 12-30, Bogotá', barrio: 'La Candelaria', municipio: 'Bogotá' });
+    expect(r.j).toEqual({ ok: true, direccion: 'Carrera 7 No. 12 - 30, Bogotá', barrio: 'La Candelaria', municipio: 'Bogotá', conNumero: true });
     expect(m.visto[0]).toMatch(/nominatim\.openstreetmap\.org\/reverse\?.*lat=4\.711&lon=-74\.0721/);
     await m.post('/direccion', { latitud: 4.71102, longitud: -74.07211 });          // a pocos metros: misma respuesta guardada
     expect(m.visto).toHaveLength(1);
     expect((await m.post('/direccion', { latitud: 4.711, longitud: -74.0721 }, 'mala')).status).toBe(401);
     for (const c of [{}, { latitud: 'x', longitud: 1 }, { latitud: 91, longitud: 0 }, { latitud: 0, longitud: 181 }]) expect((await m.post('/direccion', c)).status).toBe(400);
+  });
+
+  it('con GOOGLE_GEOCODING_KEY usa Google (placa completa: "Calle 35 No. 86 - 92"); la clave no se devuelve; si Google rechaza la consulta, 502 sin mostrar la clave', async () => {
+    const google = { status: 'OK', results: [{ types: ['street_address'], address_components: [
+      { long_name: '86-92', types: ['street_number'] }, { long_name: 'Calle 35', types: ['route'] }, { long_name: 'Laureles', types: ['sublocality_level_1', 'sublocality'] }, { long_name: 'Medellín', types: ['locality'] }] }] };
+    expect(leerDireccionGoogle(google)).toEqual({ direccion: 'Calle 35 No. 86 - 92, Medellín', barrio: 'Laureles', municipio: 'Medellín', conNumero: true });
+    expect(leerDireccionGoogle({ results: [{ types: ['route'], address_components: [{ long_name: 'Calle 35', types: ['route'] }] }] })).toMatchObject({ direccion: 'Calle 35', conNumero: false });
+    expect(leerDireccionGoogle(null)).toMatchObject({ direccion: '', conNumero: false });
+    const m = montar({ GOOGLE_GEOCODING_KEY: 'AIza-clave-secreta-de-prueba' }, google);
+    const r = await m.post('/direccion', { latitud: 6.25, longitud: -75.59 });
+    expect(r.j).toMatchObject({ ok: true, direccion: 'Calle 35 No. 86 - 92, Medellín', barrio: 'Laureles', conNumero: true });
+    expect(m.visto[0]).toMatch(/maps\.googleapis\.com\/maps\/api\/geocode\/json\?latlng=6\.25,-75\.59&language=es&region=co&key=/);
+    expect(JSON.stringify(r.j)).not.toContain('AIza');
+    const mal = montar({ GOOGLE_GEOCODING_KEY: 'AIza-clave-secreta-de-prueba' }, { status: 'REQUEST_DENIED', error_message: 'The provided API key is invalid. AIza-clave-secreta-de-prueba' });
+    const e = await mal.post('/direccion', { latitud: 7.1, longitud: -73.1 });   // otra coordenada (la anterior ya está guardada)
+    expect(e.status).toBe(502); expect(JSON.stringify(e.j)).not.toContain('AIza');
   });
 
   it('si el mapa falla, responde 502 (la app deja escribirla a mano)', async () => {
