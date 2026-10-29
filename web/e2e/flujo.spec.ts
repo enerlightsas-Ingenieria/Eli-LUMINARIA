@@ -845,3 +845,50 @@ test('formulario manual: sugerencias de lo ya escrito, poste → concreto, actua
   await guardar(page);
   await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(2);
 });
+
+test('mapa: cada luminaria muestra su etiqueta (la misma de la lista) y se puede mover a su lugar real', async ({ browser }) => {
+  const b = crearBackend();
+  const { page } = await telefono(browser, b);
+  await configurar(page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A'] }));
+  await usarProyecto(page, 'Barrio A');
+  await capturar(page, 'manual');
+  await page.getByLabel('Fabricante', { exact: true }).fill('Philips');
+  await page.getByLabel('Código de la luminaria', { exact: true }).fill('P-001');
+  await guardar(page);
+  await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);
+  expect(filas(b, 'Barrio A')[0].Latitud).toBe(4.711);
+
+  await page.getByRole('link', { name: 'Mapa' }).click();
+  const etiqueta = page.locator('.leaflet-tooltip').filter({ hasText: 'P-001 · Philips' });
+  await expect(etiqueta).toBeVisible();                                                     // etiqueta permanente, como en la lista
+  await page.getByRole('button', { name: 'Ocultar etiquetas' }).click();
+  await expect(page.locator('.leaflet-tooltip')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Mostrar etiquetas' }).click();
+  await expect(etiqueta).toBeVisible();
+
+  // tocar la luminaria → globo con sus datos → Mover → llevar el pin a otro punto → guardar
+  await page.locator('.leaflet-interactive').first().click();
+  const globo = page.locator('.leaflet-popup');
+  await expect(globo).toContainText('P-001 · Philips');
+  await globo.getByRole('button', { name: 'Mover' }).click();
+  await expect(page.getByTestId('mover-barra')).toContainText('Moviendo P-001');
+  await expect(page.locator('.pin-mover')).toBeVisible();
+  await page.waitForTimeout(1200);                                                           // que termine la animación de acercamiento del mapa
+  const caja = (await page.getByTestId('mapa').boundingBox())!;
+  await page.mouse.click(caja.x + caja.width / 2 + 90, caja.y + caja.height / 2 - 70);      // tocar el mapa lleva el pin ahí
+  await expect(page.getByTestId('mover-coordenada')).not.toContainText('4.711000, -74.072100');
+  const nueva = (await page.getByTestId('mover-coordenada').innerText()).split(', ').map(Number);
+  await page.getByRole('button', { name: 'Guardar posición' }).click();
+  await expect(page.getByTestId('mover-barra')).toHaveCount(0);
+  await expect(page.locator('.pin-mover')).toHaveCount(0);
+
+  // la nueva posición llega a la hoja (sincronización automática) y ya no hay precisión de GPS
+  await expect.poll(() => filas(b, 'Barrio A')[0].Latitud, { timeout: 20_000 }).toBeCloseTo(nueva[0], 5);
+  expect(filas(b, 'Barrio A')[0].Longitud).toBeCloseTo(nueva[1], 5);
+  expect(filas(b, 'Barrio A')[0]['Precisión (m)']).toBe('');
+  // cancelar no cambia nada
+  await page.locator('.leaflet-interactive').first().click();
+  await page.locator('.leaflet-popup').getByRole('button', { name: 'Mover' }).click();
+  await page.getByRole('button', { name: 'Cancelar' }).click();
+  await expect(page.getByTestId('mover-barra')).toHaveCount(0);
+});

@@ -149,3 +149,10 @@ code { background: var(--superficie2); padding: 1px 5px; border-radius: 4px; }
 .sugerencias { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 0 0; }
 .sugerencias small { color: var(--muted); font-size: 12px; margin-right: 2px; }
 .sugerencias .ficha { min-height: 30px; padding: 0 12px; font-size: 14px; }
+
+/* Mapa: etiquetas de las luminarias y pin para moverlas */
+.mapa.sin-etiquetas .leaflet-tooltip-pane, .mapa .sin-etiquetas .leaflet-tooltip-pane { display: none; }
+.leaflet-tooltip { font-weight: 700; font-size: 12px; padding: 2px 6px; }
+.pin-mover-caja { background: transparent; border: 0; }
+.pin-mover { width: 34px; height: 34px; border-radius: 17px; background: #ff3b30; border: 4px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.5); cursor: grab; }
+.mover-barra { display: grid; gap: 4px; margin-bottom: 8px; }
