@@ -62,7 +62,9 @@ export async function verificarIdentidad(): Promise<boolean> {
   const creados = await alinearProyectos(j);
   // Si cambió lo que esta cuenta puede ver (proyectos o técnicos asignados), se vuelve a descargar todo desde cero
   // (el punto de descarga anterior dejaría fuera lo que ahora sí le corresponde).
+  const lic = j.licencia ? JSON.stringify(j.licencia) : '';   // aviso de licencia (por vencer, en gracia o vencida): se guarda para mostrarlo
   let reiniciada = false;
+  if (((await leerKv('licencia')) ?? '') !== lic) { await guardarKv('licencia', lic); reiniciada = true; }
   if (typeof j.alcance === 'string' && (await leerKv('alcance')) !== j.alcance) {
     for (const p of await listarProyectos()) await guardarKv(`desde:${p.uuid}`, '');
     await guardarKv('alcance', j.alcance);
@@ -151,6 +153,7 @@ export async function ingresar(servidor: string, usuario: string, clave: string)
   });
   await guardarVerificador(login, clave);
   await alinearProyectos(j);
+  await guardarKv('licencia', j.licencia ? JSON.stringify(j.licencia) : '');
   return { nombre: j.nombre, rol: j.rol };
 }
 

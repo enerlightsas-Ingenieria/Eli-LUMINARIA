@@ -37,6 +37,9 @@
  *            USUARIOS_CACHE_SEG = 60  (segundos que el proxy recuerda una clave antes de volver a preguntar a la hoja)
  *            MODELOS_PERMITIDOS = "claude-sonnet-5-5,claude-haiku-5-5"
  *            ORIGENES_PERMITIDOS = "https://app.tuempresa.com"  (si no se define, cualquier origen; los tokens siguen protegiendo)
+ * Licencia:  LICENCIA_VENCE = "2027-01-31" (último día de uso, hora de Colombia; sin definir = sin límite). LICENCIA_GRACIA_DIAS = 15 (después de vencer
+ *            todo sigue funcionando con aviso), LICENCIA_AVISO_DIAS = 15 (aviso antes de vencer), LICENCIA_CLIENTE y LICENCIA_CONTACTO (se muestran en el aviso).
+ *            Pasada la gracia se bloquea enviar datos y usar la IA; consultar y exportar lo ya guardado sigue funcionando.
  * Despliegue: npx wrangler deploy server/worker.ts --name eli-luminaria-proxy --compatibility-date 2026-01-01
  *
  * Si cambias la herramienta de la app (src/services/analyzer.ts), actualiza PROPIEDADES: una prueba comprueba que coinciden.
@@ -827,6 +830,52 @@ async function direccionDeCoordenada(request: Request, env: any, llamar: typeof 
   return json(200, { ok: true, ...v });
 }
 
+/* ---------- licencia de uso ---------- */
+
+export interface EstadoLicencia {
+  estado: 'sin_limite' | 'activa' | 'por_vencer' | 'gracia' | 'vencida';
+  vence?: string; diasRestantes?: number; graciaHasta?: string; cliente?: string; contacto?: string;
+}
+const DIA_MS = 86_400_000;
+const entre = (n: number, min: number, max: number, defecto: number) => (Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : defecto);
+
+/** Estado de la licencia de ESTE despliegue según LICENCIA_VENCE (YYYY-MM-DD, vale todo ese día en hora de Colombia). Sin fecha = sin límite. */
+export function estadoLicencia(env: any, ahora = Date.now()): EstadoLicencia {
+  const v = String(env?.LICENCIA_VENCE ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return { estado: 'sin_limite' };
+  const fin = Date.parse(`${v}T23:59:59-05:00`);
+  if (!Number.isFinite(fin)) return { estado: 'sin_limite' };
+  const gracia = entre(Number(env.LICENCIA_GRACIA_DIAS ?? 15), 0, 120, 15), aviso = entre(Number(env.LICENCIA_AVISO_DIAS ?? 15), 0, 120, 15);
+  const base = { vence: v, ...(env.LICENCIA_CLIENTE ? { cliente: String(env.LICENCIA_CLIENTE).slice(0, 80) } : {}), ...(env.LICENCIA_CONTACTO ? { contacto: String(env.LICENCIA_CONTACTO).slice(0, 120) } : {}) };
+  const dias = Math.ceil((fin - ahora) / DIA_MS);
+  if (ahora <= fin) return { ...base, estado: dias <= aviso ? 'por_vencer' : 'activa', diasRestantes: dias };
+  const finGracia = fin + gracia * DIA_MS;
+  return { ...base, estado: ahora <= finGracia ? 'gracia' : 'vencida', diasRestantes: dias, graciaHasta: new Date(finGracia - 5 * 3_600_000).toISOString().slice(0, 10) };
+}
+
+const fechaLarga = (iso: string) => { const [a, m, d] = iso.split('-'); return `${Number(d)}/${Number(m)}/${a}`; };
+
+/** Lo que ve la persona: estado y un mensaje en español (nada si la licencia está activa o no tiene límite). */
+export function licenciaPublica(env: any): { estado: string; vence?: string; diasRestantes?: number; mensaje: string } | null {
+  const l = estadoLicencia(env);
+  if (l.estado === 'sin_limite' || l.estado === 'activa') return null;
+  const contacto = l.contacto ? ` Contacto: ${l.contacto}.` : '';
+  const mensaje = l.estado === 'por_vencer'
+    ? `La licencia vence el ${fechaLarga(l.vence!)} (${l.diasRestantes} día${l.diasRestantes === 1 ? '' : 's'}). Renuévala para no interrumpir el servicio.${contacto}`
+    : l.estado === 'gracia'
+      ? `La licencia venció el ${fechaLarga(l.vence!)}. Tienes hasta el ${fechaLarga(l.graciaHasta!)} para renovarla; después se bloqueará el envío de datos y la IA.${contacto}`
+      : `La licencia venció el ${fechaLarga(l.vence!)}. El envío de datos y la IA están bloqueados; puedes consultar y exportar lo que ya tienes. Renueva para volver a trabajar.${contacto}`;
+  return { estado: l.estado, vence: l.vence, diasRestantes: l.diasRestantes, mensaje };
+}
+
+/** Con la licencia vencida (pasada la gracia) solo se puede consultar: entrar, ver y descargar lo ya guardado. */
+async function permitidoConLicenciaVencida(ruta: string, request: Request): Promise<boolean> {
+  if (['/yo', '/contactos', '/equipo', '/direccion'].includes(ruta)) return true;
+  const lecturas: Record<string, string[]> = { '/sync': ['listar'], '/usuarios': ['listar'], '/sistema': ['estado'], '/ia': ['estado'] };
+  if (!lecturas[ruta]) return false;
+  try { return lecturas[ruta].includes(JSON.parse(await request.clone().text())?.accion); } catch { return false; }
+}
+
 /* ---------- supervisores: solo ven los proyectos y técnicos que supervisan ---------- */
 
 /** Huella corta de lo que ve esta persona: si cambia, el teléfono vuelve a descargar todo (lo nuevo que ahora le corresponde). '' = sin restricción. */
@@ -981,7 +1030,7 @@ async function ingresar(request: Request, env: any, llamar: typeof fetch): Promi
     return json(401, { ok: false, error: 'Usuario o clave incorrectos.' });
   }
   intentos.delete(llave);
-  return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), alcance: huellaAlcance(quien), ...proyectosPara(quien, await proyectosDeLaHoja(env, llamar)) });
+  return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), alcance: huellaAlcance(quien), licencia: licenciaPublica(env), ...proyectosPara(quien, await proyectosDeLaHoja(env, llamar)) });
 }
 
 /** Menú de administración: listar y crear/editar personas. El token del administrador del script se pone AQUÍ. */
@@ -1033,8 +1082,11 @@ async function enrutar(request: Request, env: any, llamar: typeof fetch): Promis
   try { quien = await autenticar(clave, env, llamar); }
   catch { return json(502, { error: 'No se pudo verificar el usuario (la hoja de Google no respondió).' }); }
   if (!quien) return json(401, { error: 'Unauthorized' });
+  if (estadoLicencia(env).estado === 'vencida' && !(await permitidoConLicenciaVencida(ruta, request))) {
+    return json(402, { ok: false, codigo: 'LICENCIA_VENCIDA', error: licenciaPublica(env)!.mensaje });
+  }
 
-  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), alcance: huellaAlcance(quien), ...proyectosPara(quien, await proyectosDeLaHoja(env, llamar)) });
+  if (ruta === '/yo') return json(200, { ok: true, nombre: quien.nombre, usuario: quien.usuario, rol: quien.rol, ...(quien.terceros !== undefined ? { terceros: quien.terceros } : {}), fotos: await guardarFotos(env, llamar), alcance: huellaAlcance(quien), licencia: licenciaPublica(env), ...proyectosPara(quien, await proyectosDeLaHoja(env, llamar)) });
   if (ruta === '/equipo') {
     if (quien.rol === 'tecnico') return json(401, { error: 'Unauthorized' });
     let alcance: any;

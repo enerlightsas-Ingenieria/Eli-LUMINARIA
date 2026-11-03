@@ -907,3 +907,35 @@ test('mapa: cada luminaria muestra su etiqueta (la misma de la lista) y se puede
   await page.getByRole('button', { name: 'Cancelar' }).click();
   await expect(page.getByTestId('mover-barra')).toHaveCount(0);
 });
+
+const fechaEn = (dias: number) => new Date(Date.now() + dias * 86_400_000 - 5 * 3_600_000).toISOString().slice(0, 10);   // fecha en Colombia dentro de `dias`
+
+test('licencia: avisa antes de vencer; vencida no deja enviar (lo capturado queda guardado) y el administrador ve el estado', async ({ browser }) => {
+  // por vencer: aviso visible, todo funciona
+  const pv = crearBackend(undefined, { licencia: { LICENCIA_VENCE: fechaEn(6), LICENCIA_CONTACTO: 'ventas@enerlight.co' } });
+  const ana = await telefono(browser, pv);
+  await configurar(ana.page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A'] }));
+  await expect(ana.page.getByTestId('banda-licencia')).toContainText('La licencia vence el');
+  await expect(ana.page.getByTestId('banda-licencia')).toContainText('ventas@enerlight.co');
+  await usarProyecto(ana.page, 'Barrio A');
+  await capturar(ana.page, 'manual'); await ana.page.getByLabel('Fabricante', { exact: true }).fill('Philips'); await guardar(ana.page);
+  await expect.poll(() => filas(pv, 'Barrio A').length, { timeout: 20_000 }).toBe(1);
+
+  // vencida (pasada la gracia): no se puede enviar; lo capturado se conserva como pendiente y el mensaje es claro
+  const venc = crearBackend(undefined, { licencia: { LICENCIA_VENCE: fechaEn(-60), LICENCIA_CONTACTO: 'ventas@enerlight.co' } });
+  const beto = await telefono(browser, venc); const admin = await telefono(browser, venc);
+  await configurar(beto.page, enlace({ tecnico: 'Beto', token: 'tokBeto', proyectos: ['Barrio A'] }));
+  await expect(beto.page.getByTestId('banda-licencia')).toContainText('venció');
+  await usarProyecto(beto.page, 'Barrio A');
+  await capturar(beto.page, 'manual'); await beto.page.getByLabel('Fabricante', { exact: true }).fill('Schréder'); await guardar(beto.page);
+  await beto.page.getByRole('button', { name: 'Sincronizar', exact: true }).click();
+  await expect(dialogo(beto.page)).toContainText('La licencia venció');
+  await boton(beto.page, 'Entendido');
+  expect(filas(venc, 'Barrio A')).toHaveLength(0);                                                 // nada se envió
+  await expect(beto.page.getByText('Pendiente', { exact: true })).toBeVisible();                   // pero no se perdió
+  // el administrador puede entrar y ve el estado en Administración
+  await configurar(admin.page, enlace({ token: 'tokSup' }));
+  await admin.page.getByRole('link', { name: 'Ajustes' }).click();
+  await admin.page.getByRole('button', { name: 'Administración (usuarios e IA)' }).click();
+  await expect(admin.page.getByTestId('admin-licencia')).toContainText('venció');
+});

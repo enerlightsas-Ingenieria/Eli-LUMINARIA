@@ -8,7 +8,7 @@ import { AdminUsuarios } from './AdminUsuarios';
 
 /** Menú de administración (solo administradores): Usuarios e Inteligencia artificial, cada uno en su pantalla. */
 export function Administracion({ seccion }: { seccion?: string }) {
-  const { ajustes } = useApp();
+  const { ajustes, licencia } = useApp();
   if (rolDe(ajustes) !== 'admin') return <><Cabecera titulo="Administración" atras={() => ir('/ajustes')} /><p className="muted">Solo los administradores pueden entrar aquí.</p></>;
   if (seccion === 'usuarios') return <AdminUsuarios />;
   if (seccion === 'ia') return <AdminIA />;
@@ -16,6 +16,7 @@ export function Administracion({ seccion }: { seccion?: string }) {
   return (
     <>
       <Cabecera titulo="Administración" subtitulo="Usuarios, inteligencia artificial y fotos" atras={() => ir('/ajustes')} />
+      {licencia && <p className={licencia.estado === 'por_vencer' ? 'muted' : 'aviso'} role="status" data-testid="admin-licencia">Licencia: {licencia.mensaje}</p>}
       <div className="pila">
         <button type="button" className="tarjeta item" onClick={() => ir('/admin/usuarios')} aria-label="Administrar usuarios">
           <div style={{ flex: 1 }}><div className="t">Usuarios</div><div className="s">Crear técnicos, supervisores y administradores; dar de baja; entregar su enlace de acceso.</div></div>

@@ -1334,6 +1334,102 @@ describe('fotos en Drive: una carpeta por proyecto y nombres que dicen dónde es
   });
 });
 
+describe('licencia de uso (control de cobro)', () => {
+  const { crearServidor } = require('./helpers/hoja');
+  const { estadoLicencia, licenciaPublica } = require('../server/worker');
+  const DIA = 86_400_000;
+  // 31 de enero de 2027 a las 12:00 en Colombia
+  const hoy = (d: string, hora = '12:00:00') => Date.parse(`${d}T${hora}-05:00`);
+
+  it('estadoLicencia: sin fecha no hay límite; activa, por vencer (aviso), gracia y vencida; el último día vale completo (hora de Colombia)', () => {
+    expect(estadoLicencia({}).estado).toBe('sin_limite');
+    expect(estadoLicencia({ LICENCIA_VENCE: 'mañana' }).estado).toBe('sin_limite');
+    const env = { LICENCIA_VENCE: '2027-01-31', LICENCIA_CLIENTE: 'Alcaldía X', LICENCIA_CONTACTO: 'ventas@enerlight.co' };
+    expect(estadoLicencia(env, hoy('2026-10-01'))).toMatchObject({ estado: 'activa', vence: '2027-01-31', cliente: 'Alcaldía X' });
+    expect(estadoLicencia(env, hoy('2027-01-16', '00:00:01'))).toMatchObject({ estado: 'activa', diasRestantes: 16 });        // quedan 16 días (contando hoy): aún no avisa
+    expect(estadoLicencia(env, hoy('2027-01-17'))).toMatchObject({ estado: 'por_vencer', diasRestantes: 15 });          // desde 15 días antes sí avisa
+    expect(estadoLicencia(env, hoy('2027-01-31', '23:59:00')).estado).toBe('por_vencer');                                    // el último día todavía vale
+    expect(estadoLicencia(env, hoy('2027-02-01', '00:00:30'))).toMatchObject({ estado: 'gracia', graciaHasta: '2027-02-15' });
+    expect(estadoLicencia(env, hoy('2027-02-15', '23:00:00')).estado).toBe('gracia');
+    expect(estadoLicencia(env, hoy('2027-02-16', '00:30:00')).estado).toBe('vencida');
+    expect(estadoLicencia({ ...env, LICENCIA_GRACIA_DIAS: '0' }, hoy('2027-02-01', '00:30:00')).estado).toBe('vencida');
+    expect(estadoLicencia({ ...env, LICENCIA_AVISO_DIAS: '30' }, hoy('2027-01-05')).estado).toBe('por_vencer');
+  });
+
+  it('licenciaPublica: nada si está activa; mensajes en español con la fecha y el contacto', () => {
+    const env = { LICENCIA_VENCE: '2027-01-31', LICENCIA_CONTACTO: 'ventas@enerlight.co' };
+    const ahora = Date.now;
+    try {
+      Date.now = () => hoy('2026-10-01'); expect(licenciaPublica(env)).toBeNull();
+      Date.now = () => hoy('2027-01-25'); expect(licenciaPublica(env)!.mensaje).toMatch(/vence el 31\/1\/2027 \(7 días\).*ventas@enerlight\.co/);
+      Date.now = () => hoy('2027-02-05'); expect(licenciaPublica(env)).toMatchObject({ estado: 'gracia', mensaje: expect.stringMatching(/venció el 31\/1\/2027.*hasta el 15\/2\/2027/) });
+      Date.now = () => hoy('2027-03-05'); expect(licenciaPublica(env)).toMatchObject({ estado: 'vencida', mensaje: expect.stringMatching(/bloqueados/) });
+    } finally { Date.now = ahora; }
+    expect(licenciaPublica({})).toBeNull();
+  });
+
+  const montar = (extra: any) => {
+    const gs = crearServidor(undefined, { envioCrea: false });
+    gs.llamar('', { body: JSON.stringify({ token: 'CAMBIA-ESTE-TOKEN-ADMIN', accion: 'proyecto_crear', nombre: 'Barrio A' }) });
+    const env: any = { APP_TOKENS: 'juan:tokJ', ADMIN_TOKENS: 'jefe:claveJefe99', SYNC_URL: 'https://gs.example/exec', SYNC_TOKEN: 'CAMBIA-ESTE-TOKEN', SYNC_TOKEN_ADMIN: 'CAMBIA-ESTE-TOKEN-ADMIN', USUARIOS_CACHE_SEG: 0, GEMINI_API_KEY: 'g', ...extra };
+    const f = jest.fn(async (u: any, i: any) => (String(u).includes('gs.example') ? gs.llamar(u, i) : new Response(JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { name: 'registrar_luminaria', args: { fabricante: 'X' } } }] } }] }), { status: 200 })));
+    const post = async (ruta: string, cuerpo: any, clave = 'tokJ') => { const r = await manejar(new Request('https://p.example' + ruta, { method: 'POST', headers: { 'x-api-key': clave }, body: JSON.stringify(cuerpo) }), env, f as any); return { status: r.status, j: await r.json() }; };
+    return { gs, post };
+  };
+  beforeEach(() => { vaciarCacheUsuarios(); vaciarCacheIA(); });
+  const subida = { proyecto: { nombre: 'Barrio A' }, luminarias: [{ uuid: 'u1', fabricante: 'F', latitud: 4.7, longitud: -74 }] };
+  const imagen = { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: 'AAAA' } };
+  const analisis = { model: 'claude-sonnet-5-5', max_tokens: 1024, tools: [TOOL], tool_choice: { type: 'tool', name: 'registrar_luminaria' }, messages: [{ role: 'user', content: [imagen, { type: 'text', text: 'Foto:' }] }] };
+  const vence = (dias: number) => new Date(Date.now() + dias * DIA - 5 * 3_600_000).toISOString().slice(0, 10);   // fecha en Colombia dentro de `dias`
+
+  it('sin licencia configurada o activa: todo funciona y /yo no muestra avisos', async () => {
+    for (const extra of [{}, { LICENCIA_VENCE: vence(120) }]) {
+      const m = montar(extra);
+      expect((await m.post('/sync', subida)).j.ok).toBe(true);
+      expect((await m.post('/yo', {})).j.licencia).toBeNull();
+    }
+  });
+
+  it('por vencer y en gracia: todo funciona y /yo trae el aviso para mostrarlo', async () => {
+    const pv = montar({ LICENCIA_VENCE: vence(5), LICENCIA_CONTACTO: 'ventas@enerlight.co' });
+    expect((await pv.post('/sync', subida)).j.ok).toBe(true);
+    expect((await pv.post('/yo', {})).j.licencia).toMatchObject({ estado: 'por_vencer', mensaje: expect.stringContaining('ventas@enerlight.co') });
+    const gr = montar({ LICENCIA_VENCE: vence(-3) });
+    expect((await gr.post('/sync', subida)).j.ok).toBe(true);
+    expect((await gr.post('/yo', {})).j.licencia).toMatchObject({ estado: 'gracia' });
+    expect((await gr.post('/ingresar', { usuario: 'jefe', clave: 'claveJefe99' })).j.licencia).toMatchObject({ estado: 'gracia' });
+  });
+
+  it('vencida (pasada la gracia): se puede entrar, consultar y exportar; NO enviar datos, usar la IA, crear proyectos ni cambiar usuarios', async () => {
+    const m = montar({ LICENCIA_VENCE: vence(-60), LICENCIA_GRACIA_DIAS: '15', LICENCIA_CONTACTO: 'ventas@enerlight.co' });
+    const bloqueado = (r: any) => { expect(r.status).toBe(402); expect(r.j).toMatchObject({ ok: false, codigo: 'LICENCIA_VENCIDA', error: expect.stringContaining('ventas@enerlight.co') }); };
+    // permitido
+    expect((await m.post('/ingresar', { usuario: 'jefe', clave: 'claveJefe99' })).status).toBe(200);
+    expect((await m.post('/yo', {})).j.licencia).toMatchObject({ estado: 'vencida', mensaje: expect.stringMatching(/bloqueados/) });
+    expect((await m.post('/sync', { accion: 'listar', proyecto: { nombre: 'Barrio A' }, desde: '' })).j.ok).toBe(true);        // descargar / exportar
+    expect((await m.post('/usuarios', { accion: 'listar' }, 'claveJefe99')).status).toBe(200);
+    expect((await m.post('/contactos', {})).status).toBe(200);
+    expect((await m.post('/equipo', {}, 'claveJefe99')).status).toBe(200);
+    // bloqueado
+    bloqueado(await m.post('/sync', subida));
+    bloqueado(await m.post('/sync', { accion: 'latido', estado: 'activa', dispositivo: 'd', tecnico: 'Juan' }));
+    bloqueado(await m.post('/analizar', analisis));
+    bloqueado(await m.post('/', analisis));
+    bloqueado(await m.post('/sistema', { accion: 'crear_proyecto', nombre: 'Nuevo' }, 'claveJefe99'));
+    bloqueado(await m.post('/usuarios', { accion: 'guardar', nombre: 'Ana', rol: 'tecnico' }, 'claveJefe99'));
+    bloqueado(await m.post('/ia', { accion: 'guardar', proveedor: 'gemini', ia: 'gemini' }, 'claveJefe99'));
+    expect(m.gs.hoja('Barrio A')!.filas).toHaveLength(1);              // nada se escribió
+    expect(m.gs.hoja('Nuevo')).toBeUndefined();
+  });
+
+  it('al renovar (cambiar LICENCIA_VENCE) todo vuelve a funcionar al instante', async () => {
+    const vieja = montar({ LICENCIA_VENCE: vence(-60) });
+    expect((await vieja.post('/sync', subida)).status).toBe(402);
+    const renovada = montar({ LICENCIA_VENCE: vence(365) });
+    expect((await renovada.post('/sync', subida)).j.ok).toBe(true);
+  });
+});
+
 describe('otras IAs (Groq, OpenRouter, Mistral, Qwen, Kimi, ChatGPT, otra): compatibles con la API de ChatGPT', () => {
   const { crearServidor } = require('./helpers/hoja');
   const {

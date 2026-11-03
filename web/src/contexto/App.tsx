@@ -16,6 +16,8 @@ export interface ContextoApp {
   /** Proyectos desactivados (solo los gestiona el administrador). */
   inactivos: ProyectoConCuenta[];
   proyecto: ProyectoConCuenta | null;
+  /** Aviso de licencia de uso (por vencer, en gracia o vencida); null si está al día. */
+  licencia: { estado: 'por_vencer' | 'gracia' | 'vencida'; mensaje: string; vence?: string } | null;
   items: Luminaria[];
   pendientes: number;
   ajustes: Ajustes;
@@ -39,6 +41,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [listo, setListo] = useState(false);
   const [proyectos, setProyectos] = useState<ProyectoConCuenta[]>([]);
   const [inactivos, setInactivos] = useState<ProyectoConCuenta[]>([]);
+  const [licencia, setLicencia] = useState<ContextoApp['licencia']>(null);
   const [activoId, setActivoId] = useState<number | null>(null);
   const [items, setItems] = useState<Luminaria[]>([]);
   const [ajustes, setAjustes] = useState<Ajustes>(ajustesPorDefecto());
@@ -53,6 +56,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const activo = ps.find((p) => p.id === guardado) ?? ps[0] ?? null;
     setProyectos(ps);
     setInactivos(todos.filter((p) => p.activo === false));
+    try { const l = await leerKv('licencia'); setLicencia(l ? JSON.parse(l) : null); } catch { setLicencia(null); }
     setActivoId(activo?.id ?? null);
     setItems(activo ? await listarLuminarias(activo.id) : []);
     setAjustes(await cargarAjustes());
@@ -133,10 +137,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const configCambiada = useCallback(() => { setVersionConfig((v) => v + 1); cargarAjustes().then(setAjustes); }, []);
 
   const valor = useMemo<ContextoApp>(() => ({
-    listo, proyectos, inactivos, proyecto: proyectos.find((p) => p.id === activoId) ?? null, items, ajustes,
+    listo, proyectos, inactivos, licencia, proyecto: proyectos.find((p) => p.id === activoId) ?? null, items, ajustes,
     pendientes: items.filter((l) => !l.sincronizado).length,
     refrescar, activar, recargarAjustes, versionConfig, configCambiada, bloqueada, desbloquear, salir,
-  }), [listo, proyectos, inactivos, activoId, items, ajustes, refrescar, activar, recargarAjustes, versionConfig, configCambiada, bloqueada, desbloquear, salir]);
+  }), [listo, proyectos, inactivos, licencia, activoId, items, ajustes, refrescar, activar, recargarAjustes, versionConfig, configCambiada, bloqueada, desbloquear, salir]);
 
   return <Ctx.Provider value={valor}>{children}</Ctx.Provider>;
 }

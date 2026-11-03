@@ -9,7 +9,7 @@ const CLAVE_AVISADO = 'eli.sinconexion.avisado';
 /** Avisos de estado: sin conexión, preparando/lista para trabajar sin internet, versión nueva, y riesgo de pérdida de datos en iPhone. */
 export function EstadoConexion() {
   const enLinea = useEnLinea();
-  const { pendientes } = useApp();
+  const { pendientes, licencia } = useApp();
   const estado = useEstadoSinConexion();
   const nueva = useActualizacionDisponible();
   const [mostrarLista, setMostrarLista] = useState(false);
@@ -35,6 +35,7 @@ export function EstadoConexion() {
       {enLinea && estado === 'preparando' && <div className="banda" role="status">⏳ Preparando la app para trabajar sin conexión…</div>}
       {mostrarLista && <div className="banda ok" role="status" data-testid="banda-lista">✅ Lista para trabajar sin conexión</div>}
       {nueva && <div className="banda" role="status">Hay una versión nueva. <button type="button" className="enlace" onClick={() => location.reload()}>Actualizar</button></div>}
+      {licencia && <div className={`banda ${licencia.estado === 'por_vencer' ? '' : 'aviso'}`} role={licencia.estado === 'vencida' ? 'alert' : 'status'} data-testid="banda-licencia">{licencia.estado === 'vencida' ? '🔒' : '⚠️'} {licencia.mensaje}</div>}
       {riesgoIOS && <div className="banda aviso" role="alert">⚠️ Tienes datos sin enviar. En iPhone, instala la app en la pantalla de inicio (Compartir → Añadir a pantalla de inicio) para que Safari no los borre.</div>}
     </div>
   );

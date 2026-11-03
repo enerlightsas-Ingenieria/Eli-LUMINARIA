@@ -98,6 +98,7 @@ export async function analizarFotosCon(cargarAjustes: () => Promise<Ajustes>, ba
 
   if (!res.ok) {
     const detalle = await res.text().catch(() => '');
+    if (res.status === 402) { let m = ''; try { m = JSON.parse(detalle)?.error ?? ''; } catch { /* sin detalle */ } throw new ErrorAnalisis(m || 'La licencia de uso venció. Contacta a tu proveedor para renovarla.'); }
     if (res.status === 401) throw new ErrorAnalisis('API key inválida (401). Revisa Ajustes.');
     if (res.status === 503) throw new ErrorAnalisis('La IA no está configurada en el servidor. Llena los datos a mano.');
     if (res.status === 429) throw new ErrorAnalisis('Límite de uso alcanzado (429). Intenta de nuevo en un momento.');
