@@ -16,10 +16,12 @@
  * Mapa en vivo para el administrador: <URL de la Web App>?vista=equipo&token=<TOKEN_ADMIN>
  * El orden lo pone EL SERVIDOR (columna "Recibido"), no los relojes de los teléfonos.
  */
-var TOKEN = 'CAMBIA-ESTE-TOKEN';           // el mismo que pondrás en la app (Ajustes → Token secreto)
+// CONFIGURACIÓN: guarda TOKEN, TOKEN_ADMIN y CARPETA_FOTOS_ID en ⚙ Configuración del proyecto → Propiedades del script (no hay que tocar estas líneas
+// ni volver a editarlas al pegar una versión nueva). Estas líneas solo se usan si la propiedad no existe.
+var TOKEN = 'CAMBIA-ESTE-TOKEN';           // el mismo que SYNC_TOKEN del proxy
 var CARPETA_FOTOS = 'ELI-LUMINARIA Fotos';  // carpeta suelta de Drive para las fotos si CARPETA_FOTOS_ID está vacío o no se puede abrir (se crea sola)
 // Carpeta "fotos" de ELI-LUMINARIA en Drive (el ID es lo que va después de /folders/ en su dirección). Dentro se crea una carpeta por proyecto.
-var CARPETA_FOTOS_ID = '1MaLf4fbZKC1m5r9IAv8rTmYyo3ZWUzBG';
+var CARPETA_FOTOS_ID = '';
 var CREAR_AL_ENVIAR = false;                 // NO tocar: un envío o una descarga jamás crean proyectos (solo el administrador, con la acción proyecto_crear). Las pruebas lo cambian.
 var TOKEN_ADMIN = 'CAMBIA-ESTE-TOKEN-ADMIN'; // SOLO para ti: abre el mapa en vivo del equipo (distinto del token del equipo)
 var MINUTOS_SIN_SENAL = 15;                  // una jornada activa sin latidos por más de esto se muestra "Sin señal"
@@ -60,7 +62,23 @@ var NUMERICAS = ['id', 'latitud', 'longitud', 'precisionM', 'potenciaW'];
 
 function col(clave) { for (var i = 0; i < COLUMNAS.length; i++) if (COLUMNAS[i][0] === clave) return i; return -1; }
 
+/**
+ * Configuración del cliente. LO NORMAL es guardarla en Propiedades del script (⚙ Configuración del proyecto → Propiedades del script):
+ *   TOKEN, TOKEN_ADMIN y CARPETA_FOTOS_ID. Así, al pegar una versión nueva del código NO hay que volver a editar nada.
+ * Si una propiedad existe, manda sobre las líneas var TOKEN / var TOKEN_ADMIN / var CARPETA_FOTOS_ID de arriba.
+ */
+function cargarConfiguracion() {
+  try {
+    var p = PropertiesService.getScriptProperties();
+    var t = p.getProperty('TOKEN'), ta = p.getProperty('TOKEN_ADMIN'), f = p.getProperty('CARPETA_FOTOS_ID');
+    if (t) TOKEN = String(t).trim();
+    if (ta) TOKEN_ADMIN = String(ta).trim();
+    if (f !== null && f !== undefined) CARPETA_FOTOS_ID = String(f).trim();
+  } catch (e) { /* sin acceso a las propiedades: se usan las líneas de arriba */ }
+}
+
 function doPost(e) {
+  cargarConfiguracion();
   var lock = LockService.getScriptLock(), conLock = false;
   try {
     var d = JSON.parse(e.postData.contents);
@@ -150,6 +168,7 @@ function doPost(e) {
 }
 
 function doGet(e) {
+  cargarConfiguracion();
   var p = (e && e.parameter) || {};
   if (p.vista === 'equipo') {
     if (p.token !== TOKEN_ADMIN) return HtmlService.createHtmlOutput('Acceso denegado').setTitle('ELI-LUMINARIA');
@@ -308,6 +327,7 @@ function nombreDeFoto(l, proyecto) {
 
 /** La carpeta raíz de las fotos (por ID), o null si no está configurada o no se puede abrir (entonces se usa la carpeta suelta). */
 function raizDeFotos() {
+  cargarConfiguracion();
   if (!CARPETA_FOTOS_ID) return null;
   try { return DriveApp.getFolderById(CARPETA_FOTOS_ID); } catch (e) { return null; }
 }
@@ -384,6 +404,7 @@ function migrarFotos(presupuestoMs) {
 
 /** Menú ELI-LUMINARIA → Ordenar fotos en Drive. */
 function ordenarFotosEnDrive() {
+  cargarConfiguracion();
   var r = migrarFotos(240000), ui = SpreadsheetApp.getUi();
   ui.alert('Fotos', r.ok ? 'Movidas: ' + r.movidas + '\nRenombradas: ' + r.renombradas + '\nYa estaban ordenadas: ' + r.yaOrdenadas + (r.pendientes ? '\n\nQuedan ' + r.pendientes + ' por ordenar: vuelve a ejecutar esta opción.' : '\n\nListo: todas las fotos están en su carpeta.') : r.error, ui.ButtonSet.OK);
 }
@@ -509,6 +530,7 @@ function auditarHoja(hoja, enLinea) {
 
 /** Para un activador por tiempo (cada 10-15 min): re-audita todos los proyectos (p. ej. cuando llega una jornada tardía). */
 function auditarTodo() {
+  cargarConfiguracion();
   SpreadsheetApp.getActiveSpreadsheet().getSheets().forEach(function (h) {
     if (h.getName().charAt(0) !== '_') { prepararLectura(h); auditarHoja(h, false); }
   });
@@ -1152,6 +1174,7 @@ function filtroAlcance(a) {
 }
 
 function datosEquipo(token, alcance) {
+  cargarConfiguracion();
   if (token !== TOKEN_ADMIN) throw new Error('Acceso denegado');
   var filtro = filtroAlcance(alcance);
   var libro = SpreadsheetApp.getActiveSpreadsheet();

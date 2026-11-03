@@ -69,7 +69,7 @@ export function crearServidor(rutaScript?: string, opciones: { envioCrea?: boole
   const carpetas: { nombre: string; papelera: boolean }[] = [];   // carpetas de Drive simuladas (las de fotos)
   const libro = { getSheets: () => hojas, insertSheet: (n: string) => { const h = new Hoja(n); hojas.push(h); return h; }, deleteSheet: (h: Hoja) => { hojas.splice(hojas.indexOf(h), 1); } };
   let fuente = fs.readFileSync(rutaScript ?? path.join(__dirname, '../../server/google-apps-script.gs'), 'utf8');
-  if (!opciones.carpetaFotos) fuente = fuente.replace(/var CARPETA_FOTOS_ID = '[^']*';/, "var CARPETA_FOTOS_ID = '';");
+  if (opciones.carpetaFotos) fuente = fuente.replace("var CARPETA_FOTOS_ID = '';", "var CARPETA_FOTOS_ID = 'RAIZ-FOTOS-PRUEBA';");
   if ((opciones.envioCrea ?? true) === true) fuente = fuente.replace('var CREAR_AL_ENVIAR = false;', 'var CREAR_AL_ENVIAR = true;');
   const html = { createHtmlOutput: (h: string) => ({ html: h, setTitle() { return this; }, addMetaTag() { return this; } }) };
   const propiedades = new Map<string, string>();                    // propiedades del script (donde se guardan las claves de las IAs)

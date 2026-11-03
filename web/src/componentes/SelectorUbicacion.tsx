@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import { Boton } from './ui';
 import { Icono } from './Icono';
 import { obtenerMejorPosicion } from '../servicios/gps';
+import { capasMapa } from '../servicios/mapas';
 import { useEnLinea } from '../servicios/red';
 
 /**
@@ -23,8 +24,9 @@ export function SelectorUbicacion({ inicial, vecinas, alConfirmar, alCerrar }: {
   useEffect(() => {
     if (!contenedor.current || mapa.current) return;
     const m = L.map(contenedor.current, { zoomControl: true }).setView(inicial ? [inicial.lat, inicial.lng] : [4.65, -74.1], inicial ? 19 : 6);
-    const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 21, maxNativeZoom: 19, attribution: 'Esri' }).addTo(m);
-    const calles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 21, maxNativeZoom: 19, attribution: '© OpenStreetMap' });
+    const fondos = capasMapa();
+    const satelite = L.tileLayer(fondos.satelite.url, { maxZoom: 21, maxNativeZoom: fondos.satelite.maxNativeZoom, attribution: fondos.satelite.atribucion }).addTo(m);
+    const calles = L.tileLayer(fondos.calles.url, { maxZoom: 21, maxNativeZoom: fondos.calles.maxNativeZoom, attribution: fondos.calles.atribucion });
     L.control.layers({ Satélite: satelite, Calles: calles }, undefined, { position: 'topright' }).addTo(m);
     for (const v of vecinas) L.circleMarker([v.lat, v.lng], { radius: 5, color: '#fff', weight: 1.5, fillColor: '#64748b', fillOpacity: 0.9, interactive: false }).addTo(m);
     const actualizar = () => { const c = m.getCenter(); setCentro({ lat: c.lat, lng: c.lng }); };

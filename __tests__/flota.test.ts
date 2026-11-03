@@ -1326,6 +1326,24 @@ describe('fotos en Drive: una carpeta por proyecto y nombres que dicen dónde es
     expect((await m.post('/sistema', { accion: 'migrar_fotos' }, 'claveJefe99')).j).toMatchObject({ movidas: 0, renombradas: 0, yaOrdenadas: 2 });   // repetirlo no hace nada
   });
 
+  it('TOKEN, TOKEN_ADMIN y CARPETA_FOTOS_ID se pueden guardar como Propiedades del script (mandan sobre las líneas del código: no hay que editar el código al actualizarlo)', async () => {
+    const gs = crearServidor(undefined, { envioCrea: false });
+    const llamar = async (cuerpo: any) => (await (await gs.llamar('', { body: JSON.stringify(cuerpo) })).json());
+    expect((await llamar({ token: 'CAMBIA-ESTE-TOKEN', accion: 'proyectos' })).ok).toBe(true);                 // sin propiedades: valen las líneas del código
+    gs.propiedades.set('TOKEN', 'token-propio-del-cliente-123'); gs.propiedades.set('TOKEN_ADMIN', 'admin-propio-del-cliente-456');
+    expect((await llamar({ token: 'CAMBIA-ESTE-TOKEN', accion: 'proyectos' }))).toMatchObject({ ok: false, error: 'Token inválido' });
+    expect((await llamar({ token: 'token-propio-del-cliente-123', accion: 'proyectos' })).ok).toBe(true);
+    expect((await llamar({ token: 'token-propio-del-cliente-123', accion: 'usuarios_listar' })).ok).toBe(false);   // el del equipo no vale para administrar
+    expect((await llamar({ token: 'admin-propio-del-cliente-456', accion: 'usuarios_listar' })).ok).toBe(true);
+    expect((await llamar({ token: 'CAMBIA-ESTE-TOKEN-ADMIN', accion: 'usuarios_listar' })).ok).toBe(false);
+    // la carpeta de fotos también: con la propiedad, las fotos van a esa carpeta por proyecto
+    gs.propiedades.set('CARPETA_FOTOS_ID', 'CARPETA-DEL-CLIENTE');
+    await llamar({ token: 'admin-propio-del-cliente-456', accion: 'proyecto_crear', nombre: 'Zona 2' });
+    expect((await llamar({ token: 'token-propio-del-cliente-123', proyecto: { nombre: 'Zona 2' }, luminarias: [{ uuid: 'abc123def', fabricante: 'F', latitud: 1, longitud: 1, foto: 'FOTO64' }] })).ok).toBe(true);
+    expect(gs.arbol().map((c: any) => c.id)).toEqual(['CARPETA-DEL-CLIENTE']);
+    expect(gs.arbol()[0].carpetas.map((c: any) => c.nombre)).toEqual(['Zona 2']);
+  });
+
   it('reiniciar todo manda a la papelera las carpetas de los proyectos pero conserva la carpeta "fotos"', async () => {
     const m = montar();
     await crear(m, 'Zona 2'); await sube(m, 'Zona 2', lum());

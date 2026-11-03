@@ -7,6 +7,7 @@ import { cerrarSesion, verificarIdentidad } from '../servicios/identidad';
 import { jornada } from '../servicios/nucleo';
 import { claveDeSesion, INACTIVIDAD_MINUTOS } from '../servicios/sesion';
 import { ir } from '../router';
+import { cargarConfigMapas } from '../servicios/mapas';
 import { guardarKv, leerKv, listarLuminarias, listarProyectos, marcarParaReenviar, ProyectoConCuenta } from '../servicios/almacen';
 
 export interface ContextoApp {
@@ -64,6 +65,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => { cargarConfigMapas(); }, []);   // fondos de mapa de este despliegue (servidor.json)
   useEffect(() => { document.documentElement.dataset.tema = ajustes.tema; }, [ajustes.tema]);
 
   // El servidor es quien dice el rol y el nombre de la cuenta: se consulta al abrir y al importar una configuración (si hay conexión).

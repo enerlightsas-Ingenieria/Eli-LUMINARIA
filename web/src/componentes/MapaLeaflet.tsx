@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Icono } from './Icono';
+import { capasMapa } from '../servicios/mapas';
 
 export interface Marca {
   lat: number; lng: number; color: string; radio?: number;
@@ -44,8 +45,9 @@ export function MapaLeaflet({ marcas, ajustar, yo, alCentrarEnMi, etiquetasDesde
   useEffect(() => {
     if (!contenedor.current || mapa.current) return;
     const m = L.map(contenedor.current).setView([4.65, -74.1], 6);
-    const calles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(m);
-    const satelite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Esri' });
+    const fondos = capasMapa();
+    const calles = L.tileLayer(fondos.calles.url, { maxZoom: 19, attribution: fondos.calles.atribucion }).addTo(m);
+    const satelite = L.tileLayer(fondos.satelite.url, { maxZoom: 19, attribution: fondos.satelite.atribucion });
     L.control.layers({ Calles: calles, Satélite: satelite }, undefined, { position: 'topright' }).addTo(m);
     capa.current = L.featureGroup().addTo(m);
     mapa.current = m;
