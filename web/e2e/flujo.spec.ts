@@ -939,3 +939,22 @@ test('licencia: avisa antes de vencer; vencida no deja enviar (lo capturado qued
   await admin.page.getByRole('button', { name: 'Administración (usuarios e IA)' }).click();
   await expect(admin.page.getByTestId('admin-licencia')).toContainText('venció');
 });
+
+test('Ajustes: "Reenviar las fotos de este dispositivo a Drive" vuelve a subir la primera foto de cada luminaria ya sincronizada', async ({ browser }) => {
+  const b = crearBackend();
+  const { page } = await telefono(browser, b);
+  await configurar(page, enlace({ tecnico: 'Ana', token: 'tokAna', proyectos: ['Barrio A'] }));
+  await usarProyecto(page, 'Barrio A');
+  await capturar(page, 'manual'); await page.getByLabel('Fabricante', { exact: true }).fill('Philips'); await guardar(page);
+  await expect.poll(() => filas(b, 'Barrio A').length, { timeout: 20_000 }).toBe(1);
+  await expect.poll(() => b.gs.fotosGuardadas.length, { timeout: 20_000 }).toBe(1);               // la foto subió con el primer envío
+  await expect(page.getByText('Pendiente', { exact: true })).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'Ajustes' }).click();
+  await page.getByRole('button', { name: 'Reenviar las fotos de este dispositivo a Drive' }).click();
+  await boton(page, 'Reenviar');
+  await expect(dialogo(page)).toContainText('1 luminaria con foto en este dispositivo; 1 enviada');
+  await boton(page, 'Entendido');
+  expect(b.gs.fotosGuardadas.length).toBe(2);                                                       // la foto se volvió a subir
+  expect(filas(b, 'Barrio A')).toHaveLength(1);                                                     // sin duplicar la luminaria
+});

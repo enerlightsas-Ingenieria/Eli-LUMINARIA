@@ -11,13 +11,13 @@ import { ir } from '../router';
 import { cargarAjustes, guardarAjustes } from '../servicios/ajustes';
 import { sincronizacion } from '../servicios/nucleo';
 import { pedirAlmacenamientoPersistente } from '../servicios/pwa';
-import { borrarTodoLocal } from '../servicios/almacen';
+import { borrarTodoLocal, marcarParaReenviar } from '../servicios/almacen';
 import { useEstadoSinConexion } from '../servicios/usoSinConexion';
 
 declare const __VERSION__: string;
 
 export function AjustesPantalla() {
-  const { pendientes, proyecto, refrescar, recargarAjustes, versionConfig, configCambiada, salir } = useApp();
+  const { pendientes, proyecto, proyectos, refrescar, recargarAjustes, versionConfig, configCambiada, salir } = useApp();
   const [a, setA] = useState<TipoAjustes | null>(null);
   const [codigo, setCodigo] = useState('');
   const [sync, setSync] = useState(false);
@@ -38,6 +38,22 @@ export function AjustesPantalla() {
     location.reload();
   };
   const guardar = async () => { await guardarAjustes(a); await recargarAjustes(); await avisar('Listo', 'Ajustes guardados.'); };
+
+  // Vuelve a enviar a Drive la primera foto de TODAS las luminarias de este dispositivo (por si alguna no llegó)
+  const reenviarFotos = async () => {
+    if (!a.syncFotos) { await avisar('Fotos desactivadas', 'El administrador desactivó guardar las fotos en Drive. Pídele que lo active en Administración → Fotos.'); return; }
+    if (!(await confirmar('Reenviar fotos', 'Se volverán a enviar a Drive las fotos de las luminarias guardadas en este dispositivo (la primera de cada una). Puede tardar y gastar datos; hazlo con buena señal.', 'Reenviar'))) return;
+    setSync(true);
+    try {
+      const n = await marcarParaReenviar();
+      await refrescar();
+      let enviadas = 0;
+      for (const p of proyectos.filter((x) => !!x.idHoja)) enviadas += (await sincronizacion.sincronizar(p)).enviadas;
+      await refrescar();
+      await avisar('Fotos reenviadas', `${n} luminaria${n === 1 ? '' : 's'} con foto en este dispositivo; ${enviadas} enviada${enviadas === 1 ? '' : 's'} a la hoja y a Drive.`);
+    } catch (e: any) { await avisar('No se pudo reenviar', `${e.message ?? e}\n\nLas fotos siguen guardadas en este dispositivo; inténtalo de nuevo con mejor señal.`); }
+    finally { setSync(false); }
+  };
 
   const sincronizarYa = async () => {
     if (!proyecto) return;
@@ -82,6 +98,7 @@ export function AjustesPantalla() {
       <label className="interruptor"><input type="checkbox" checked={a.syncFotos} onChange={(e) => cambiar({ syncFotos: e.target.checked })} /> Incluir la primera foto (se guarda en Drive)</label>
       <label className="interruptor"><input type="checkbox" checked={a.autoSync} onChange={(e) => cambiar({ autoSync: e.target.checked })} /> Sincronizar automáticamente cuando haya conexión</label>
       <Boton texto={`Sincronizar "${proyecto?.nombre ?? ''}" ahora`} variante="secundario" cargando={sync} deshabilitado={!a.syncUrl} onClick={sincronizarYa} />
+      <Boton texto="Reenviar las fotos de este dispositivo a Drive" variante="secundario" icono="nube" cargando={sync} deshabilitado={!a.syncUrl} onClick={reenviarFotos} />
 
       {a.modoTerceros && <p className="muted" style={{ marginTop: 12 }}>🔒 Modo terceros activo (configurado por tu empresa): capturas solo con jornada activa, con la cámara y con GPS de ±{a.precisionMaxM} m.</p>}
       <div style={{ marginTop: 22 }}><Boton texto="Guardar ajustes" onClick={guardar} /></div>
